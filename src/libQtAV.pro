@@ -51,22 +51,14 @@ TRANSLATIONS = i18n/QtAV_zh_CN.ts
 sse4_1|config_sse4_1|contains(TARGET_ARCH_SUB, sse4.1) {
   CONFIG += sse2 #only sse4.1 is checked. sse2 now can be disabled if sse4.1 is disabled
   DEFINES += QTAV_HAVE_SSE4_1=1
-## TODO: use SSE4_1_SOURCES
-# all x64 processors supports sse2. unknown option for vc
-  *msvc* {
-    !isEqual(QT_ARCH, x86_64)|!x86_64: QMAKE_CXXFLAGS += $$QMAKE_CFLAGS_SSE4_1
-  } else {
-    QMAKE_CXXFLAGS += $$QMAKE_CFLAGS_SSE4_1 #gcc -msse4.1
-  }
-}
-sse2|config_sse2|contains(TARGET_ARCH_SUB, sse2) {
+  CONFIG *= simd
+  SSE4_1_SOURCES += utils/GPUMemCopy.cpp
+} else:sse2|config_sse2|contains(TARGET_ARCH_SUB, sse2) {
   DEFINES += QTAV_HAVE_SSE2=1
-# all x64 processors supports sse2. unknown option for vc
-  *msvc* {
-    !isEqual(QT_ARCH, x86_64)|!x86_64: QMAKE_CXXFLAGS += $$QMAKE_CFLAGS_SSE2
-  } else {
-    QMAKE_CXXFLAGS += $$QMAKE_CFLAGS_SSE2 #gcc -msse2
-  }
+  CONFIG *= simd
+  SSE2_SOURCES += utils/GPUMemCopy.cpp
+} else {
+  SOURCES += utils/GPUMemCopy.cpp
 }
 
 *msvc* {
@@ -207,7 +199,7 @@ config_libcedarv {
       DEFINES *= NO_NEON_OPT
     }
     SOURCES += codec/video/VideoDecoderCedarv.cpp
-    CONFIG += simd #addSimdCompiler xxx_ASM
+    CONFIG *= simd #addSimdCompiler xxx_ASM
     CONFIG += no_clang_integrated_as #see qtbase/src/gui/painting/painting.pri. add -fno-integrated-as from simd.prf
     NEON_ASM += codec/video/tiled_yuv.S #from libvdpau-sunxi
     LIBS += -lvecore -lcedarv
@@ -280,7 +272,6 @@ SOURCES += \
     subtitle/Subtitle.cpp \
     subtitle/SubtitleProcessor.cpp \
     subtitle/SubtitleProcessorFFmpeg.cpp \
-    utils/GPUMemCopy.cpp \
     utils/Logger.cpp \
     AudioThread.cpp \
     AVThread.cpp \
