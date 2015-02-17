@@ -296,6 +296,8 @@ Item {
     */
     property alias autoPlay:        player.autoPlay
 
+    property alias loops:        player.loops
+
     /*!
         \qmlsignal Video::paused()
 
