@@ -54,6 +54,7 @@ class VideoDecoderVDA : public VideoDecoderFFmpegHW
 {
     Q_OBJECT
     DPTR_DECLARE_PRIVATE(VideoDecoderVDA)
+    Q_PROPERTY(bool NV12 READ isNV12 WRITE setNV12 NOTIFY NV12Changed)
 public:
     VideoDecoderVDA();
     virtual ~VideoDecoderVDA();
@@ -61,8 +62,10 @@ public:
     virtual QString description() const;
     virtual VideoFrame frame();
     // QObject properties
-    void setSSE4(bool y);
-    bool SSE4() const;
+    void setNV12(bool value);
+    bool isNV12() const;
+Q_SIGNALS:
+    void NV12Changed();
 };
 
 extern VideoDecoderId VideoDecoderId_VDA;
@@ -79,7 +82,9 @@ class VideoDecoderVDAPrivate : public VideoDecoderFFmpegHWPrivate
 public:
     VideoDecoderVDAPrivate()
         : VideoDecoderFFmpegHWPrivate()
+        , nv12(true)
     {
+        copy_uswc = false;
         description = "VDA";
         memset(&hw_ctx, 0, sizeof(hw_ctx));
     }
@@ -87,11 +92,12 @@ public:
     virtual bool open();
     virtual void close();
 
-    virtual bool setup(void **hwctx, int w, int h);
+    virtual bool setup(AVCodecContext *avctx);
     virtual bool getBuffer(void **opaque, uint8_t **data);
     virtual void releaseBuffer(void *opaque, uint8_t *data);
     virtual AVPixelFormat vaPixelFormat() const { return QTAV_PIX_FMT_C(VDA_VLD);}
 
+    bool nv12;
     struct vda_context  hw_ctx;
 };
 
@@ -131,13 +137,17 @@ typedef struct {
 } cv_format;
 
 //https://developer.apple.com/library/Mac/releasenotes/General/MacOSXLionAPIDiffs/CoreVideo.html
+/* use fourcc '420v', 'yuvs' for NV12 and yuyv to avoid build time version check
+ * qt4 targets 10.6, so those enum values is not valid in build time, while runtime is supported.
+ */
 static const cv_format cv_formats[] = {
-    { kCVPixelFormatType_420YpCbCr8Planar, VideoFormat::Format_YUV420P },
-    { kCVPixelFormatType_422YpCbCr8, VideoFormat::Format_UYVY },
-#ifdef OSX_TARGET_MIN_LION
-    { kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, VideoFormat::Format_NV12 },
-    { kCVPixelFormatType_422YpCbCr8_yuvs, VideoFormat::Format_YUYV },
-#endif
+    { 'y420', VideoFormat::Format_YUV420P }, //kCVPixelFormatType_420YpCbCr8Planar
+    { '2vuy', VideoFormat::Format_UYVY }, //kCVPixelFormatType_422YpCbCr8
+//#ifdef OSX_TARGET_MIN_LION
+    { '420f' , VideoFormat::Format_NV12 }, // kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+    { '420v', VideoFormat::Format_NV12 }, //kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+    { 'yuvs', VideoFormat::Format_YUYV }, //kCVPixelFormatType_422YpCbCr8_yuvs
+//#endif
     { 0, VideoFormat::Format_Invalid }
 };
 
@@ -159,12 +169,27 @@ static int format_to_cv(VideoFormat::PixelFormat fmt)
     return 0;
 }
 
+static int getOutputPixelFormat() {
+    static int fmt = 0;
+    if (fmt > 0)
+        return fmt;
+#ifndef kCFCoreFoundationVersionNumber10_7
+#define kCFCoreFoundationVersionNumber10_7      635.00
+#endif
+    if (kCFCoreFoundationVersionNumber < kCFCoreFoundationVersionNumber10_7)
+        fmt = format_to_cv(VideoFormat::Format_YUV420P);
+    else
+        fmt = format_to_cv(VideoFormat::Format_NV12);
+    return fmt;
+}
+
 VideoDecoderVDA::VideoDecoderVDA()
     : VideoDecoderFFmpegHW(*new VideoDecoderVDAPrivate())
 {
     // dynamic properties about static property details. used by UI
     // format: detail_property
-    setProperty("detail_SSE4", tr("Optimized copy decoded data from USWC memory using SSE4.1"));
+    setProperty("detail_SSE4", tr("Optimized copy decoded data from USWC memory using SSE4.1 if possible.") + " " + tr("Crash for some videos."));
+    setProperty("detail_NV12", tr("NV12 output pixel format (OSX >= 10.7). Better performance."));
 }
 
 VideoDecoderVDA::~VideoDecoderVDA()
@@ -208,15 +233,36 @@ VideoFrame VideoDecoderVDA::frame()
     }
     CVPixelBufferUnlockBaseAddress(cv_buffer, 0);
     CVPixelBufferRelease(cv_buffer);
+#if 0
+    VideoFrame f(width(), height(), fmt);
+    f.setBits(src);
+    f.setBytesPerLine(pitch);
+    f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+    return f; // deferred copy. need to manage hw buffers
+#endif
     return copyToFrame(fmt, d.height, src, pitch, false);
 }
 
-bool VideoDecoderVDAPrivate::setup(void **pp_hw_ctx, int w, int h)
+void VideoDecoderVDA::setNV12(bool value)
 {
+    DPTR_D(VideoDecoderVDA);
+    if (d.nv12 == value)
+        return;
+    d.nv12 = value;
+    emit NV12Changed();
+}
+
+bool VideoDecoderVDA::isNV12() const
+{
+    return d_func().nv12;
+}
+
+bool VideoDecoderVDAPrivate::setup(AVCodecContext *avctx)
+{
+    const int w = codedWidth(avctx);
+    const int h = codedHeight(avctx);
     if (hw_ctx.width == w && hw_ctx.height == h && hw_ctx.decoder) {
-        width = w;
-        height = h;
-        *pp_hw_ctx = &hw_ctx;
+        avctx->hwaccel_context = &hw_ctx;
         return true;
     }
     if (hw_ctx.decoder) {
@@ -224,21 +270,25 @@ bool VideoDecoderVDAPrivate::setup(void **pp_hw_ctx, int w, int h)
         releaseUSWC();
     } else {
         memset(&hw_ctx, 0, sizeof(hw_ctx));
-        hw_ctx.format = 'avc1';
-        hw_ctx.cv_pix_fmt_type = format_to_cv(VideoFormat::Format_YUV420P);
+        hw_ctx.format = 'avc1'; //fourcc
+        if (nv12)
+            hw_ctx.cv_pix_fmt_type = getOutputPixelFormat();
+        else
+            hw_ctx.cv_pix_fmt_type = format_to_cv(VideoFormat::Format_YUV420P);
     }
     /* Setup the libavcodec hardware context */
-    *pp_hw_ctx = &hw_ctx;
     hw_ctx.width = w;
     hw_ctx.height = h;
-    width = w;
-    height = h;
+    width = avctx->width; // not necessary. set in decode()
+    height = avctx->height;
+    avctx->hwaccel_context = NULL;
     /* create the decoder */
     int status = ff_vda_create_decoder(&hw_ctx, codec_ctx->extradata, codec_ctx->extradata_size);
     if (status) {
         qWarning("Failed to create decoder (%i): %s", status, vda_err_str(status));
         return false;
     }
+    avctx->hwaccel_context = &hw_ctx;
     initUSWC(hw_ctx.width);
     qDebug("VDA decoder created");
     return true;
@@ -261,7 +311,6 @@ void VideoDecoderVDAPrivate::releaseBuffer(void *opaque, uint8_t *data)
     CVPixelBufferRef cv_buffer = (CVPixelBufferRef)data;
     if (!cv_buffer)
         return;
-    qDebug("release buffer");
     CVPixelBufferRelease(cv_buffer);
 }
 

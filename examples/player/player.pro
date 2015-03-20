@@ -4,7 +4,6 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TRANSLATIONS = res/player_zh_CN.ts
 VERSION = $$QTAV_VERSION
 
-STATICLINK = 0
 PROJECTROOT = $$PWD/../..
 include($$PROJECTROOT/src/libQtAV.pri)
 include($$PROJECTROOT/widgets/libQtAVWidgets.pri)
@@ -27,6 +26,7 @@ SOURCES += main.cpp \
     config/CaptureConfigPage.cpp \
     config/VideoEQConfigPage.cpp \
     config/DecoderConfigPage.cpp \
+    config/MiscPage.cpp \
     filters/OSD.cpp \
     filters/OSDFilter.cpp \
     playlist/PlayListModel.cpp \
@@ -51,6 +51,7 @@ HEADERS += \
     config/CaptureConfigPage.h \
     config/VideoEQConfigPage.h \
     config/DecoderConfigPage.h \
+    config/MiscPage.h \
     filters/OSD.h \
     filters/OSDFilter.h \
     playlist/PlayListModel.h \

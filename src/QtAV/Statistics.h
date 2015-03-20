@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -57,6 +57,7 @@ public:
         bool available;
         QString codec, codec_long;
         QString decoder;
+        QString decoder_detail;
         QTime current_time, total_time, start_time;
         int bit_rate;
         qint64 frames;
@@ -116,7 +117,8 @@ public:
          */
         int gop_size;
         QString pix_fmt;
-        void frameDisplayed(qreal pts); // used to compute currentDisplayFPS()
+        /// return current absolute time (seconds since epcho
+        qint64 frameDisplayed(qreal pts); // used to compute currentDisplayFPS()
     private:
         class Private : public QSharedData {
         public:
