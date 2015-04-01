@@ -123,7 +123,7 @@ public:
     QObject* videoOut();
     void setVideoOut(QObject* out);
     qreal volume() const;
-    void setVolume(qreal volume);
+    void setVolume(qreal value);
     bool isMuted() const;
     void setMuted(bool m);
     int duration() const;
@@ -234,7 +234,6 @@ private:
     PlaybackState mPlaybackState;
     Error mError;
     QString mErrorString;
-    QtAV::MediaStatus m_status;
     QtAV::AVPlayer *mpPlayer;
     QUrl mSource;
     QStringList mVideoCodecs;
