@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -71,8 +71,10 @@ public:
         Format_YUV411P,
         Format_YUV410P,
         Format_YV12,
-        Format_UYVY,
-        Format_YUYV,
+        Format_UYVY, //422
+        Format_VYUY, //not in ffmpeg. OMX_COLOR_FormatCrYCbY
+        Format_YUYV, //422, aka yuy2
+        Format_YVYU, //422
         Format_NV12,
         Format_NV21,
         Format_IMC1,
@@ -195,6 +197,19 @@ public:
      */
     int chromaWidth(int lumaWidth) const;
     int chromaHeight(int lumaHeight) const;
+    /*!
+     * \brief width
+     * plane width for given lumaWidth in current format
+     * \return lumaWidth if plane <= 0. otherwise chromaWidth
+     */
+    int width(int lumaWidth, int plane) const;
+    int height(int lumaWidth, int plane) const;
+    /*!
+     * \brief normalizedWidth
+     * \return 1.0 for plane <= 0. otherwise chroma width
+     */
+    qreal normalizedWidth(int plane) const;
+    qreal normalizedHeight(int plane) const;
     //TODO: add planeWidth()/planeHeight()
     // test AV_PIX_FMT_FLAG_XXX
     bool isBigEndian() const;

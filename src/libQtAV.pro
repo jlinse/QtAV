@@ -12,7 +12,11 @@ greaterThan(QT_MAJOR_VERSION, 4) {
 config_gl: QT += opengl
 }
 CONFIG *= qtav-buildlib
+staticlib: DEFINES += BUILD_QTAV_STATIC
 INCLUDEPATH += $$[QT_INSTALL_HEADERS]
+icon.files = $$PWD/$${TARGET}.svg
+icon.path = /usr/share/icons/hicolor/64x64/apps
+INSTALLS += icon
 
 #mac: simd.prf will load qt_build_config and the result is soname will prefixed with QT_INSTALL_LIBS and link flag will append soname after QMAKE_LFLAGS_SONAME
 config_libcedarv: CONFIG *= neon config_simd #need by qt4 addSimdCompiler(). neon or config_neon is required because tests/arch can not detect neon
@@ -212,7 +216,8 @@ macx:!ios: CONFIG += config_vda
 config_vda {
     DEFINES *= QTAV_HAVE_VDA=1
     SOURCES += codec/video/VideoDecoderVDA.cpp
-    LIBS += -framework VideoDecodeAcceleration -framework CoreVideo -framework CoreFoundation
+    LIBS += -framework VideoDecodeAcceleration -framework CoreVideo -framework CoreFoundation \
+            -framework IOSurface
 }
 
 config_gl|config_opengl {
@@ -309,7 +314,7 @@ SOURCES += \
     input/AVInput.cpp \
     input/QIODeviceInput.cpp \
     output/audio/AudioOutput.cpp \
-    output/audio/AudioOutputTypes.cpp \
+    output/audio/AudioOutputBackend.cpp \
     output/video/VideoRenderer.cpp \
     output/video/VideoRendererTypes.cpp \
     output/video/VideoOutput.cpp \
@@ -337,7 +342,6 @@ SDK_HEADERS *= \
     QtAV/AudioFormat.h \
     QtAV/AudioFrame.h \
     QtAV/AudioOutput.h \
-    QtAV/AudioOutputTypes.h \
     QtAV/AVDecoder.h \
     QtAV/AVDemuxer.h \
     QtAV/CommonTypes.h \
@@ -376,7 +380,7 @@ SDK_PRIVATE_HEADERS *= \
     QtAV/private/PlayerSubtitle.h \
     QtAV/private/SubtitleProcessor.h \
     QtAV/private/AVCompat.h \
-    QtAV/private/AudioOutput_p.h \
+    QtAV/private/AudioOutputBackend.h \
     QtAV/private/AudioResampler_p.h \
     QtAV/private/AVDecoder_p.h \
     QtAV/private/AVInput_p.h \
@@ -411,6 +415,7 @@ HEADERS *= \
     utils/GPUMemCopy.h \
     utils/Logger.h \
     utils/SharedPtr.h \
+    utils/ring.h \
     output/OutputSet.h \
     QtAV/ColorTransform.h
 
@@ -441,7 +446,6 @@ mac {
        QMAKE_CXXFLAGS += -fconstant-cfstrings
    }
 }
-
 
 unix:!android:!mac {
 #debian
@@ -480,7 +484,3 @@ MODULE_VERSION = $$VERSION
 # windows: Qt5AV.dll, not Qt1AV.dll
 !mac_framework: MODULE_VERSION = $${QT_MAJOR_VERSION}.$${QT_MINOR_VERSION}.$${QT_PATCH_VERSION}
 include($$PROJECTROOT/deploy.pri)
-
-icon.files = $$PWD/$${TARGET}.svg
-icon.path = /usr/share/icons/hicolor/64x64/apps
-INSTALLS += icon

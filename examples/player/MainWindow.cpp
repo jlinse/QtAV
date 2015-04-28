@@ -100,7 +100,8 @@ MainWindow::MainWindow(QWidget *parent) :
   , mpPlayer(0)
   , mpRenderer(0)
   , mpTempRenderer(0)
-  , mpAVFilter(0)
+  , mpVideoFilter(0)
+  , mpAudioFilter(0)
   , mpStatisticsView(0)
   , mpOSD(0)
   , mpSubtitle(0)
@@ -153,11 +154,15 @@ void MainWindow::initPlayer()
     connect(ef, SIGNAL(helpRequested()), SLOT(help()));
     connect(ef, SIGNAL(showNextOSD()), SLOT(showNextOSD()));
     onCaptureConfigChanged();
-    onAVFilterConfigChanged();
+    onAVFilterVideoConfigChanged();
+    onAVFilterAudioConfigChanged();
     connect(&Config::instance(), SIGNAL(captureDirChanged(QString)), SLOT(onCaptureConfigChanged()));
     connect(&Config::instance(), SIGNAL(captureFormatChanged(QString)), SLOT(onCaptureConfigChanged()));
     connect(&Config::instance(), SIGNAL(captureQualityChanged(int)), SLOT(onCaptureConfigChanged()));
-    connect(&Config::instance(), SIGNAL(avfilterChanged()), SLOT(onAVFilterConfigChanged()));
+    connect(&Config::instance(), SIGNAL(avfilterVideoChanged()), SLOT(onAVFilterVideoConfigChanged()));
+    connect(&Config::instance(), SIGNAL(avfilterAudioChanged()), SLOT(onAVFilterAudioConfigChanged()));
+    connect(&Config::instance(), SIGNAL(bufferValueChanged()), SLOT(onBufferValueChanged()));
+    connect(&Config::instance(), SIGNAL(abortOnTimeoutChanged()), SLOT(onAbortOnTimeoutChanged()));
     connect(mpStopBtn, SIGNAL(clicked()), this, SLOT(stopUnload()));
     connect(mpForwardBtn, SIGNAL(clicked()), mpPlayer, SLOT(seekForward()));
     connect(mpBackwardBtn, SIGNAL(clicked()), mpPlayer, SLOT(seekBackward()));
@@ -725,11 +730,16 @@ void MainWindow::play(const QString &name)
     mpPlayer->enableAudio(!mNullAO);
     if (!mpRepeatEnableAction->isChecked())
         mRepeateMax = 0;
+    mpPlayer->setInterruptOnTimeout(Config::instance().abortOnTimeout());
+    mpPlayer->setInterruptTimeout(Config::instance().timeout()*1000.0);
+    mpPlayer->setBufferMode(QtAV::BufferPackets);
+    mpPlayer->setBufferValue(Config::instance().bufferValue());
     mpPlayer->setRepeat(mRepeateMax);
     mpPlayer->setPriority(idsFromNames(Config::instance().decoderPriorityNames()));
     mpPlayer->setOptionsForAudioCodec(mpDecoderConfigPage->audioDecoderOptions());
     mpPlayer->setOptionsForVideoCodec(mpDecoderConfigPage->videoDecoderOptions());
-    mpPlayer->setOptionsForFormat(Config::instance().avformatOptions());
+    if (Config::instance().avformatOptionsEnabled())
+        mpPlayer->setOptionsForFormat(Config::instance().avformatOptions());
     PlayListItem item;
     item.setUrl(mFile);
     item.setTitle(mTitle);
@@ -776,7 +786,10 @@ void MainWindow::togglePlayPause()
     } else {
         if (mFile.isEmpty())
             return;
-        mpPlayer->play();
+        if (!mpPlayer->isPlaying())
+            play(mFile);
+        else
+            mpPlayer->play();
         mpPlayPauseBtn->setIconWithSates(mPausePixmap);
     }
 }
@@ -850,7 +863,8 @@ void MainWindow::onStopPlay()
     mpPlayer->setFrameRate(Config::instance().forceFrameRate());
     mpPlayer->setOptionsForAudioCodec(mpDecoderConfigPage->audioDecoderOptions());
     mpPlayer->setOptionsForVideoCodec(mpDecoderConfigPage->videoDecoderOptions());
-    mpPlayer->setOptionsForFormat(Config::instance().avformatOptions());
+    if (Config::instance().avformatOptionsEnabled())
+        mpPlayer->setOptionsForFormat(Config::instance().avformatOptions());
 
     mpPlayPauseBtn->setIconWithSates(mPlayPixmap);
     mpTimeSlider->setValue(0);
@@ -887,10 +901,8 @@ void MainWindow::seek()
         return;
     m_preview->setTimestamp(mpTimeSlider->value());
     m_preview->preview();
-    const int w = 160;
-    const int h = 90;
     m_preview->setWindowFlags(m_preview->windowFlags() |Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint);
-    m_preview->resize(w, h);
+    m_preview->resize(Config::instance().previewWidth(), Config::instance().previewHeight());
     m_preview->show();
 }
 
@@ -1247,8 +1259,8 @@ void MainWindow::onTimeSliderHover(int pos, int value)
     m_preview->setFile(mpPlayer->file());
     m_preview->setTimestamp(value);
     m_preview->preview();
-    const int w = 160;
-    const int h = 90;
+    const int w = Config::instance().previewWidth();
+    const int h = Config::instance().previewHeight();
     m_preview->setWindowFlags(m_preview->windowFlags() |Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint);
     m_preview->resize(w, h);
     m_preview->move(gpos - QPoint(w/2, h));
@@ -1289,11 +1301,15 @@ void MainWindow::onMediaStatusChanged()
     case LoadedMedia:
         status = "Loaded";
         break;
+    case StalledMedia:
+        status = "Stalled";
+        break;
     default:
         status = "";
         onStopPlay();
         break;
     }
+    qDebug() << "status changed " << status;
     setWindowTitle(status + " " + mTitle);
 }
 
@@ -1381,20 +1397,37 @@ void MainWindow::onCaptureConfigChanged()
 
 }
 
-void MainWindow::onAVFilterConfigChanged()
+void MainWindow::onAVFilterVideoConfigChanged()
 {
-    if (Config::instance().avfilterEnable()) {
-        if (!mpAVFilter) {
-            mpAVFilter = new LibAVFilter();
+    if (Config::instance().avfilterVideoEnable()) {
+        if (!mpVideoFilter) {
+            mpVideoFilter = new LibAVFilterVideo(this);
         }
-        mpAVFilter->setEnabled(true);
-        mpPlayer->installVideoFilter(mpAVFilter);
-        mpAVFilter->setOptions(Config::instance().avfilterOptions());
+        mpVideoFilter->setEnabled(true);
+        mpPlayer->installVideoFilter(mpVideoFilter);
+        mpVideoFilter->setOptions(Config::instance().avfilterVideoOptions());
     } else {
-        if (mpAVFilter) {
-            mpAVFilter->setEnabled(false);
+        if (mpVideoFilter) {
+            mpVideoFilter->setEnabled(false);
         }
-        mpPlayer->uninstallFilter(mpAVFilter);
+        mpPlayer->uninstallFilter(mpVideoFilter);
+    }
+}
+
+void MainWindow::onAVFilterAudioConfigChanged()
+{
+    if (Config::instance().avfilterAudioEnable()) {
+        if (!mpAudioFilter) {
+            mpAudioFilter = new LibAVFilterAudio(this);
+        }
+        mpAudioFilter->setEnabled(true);
+        mpPlayer->installAudioFilter(mpAudioFilter);
+        mpAudioFilter->setOptions(Config::instance().avfilterAudioOptions());
+    } else {
+        if (mpAudioFilter) {
+            mpAudioFilter->setEnabled(false);
+        }
+        mpPlayer->uninstallFilter(mpAudioFilter);
     }
 }
 
@@ -1402,6 +1435,20 @@ void MainWindow::donate()
 {
     //QDesktopServices::openUrl(QUrl("https://sourceforge.net/p/qtav/wiki/Donate%20%E6%8D%90%E8%B5%A0/"));
     QDesktopServices::openUrl(QUrl("http://www.qtav.org/#donate"));
+}
+
+void MainWindow::onBufferValueChanged()
+{
+    if (!mpPlayer)
+        return;
+    mpPlayer->setBufferValue(Config::instance().bufferValue());
+}
+
+void MainWindow::onAbortOnTimeoutChanged()
+{
+    if (!mpPlayer)
+        return;
+    mpPlayer->setInterruptOnTimeout(Config::instance().abortOnTimeout());
 }
 
 void MainWindow::setup()

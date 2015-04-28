@@ -1,6 +1,6 @@
 /******************************************************************************
-    VideoRendererTypes: type id and manually id register function
-    Copyright (C) 2014 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Media play library based on Qt and FFmpeg
+    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -19,29 +19,29 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 
-#ifndef QTAV_AUDIOOUTPUTTYPES_H
-#define QTAV_AUDIOOUTPUTTYPES_H
+#ifdef GL_ES
+// Set default precision to medium
+precision mediump int;
+precision mediump float;
+#else
+#define highp
+#define mediump
+#define lowp
+#endif
 
-#include <QtAV/AudioOutput.h>
-#include <QtCore/QVector>
+uniform sampler2D u_Texture0;
+varying vec2 v_TexCoords0;
+uniform mat4 u_colorMatrix;
+uniform float u_opacity;
+#ifdef PACKED_YUV
+uniform mat4 u_c;
+#endif //PACKED_YUV
 
-namespace QtAV {
-
-/*!
- * \brief GetRegisted
- * \return count of available id
- *  if pass a null ids, only return the count. otherwise regitered ids will be stored in ids
- */
-Q_AV_EXPORT QVector<AudioOutputId> GetRegistedAudioOutputIds();
-
-extern Q_AV_EXPORT AudioOutputId AudioOutputId_PortAudio;
-extern Q_AV_EXPORT AudioOutputId AudioOutputId_OpenAL;
-extern Q_AV_EXPORT AudioOutputId AudioOutputId_OpenSL;
-extern Q_AV_EXPORT AudioOutputId AudioOutputId_DSound;
-extern Q_AV_EXPORT AudioOutputId AudioOutputId_Pulse;
-
-
-Q_AV_EXPORT void AudioOutput_RegisterAll();
-
-} //namespace QtAV
-#endif // QTAV_AUDIOOUTPUTTYPES_H
+void main() {
+    vec4 c = texture2D(u_Texture0, v_TexCoords0);
+#ifdef PACKED_YUV
+    c = u_c * c;
+    c.a = 1.0;
+#endif //PACKED_YUV
+    gl_FragColor = clamp(u_colorMatrix * c, 0.0, 1.0) * u_opacity;
+}

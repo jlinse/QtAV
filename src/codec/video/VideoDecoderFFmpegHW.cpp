@@ -23,7 +23,9 @@
 #include "VideoDecoderFFmpegHW_p.h"
 #include <algorithm>
 #include "utils/Logger.h"
-
+#ifndef Q_UNLIKELY
+#define Q_UNLIKELY(x) (!!(x))
+#endif
 namespace QtAV {
 
 static AVPixelFormat ffmpeg_get_va_format(struct AVCodecContext *c, const AVPixelFormat * ff)
@@ -188,31 +190,38 @@ int VideoDecoderFFmpegHWPrivate::codedHeight(AVCodecContext *avctx) const
 
 bool VideoDecoderFFmpegHWPrivate::initUSWC(int lineSize)
 {
-    if (!copy_uswc)
+    if (copy_mode != VideoDecoderFFmpegHW::OptimizedCopy)
         return false;
     return gpu_mem.initCache(lineSize);
 }
 
 void VideoDecoderFFmpegHWPrivate::releaseUSWC()
 {
-    if (copy_uswc)
+    if (copy_mode == VideoDecoderFFmpegHW::OptimizedCopy)
         gpu_mem.cleanCache();
 }
 
 VideoDecoderFFmpegHW::VideoDecoderFFmpegHW(VideoDecoderFFmpegHWPrivate &d):
     VideoDecoderFFmpegBase(d)
 {
-    setProperty("detail_SSE4", tr("Optimized copy decoded data from USWC memory using SSE4.1 if possible"));
+    setProperty("detail_copyMode", tr("ZeroCopy: fastest. Direct rendering without data copy between CPU and GPU") + ". " + tr("Not implemented for all codecs")
+                          + "\n" + tr("LazyCopy: no explicitly additional copy") + ". " + tr("Not implemented for all codecs")
+                          + "\n" + tr("OptimizedCopy: copy from USWC memory optimized by SSE4.1")
+                          + "\n" + tr("GenericCopy: slowest. Generic cpu copy"));
 }
 
-void VideoDecoderFFmpegHW::setSSE4(bool y)
+void VideoDecoderFFmpegHW::setCopyMode(CopyMode value)
 {
-    d_func().copy_uswc = y;
+    DPTR_D(VideoDecoderFFmpegHW);
+    if (d.copy_mode == value)
+        return;
+    d_func().copy_mode = value;
+    emit copyModeChanged();
 }
 
-bool VideoDecoderFFmpegHW::isSSE4() const
+VideoDecoderFFmpegHW::CopyMode VideoDecoderFFmpegHW::copyMode() const
 {
-    return d_func().copy_uswc;
+    return d_func().copy_mode;
 }
 
 VideoFrame VideoDecoderFFmpegHW::copyToFrame(const VideoFormat& fmt, int surface_h, quint8 *src[], int pitch[], bool swapUV)
@@ -236,7 +245,7 @@ VideoFrame VideoDecoderFFmpegHW::copyToFrame(const VideoFormat& fmt, int surface
         std::swap(pitch[1], pitch[2]);
     }
     VideoFrame frame;
-    if (d.copy_uswc && d.gpu_mem.isReady()) {
+    if (copyMode() == VideoDecoderFFmpegHW::OptimizedCopy && d.gpu_mem.isReady()) {
         int yuv_size = 0;
         for (int i = 0; i < nb_planes; ++i) {
             yuv_size += pitch[i]*h[i];
@@ -297,6 +306,7 @@ bool VideoDecoderFFmpegHW::prepare()
     }
     //// From vlc begin
     d.codec_ctx->thread_safe_callbacks = true; //?
+#pragma warning(disable:4065) //vc: switch has default but no case
     switch (d.codec_ctx->codec_id) {
 # if (LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55, 1, 0))
         /// tested libav-9.x + va-api. If remove this code:  Bug detected, please report the issue. Context scratch buffers could not be allocated due to unknown size

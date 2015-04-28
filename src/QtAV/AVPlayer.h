@@ -24,10 +24,10 @@
 
 #include <QtCore/QHash>
 #include <QtCore/QScopedPointer>
+#include <QtAV/AudioOutput.h>
 #include <QtAV/AVClock.h>
 #include <QtAV/Statistics.h>
 #include <QtAV/VideoDecoderTypes.h>
-#include <QtAV/AudioOutputTypes.h>
 #include <QtAV/AVError.h>
 
 class QIODevice;
@@ -47,7 +47,6 @@ class Q_AV_EXPORT AVPlayer : public QObject
     Q_PROPERTY(bool relativeTimeMode READ relativeTimeMode WRITE setRelativeTimeMode NOTIFY relativeTimeModeChanged)
     Q_PROPERTY(bool autoLoad READ isAutoLoad WRITE setAutoLoad NOTIFY autoLoadChanged)
     Q_PROPERTY(bool asyncLoad READ isAsyncLoad WRITE setAsyncLoad NOTIFY asyncLoadChanged)
-    Q_PROPERTY(bool mute READ isMute WRITE setMute NOTIFY muteChanged)
     Q_PROPERTY(qreal bufferProgress READ bufferProgress NOTIFY bufferProgressChanged)
     Q_PROPERTY(bool seekable READ isSeekable NOTIFY seekableChanged)
     Q_PROPERTY(qint64 position READ position WRITE setPosition NOTIFY positionChanged)
@@ -56,6 +55,7 @@ class Q_AV_EXPORT AVPlayer : public QObject
     Q_PROPERTY(qint64 repeat READ repeat WRITE setRepeat NOTIFY repeatChanged)
     Q_PROPERTY(int currentRepeat READ currentRepeat NOTIFY currentRepeatChanged)
     Q_PROPERTY(qint64 interruptTimeout READ interruptTimeout WRITE setInterruptTimeout NOTIFY interruptTimeoutChanged)
+    Q_PROPERTY(bool interruptOnTimeout READ isInterruptOnTimeout WRITE setInterruptOnTimeout NOTIFY interruptOnTimeoutChanged)
     Q_PROPERTY(int notifyInterval READ notifyInterval WRITE setNotifyInterval NOTIFY notifyIntervalChanged)
     Q_PROPERTY(int brightness READ brightness WRITE setBrightness NOTIFY brightnessChanged)
     Q_PROPERTY(int contrast READ contrast WRITE setContrast NOTIFY contrastChanged)
@@ -199,23 +199,19 @@ public:
     void setRenderer(VideoRenderer* renderer);
     VideoRenderer* renderer();
     QList<VideoRenderer*> videoOutputs();
-    void setAudioOutput(AudioOutput* ao);
-    //default has 1 audiooutput
-    //void addAudioOutput(AudioOutput* ao);
-    //void removeAudioOutput(AudioOutput* ao);
-    //QList<AudioOutput*> audioOutputs();
     /*!
-     * To change audio format, you should set both AudioOutput's format and AudioResampler's format
-     * So signals/slots is a better solution.
-     * TODO: AudioOutput.audioFormatChanged (signal)---AudioResampler.setOutAudioFormat (slot)
+     * \brief audio
+     * AVPlayer always has an AudioOutput instance. You can access or control audio output properties through audio().
+     * \return
      */
     AudioOutput* audio();
+    /// enableAudio(false): no audio thread will be started. broken now
     void enableAudio(bool enable = true);
     void disableAudio(bool disable = true);
-    void setMute(bool mute = true);
-    bool isMute() const;
+    Q_DECL_DEPRECATED void setMute(bool mute = true); // use audio()->setMute(bool) instead
+    Q_DECL_DEPRECATED bool isMute() const; // use audio()->isMute() instead
     /*!
-     * \brief setSpeed set playing speed.
+     * \brief setSpeed set playback speed.
      * \param speed  speed > 0. 1.0: normal speed
      * TODO: playbackRate
      */
@@ -224,11 +220,19 @@ public:
 
     /*!
      * \brief setInterruptTimeout
-     * Abort current operation(open, read) if it spends too much time.
-     * \param value
+     * Emit error(usually network error) if open/read spends too much time.
+     * If isInterruptOnTimeout() is true, abort current operation and stop playback
+     * \param ms milliseconds. <0: never interrupt.
      */
+    /// TODO: rename to timeout
     void setInterruptTimeout(qint64 ms);
     qint64 interruptTimeout() const;
+    /*!
+     * \brief setInterruptOnTimeout
+     * \param value
+     */
+    void setInterruptOnTimeout(bool value);
+    bool isInterruptOnTimeout() const;
     /*!
      * \brief setFrameRate
      * Force the (video) frame rate to a given value.
@@ -363,7 +367,8 @@ public slots:
     BufferMode bufferMode() const;
     /*!
      * \brief setBufferValue
-     * Ensure the buffered msecs/bytes/packets in queue is at least the given value before playback starts
+     * Ensure the buffered msecs/bytes/packets in queue is at least the given value before playback starts.
+     * Set before playback starts.
      * \param value <0: auto; BufferBytes: bytes, BufferTime: msecs, BufferPackets: packets count
      */
     void setBufferValue(int value);
@@ -405,6 +410,7 @@ signals:
     void seekableChanged();
     void positionChanged(qint64 position);
     void interruptTimeoutChanged();
+    void interruptOnTimeoutChanged();
     void notifyIntervalChanged();
     void brightnessChanged(int val);
     void contrastChanged(int val);
@@ -421,6 +427,7 @@ private slots:
     void startNotifyTimer();
     void stopNotifyTimer();
     void onStarted();
+    void updateMediaStatus(QtAV::MediaStatus status);
 
 protected:
     // TODO: set position check timer interval

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -19,21 +19,28 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 
-#ifdef GL_ES
-// Set default precision to medium
-precision mediump int;
-precision mediump float;
-#else
-#define highp
-#define mediump
-#define lowp
+attribute vec4 a_Position;
+attribute vec2 a_TexCoords0;
+uniform mat4 u_MVP_matrix;
+varying vec2 v_TexCoords0;
+#ifdef MULTI_COORD
+attribute vec2 a_TexCoords1;
+attribute vec2 a_TexCoords2;
+varying vec2 v_TexCoords1;
+varying vec2 v_TexCoords2;
+#ifdef PLANE_4
+attribute vec2 a_TexCoords3;
+varying vec2 v_TexCoords3;
 #endif
-
-uniform sampler2D u_Texture0;
-varying vec2 v_TexCoords;
-uniform mat4 u_colorMatrix;
-uniform float u_opacity;
-
+#endif //MULTI_COORD
 void main() {
-  gl_FragColor = u_colorMatrix*texture2D(u_Texture0, v_TexCoords) * u_opacity;
+  gl_Position = u_MVP_matrix * a_Position;
+  v_TexCoords0 = a_TexCoords0;
+#ifdef MULTI_COORD
+  v_TexCoords1 = a_TexCoords1;
+  v_TexCoords2 = a_TexCoords2;
+#ifdef PLANE_4
+  v_TexCoords3 = a_TexCoords3;
+#endif
+#endif //MULTI_COORD
 }

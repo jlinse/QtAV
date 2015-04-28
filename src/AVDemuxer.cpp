@@ -80,6 +80,8 @@ public:
     InterruptHandler(AVDemuxer* demuxer, int timeout = 30000)
       : mStatus(0)
       , mTimeout(timeout)
+      , mTimeoutAbort(true)
+      , mEmitError(true)
       //, mLastTime(0)
       , mAction(Open)
       , mpDemuxer(demuxer)
@@ -95,6 +97,9 @@ public:
 #endif
     }
     void begin(Action act) {
+        if (mStatus > 0)
+            mStatus = 0;
+        mEmitError = true;
         mAction = act;
         mTimer.start();
     }
@@ -114,6 +119,16 @@ public:
     }
     qint64 getTimeout() const { return mTimeout; }
     void setTimeout(qint64 timeout) { mTimeout = timeout; }
+    bool setInterruptOnTimeout(bool value) {
+        if (mTimeoutAbort == value)
+            return false;
+        mTimeoutAbort = value;
+        if (mTimeoutAbort) {
+            mEmitError = true;
+        }
+        return true;
+    }
+    bool isInterruptOnTimeout() const {return mTimeoutAbort;}
     int getStatus() const { return mStatus; }
     void setStatus(int status) { mStatus = status; }
     /*
@@ -129,7 +144,7 @@ public:
             return -1;
         }
         //check manual interruption
-        if (handler->getStatus() > 0) {
+        if (handler->getStatus() < 0) {
             qDebug("User Interrupt: -> quit!");
             // DO NOT call setMediaStatus() here.
             /* MUST make sure blocking functions (open, read) return before we change the status
@@ -150,8 +165,10 @@ public:
         default:
             break;
         }
+        if (handler->mTimeout < 0)
+            return 0;
         if (!handler->mTimer.isValid()) {
-            qDebug("timer is not valid, start it");
+            //qDebug("timer is not valid, start it");
             handler->mTimer.start();
             //handler->mLastTime = handler->mTimer.elapsed();
             return 0;
@@ -163,22 +180,37 @@ public:
         if (handler->mTimer.elapsed() < handler->mTimeout)
 #endif
             return 0;
-        qDebug("Timeout expired: %lld/%lld -> quit!", handler->mTimer.elapsed(), handler->mTimeout);
+        qDebug("status: %d, Timeout expired: %lld/%lld -> quit!", (int)handler->mStatus, handler->mTimer.elapsed(), handler->mTimeout);
         handler->mTimer.invalidate();
-        AVError err;
-        if (handler->mAction == Open) {
-            err.setError(AVError::OpenTimedout);
-        } else if (handler->mAction == FindStreamInfo) {
-            err.setError(AVError::FindStreamInfoTimedout);
-        } else if (handler->mAction == Read) {
-            err.setError(AVError::ReadTimedout);
+        if (handler->mStatus == 0) {
+            AVError::ErrorCode ec(AVError::ReadTimedout);
+            if (handler->mAction == Open) {
+                ec = AVError::OpenTimedout;
+            } else if (handler->mAction == FindStreamInfo) {
+                ec = AVError::FindStreamInfoTimedout;
+            } else if (handler->mAction == Read) {
+                ec = AVError::ReadTimedout;
+            }
+            handler->mStatus = (int)ec;
+            // maybe changed in other threads
+            //handler->mStatus.testAndSetAcquire(0, ec);
         }
-        QMetaObject::invokeMethod(handler->mpDemuxer, "error", Qt::AutoConnection, Q_ARG(QtAV::AVError, err));
-        return 1;
+        if (handler->mTimeoutAbort)
+            return 1;
+        // emit demuxer error, handleerror
+        if (handler->mEmitError) {
+            handler->mEmitError = false;
+            AVError::ErrorCode ec = AVError::ErrorCode(handler->mStatus); //FIXME: maybe changed in other threads
+            QString es;
+            handler->mpDemuxer->handleError(AVERROR_EXIT, &ec, es);
+        }
+        return 0;
     }
 private:
     int mStatus;
     qint64 mTimeout;
+    bool mTimeoutAbort;
+    bool mEmitError;
     //qint64 mLastTime;
     Action mAction;
     AVDemuxer *mpDemuxer;
@@ -238,6 +270,7 @@ public:
                 || file.startsWith("mms") //mms{,h,t}
                 || file.startsWith("ffrtmp") //ffrtmpcrypt, ffrtmphttp
                 || file.startsWith("rtp:")
+                || file.startsWith("rtsp:")
                 || file.startsWith("sctp:")
                 || file.startsWith("tcp:")
                 || file.startsWith("tls:")
@@ -366,7 +399,7 @@ bool AVDemuxer::readFrame()
     d->interrupt_hanlder->begin(InterruptHandler::Read);
     int ret = av_read_frame(d->format_ctx, &packet); //0: ok, <0: error/end
     d->interrupt_hanlder->end();
-
+    // TODO: why return 0 if interrupted by user?
     if (ret < 0) {
         //end of file. FIXME: why no d->eof if replaying by seek(0)?
         // ffplay also check pb && pb->error and exit read thread
@@ -374,11 +407,18 @@ bool AVDemuxer::readFrame()
                 // AVFMT_NOFILE(e.g. network streams) stream has no pb
                 || avio_feof(d->format_ctx->pb)) {
             if (!d->eof) {
+                if (getInterruptStatus()) { //eof error if interrupted!
+                    AVError::ErrorCode ec(AVError::ReadError);
+                    QString msg(tr("error reading stream data"));
+                    handleError(ret, &ec, msg);
+                }
                 d->eof = true;
+#if 0 // EndOfMedia when demux thread finished
                 d->started = false;
                 setMediaStatus(EndOfMedia);
-                qDebug("End of file. %s %d", __FUNCTION__, __LINE__);
                 emit finished();
+#endif
+                qDebug("End of file. erreof=%d feof=%d", ret == AVERROR_EOF, avio_feof(d->format_ctx->pb));
             }
             return false;
         }
@@ -458,6 +498,7 @@ bool AVDemuxer::seek(qint64 pos)
         qWarning("Invalid seek position %lld %.2f. valid range [%lld, %lld]", upos, double(upos)/double(durationUs()), startTimeUs(), startTimeUs()+durationUs());
         return false;
     }
+    d->eof = false;
     // no lock required because in AVDemuxThread read and seek are in the same thread
 #if 0
     //t: unit is s
@@ -496,7 +537,7 @@ bool AVDemuxer::seek(qint64 pos)
     // TODO: replay
     if (upos <= startTime()) {
         qDebug("************seek to beginning. started = false");
-        d->started = false;
+        d->started = false; //???
         if (d->astream.avctx)
             d->astream.avctx->frame_number = 0;
         if (d->vstream.avctx)
@@ -682,6 +723,7 @@ bool AVDemuxer::load()
         QString msg = tr("failed to open media");
         handleError(ret, &ec, msg);
         qWarning() << "Can't open media: " << msg;
+        Q_EMIT unloaded(); //context not ready. so will not emit in unload()
         return false;
     }
     //deprecated
@@ -696,6 +738,7 @@ bool AVDemuxer::load()
         QString msg(tr("failed to find stream info"));
         handleError(ret, &ec, msg);
         qWarning() << "Can't find stream info: " << msg;
+        // context is ready. unloaded() will be emitted in unload()
         return false;
     }
 
@@ -963,23 +1006,24 @@ void AVDemuxer::setInterruptTimeout(qint64 timeout)
     d->interrupt_hanlder->setTimeout(timeout);
 }
 
-/**
- * @brief getInterruptStatus return the interrupt status
- * @return
- */
-bool AVDemuxer::getInterruptStatus() const
+bool AVDemuxer::isInterruptOnTimeout() const
 {
-    return d->interrupt_hanlder->getStatus() == 1 ? true : false;
+    return d->interrupt_hanlder->isInterruptOnTimeout();
 }
 
-/**
- * @brief setInterruptStatus set the interrupt status
- * @param interrupt
- * @return
- */
-void AVDemuxer::setInterruptStatus(bool interrupt)
+void AVDemuxer::setInterruptOnTimeout(bool value)
 {
-    d->interrupt_hanlder->setStatus(interrupt ? 1 : 0);
+    d->interrupt_hanlder->setInterruptOnTimeout(value);
+}
+
+int AVDemuxer::getInterruptStatus() const
+{
+    return d->interrupt_hanlder->getStatus();
+}
+
+void AVDemuxer::setInterruptStatus(int interrupt)
+{
+    d->interrupt_hanlder->setStatus(interrupt);
 }
 
 void AVDemuxer::setOptions(const QVariantHash &dict)
@@ -1122,19 +1166,23 @@ void AVDemuxer::handleError(int averr, AVError::ErrorCode *errorCode, QString &m
     QString err_msg(msg);
     if (interrupted) { // interrupted by callback, so can not determine whether the media is valid
         // insufficient buffering or other interruptions
-        setMediaStatus(StalledMedia);
-        if (getInterruptStatus())
+        if (getInterruptStatus() < 0) {
+            setMediaStatus(StalledMedia);
+            emit userInterrupted();
             err_msg += " [" + tr("interrupted by user") + "]";
-        else
+        } else {
+            if (isInterruptOnTimeout())
+                setMediaStatus(StalledMedia);
+            // averr is eof for open timeout
             err_msg += " [" + tr("timeout") + "]";
-        emit userInterrupted();
+        }
     } else {
         if (mediaStatus() == LoadingMedia)
             setMediaStatus(InvalidMedia);
     }
     if (!errorCode)
         return;
-    AVError::ErrorCode ec(AVError::OpenError);
+    AVError::ErrorCode ec(*errorCode);
     if (averr == AVERROR_INVALIDDATA) { // leave it if reading
         if (*errorCode == AVError::OpenError)
             ec = AVError::FormatError;
