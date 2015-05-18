@@ -77,6 +77,7 @@ Rectangle {
         videoCodecPriority: PlayerConfig.decoderPriorityNames
         onPositionChanged: control.setPlayingProgress(position/duration)
         onPlaying: {
+            control.mediaSource = player.source
             control.duration = duration
             control.setPlayingState()
             if (!pageLoader.item)
@@ -94,6 +95,27 @@ Rectangle {
             if (error != MediaPlayer.NoError) {
                 msg.error(errorString)
             }
+        }
+        volume: control.volume
+        onVolumeChanged: { //why need this? control.volume = player.volume is not enough?
+            if (Math.abs(control.volume - volume) >= 0.01) {
+                control.volume = volume
+            }
+        }
+        onStatusChanged: {
+            if (status == MediaPlayer.Loading)
+                msg.info("Loading " + source)
+            else if (status == MediaPlayer.Buffering)
+                msg.info("Buffering")
+            else if (status == MediaPlayer.Buffered)
+                msg.info("Buffered")
+            else if (status == MediaPlayer.EndOfMedia)
+                msg.info("End")
+            else if (status == MediaPlayer.InvalidMedia)
+                msg.info("Invalid")
+        }
+        onBufferProgressChanged: {
+            msg.info("Buffering " + Math.floor(bufferProgress*100) + "%...")
         }
     }
     Subtitle {
@@ -197,7 +219,7 @@ Rectangle {
                 player.play()
             }
         }
-        onVolumeChanged: player.volume = volume
+        volume: player.volume
         onOpenFile: fileDialog.open()
         onShowInfo: pageLoader.source = "MediaInfoPage.qml"
         onShowHelp: pageLoader.source = "About.qml"

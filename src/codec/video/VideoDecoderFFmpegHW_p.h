@@ -22,7 +22,7 @@
 #ifndef QTAV_VIDEODECODERFFMPEGHW_P_H
 #define QTAV_VIDEODECODERFFMPEGHW_P_H
 
-#include "VideoDecoderFFmpegBase.h"
+#include "VideoDecoderFFmpegHW.h"
 #include "utils/GPUMemCopy.h"
 
 /*!
@@ -38,7 +38,7 @@ class VideoDecoderFFmpegHWPrivate : public VideoDecoderFFmpegBasePrivate
 public:
     VideoDecoderFFmpegHWPrivate()
         : VideoDecoderFFmpegBasePrivate()
-        , copy_uswc(true)
+        , copy_mode(VideoDecoderFFmpegHW::OptimizedCopy)
     {
         get_format = 0;
         get_buffer = 0;
@@ -60,13 +60,15 @@ public:
 #endif //QTAV_VA_REF
     }
 
-    virtual bool setup(void **hwctx, int w, int h) = 0;
+    virtual bool setup(AVCodecContext* avctx) = 0;
 
     AVPixelFormat getFormat(struct AVCodecContext *p_context, const AVPixelFormat *pi_fmt);
     virtual bool getBuffer(void **opaque, uint8_t **data) = 0;
     virtual void releaseBuffer(void *opaque, uint8_t *data) = 0;
     virtual AVPixelFormat vaPixelFormat() const = 0;
 
+    int codedWidth(AVCodecContext *avctx) const;  //TODO: virtual int surfaceWidth(AVCodecContext*) const;
+    int codedHeight(AVCodecContext *avctx) const;
     bool initUSWC(int lineSize);
     void releaseUSWC();
 
@@ -81,7 +83,7 @@ public:
     QString description;
     // false for not intel gpu. my test result is intel gpu is supper fast and lower cpu usage if use optimized uswc copy. but nv is worse.
     // TODO: flag enable, disable, auto
-    bool copy_uswc;
+    VideoDecoderFFmpegHW::CopyMode copy_mode;
     GPUMemCopy gpu_mem;
 };
 

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -166,7 +166,7 @@ DecoderConfigPage::DecoderConfigPage(QWidget *parent) :
     QFrame *frame = new QFrame();
     frame->setFrameShape(QFrame::HLine);
     vb->addWidget(frame);
-    vb->addWidget(new QLabel(tr("Decoder") + " " + tr("Priorities")));
+    vb->addWidget(new QLabel(tr("Decoder") + " " + tr("Priorities") + " (" + tr("reopen is required") + ")"));
 
     sPriorityUi = idsFromNames(Config::instance().decoderPriorityNames());
     QStringList vds = Config::instance().decoderPriorityNames();
@@ -220,7 +220,7 @@ DecoderConfigPage::DecoderConfigPage(QWidget *parent) :
     hb->addWidget(mpDown);
     vb->addLayout(hb);
     connect(&Config::instance(), SIGNAL(decoderPriorityNamesChanged()), SLOT(onConfigChanged()));
-    updateDecodersUi();
+    applyToUi();
 }
 
 QString DecoderConfigPage::name() const
@@ -242,7 +242,7 @@ QVariantHash DecoderConfigPage::videoDecoderOptions() const
     return options;
 }
 
-void DecoderConfigPage::apply()
+void DecoderConfigPage::applyFromUi()
 {
     QStringList decs_all;
     QStringList decs;
@@ -255,13 +255,9 @@ void DecoderConfigPage::apply()
     Config::instance().setDecoderPriorityNames(decs);
 }
 
-void DecoderConfigPage::cancel()
+void DecoderConfigPage::applyToUi()
 {
     updateDecodersUi();
-}
-
-void DecoderConfigPage::reset()
-{
 }
 
 void DecoderConfigPage::videoDecoderEnableChanged()

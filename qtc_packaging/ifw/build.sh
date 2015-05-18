@@ -1,4 +1,3 @@
-
 # QtAV installer creator.
 
 [ $# -lt 1 ] && {
@@ -8,9 +7,11 @@
 
 
 BUILD=$1
-QTBIN=`grep -m 1 QT_BIN $BUILD/.qmake.cache |cut -d "=" -f 2 | tr -d ' '`
+QTBIN=`grep QT_BIN $BUILD/.qmake.cache |head -n 1 |cut -d "=" -f 2 | tr -d ' '` 
+# for windows
+QTBIN=`echo /$QTBIN|sed 's,:,,'`
 export PATH=$QTBIN:$PATH
-
+echo "QTBIN=$QTBIN"
 ARCH=`grep TARGET_ARCH $BUILD/.qmake.cache |grep -v TARGET_ARCH_SUB |cut -d "=" -f 2`
 ARCH=`echo $ARCH` #trim
 echo "$ARCH"
@@ -18,13 +19,15 @@ MKSPEC=`grep mkspecs_cached $BUILD/.qmake.cache |cut -d "=" -f 2`
 MKSPEC=`echo $MKSPEC`
 
 TARGET=${MKSPEC}-${ARCH}
-QTAV_VER_MAJOR=`grep -m 1 QTAV_MAJOR_VERSION ../../.qmake.conf |cut -d "=" -f 2 | tr -d ' '`
-QTAV_VER_MINOR=`grep -m 1 QTAV_MINOR_VERSION ../../.qmake.conf |cut -d "=" -f 2 | tr -d ' '`
-QTAV_VER_PATCH=`grep -m 1 QTAV_PATCH_VERSION ../../.qmake.conf |cut -d "=" -f 2 | tr -d ' '`
+mkdir -p $TARGET
+# grep -m 1 is not supported for msys
+QTAV_VER_MAJOR=`grep QTAV_MAJOR_VERSION ../../.qmake.conf |head -n 1 |cut -d "=" -f 2 | tr -d ' '`
+QTAV_VER_MINOR=`grep QTAV_MINOR_VERSION ../../.qmake.conf |head -n 1 |cut -d "=" -f 2 | tr -d ' '`
+QTAV_VER_PATCH=`grep QTAV_PATCH_VERSION ../../.qmake.conf |head -n 1 |cut -d "=" -f 2 | tr -d ' '`
 QTAV_VER=${QTAV_VER_MAJOR}.${QTAV_VER_MINOR}.${QTAV_VER_PATCH}
 echo "QtAV $QTAV_VER"
 
-function host_is() {
+host_is() {
   local name=$1
 #TODO: osx=>darwin
   local line=`uname -a |grep -i $name`
@@ -80,11 +83,11 @@ cat > $RT_DIR/data/bin/qt.conf <<EOF
 [Paths]
 Prefix=.
 EOF
-QTMODULES=(Core Gui OpenGL Widgets Qml Quick Network Svg) #TODO: use readelf, objdump or otool to get depends
+declare -a QTMODULES=(Core Gui OpenGL Widgets Qml Quick Network Svg) #TODO: use readelf, objdump or otool to get depends
 host_is Linux && QTMODULES+=(DBus)
 cp -af $BUILD/bin/* $RT_DIR/data/bin
 QTRT=`qmake -query QT_INSTALL_LIBS`
-host_is MinGW || host_is MSYS && QTRT=`$QTBiN/qmake -query QT_INSTALL_BINS`
+host_is MinGW || host_is MSYS && QTRT=`$QTBIN/qmake -query QT_INSTALL_BINS`
 for m in ${QTMODULES[@]}; do
   RT_DLL=`qt5lib_name ${m}`
   test -L $RT_DLL/data/bin/$RT_DLL && rm -rf $RT_DLL/data/bin/$RT_DLL
@@ -118,15 +121,35 @@ cp -af ../../widgets/QtAVWidgets $TARGET/packages/com.qtav.product.dev/data/incl
 cp -af $BUILD/tools/install_sdk/mkspecs $TARGET/packages/com.qtav.product.dev/data
 cp -af ../../{README.md,lgpl-2.1.txt,gpl-3.0.txt,doc} $TARGET/packages/com.qtav.product/data
 
+# copy qml files for simplify deployment sdk
+cd $TARGET/packages/com.qtav.product.dev/data
+mkdir -p qml
+if [ -d $RT_DIR/data/bin/QtAV ]; then
+  cp -af $RT_DIR/data/bin/QtAV qml
+elif  [ -d $BUILD/bin/QtAV ]; then
+  cp -af $BUILD/bin/QtAV qml
+elif [ -d $RT_DIR/data/bin/qml/QtAV ]; then
+  cp -af $RT_DIR/data/bin/qml/QtAV qml
+fi
+cd -
+
 #mingw: libQt5AV1.a
-cp -af $LIBDIR/*Qt*AV* $TARGET/packages/com.qtav.product.dev/data/lib
-[ -f $LIBDIR/Qt5AV1.lib ] && cp -af $LIBDIR/libQt5AV1.lib $TARGET/packages/com.qtav.product.dev/data/lib/Qt5AV.lib
-[ -f $LIBDIR/libQt5AV1.a ] && cp -af $LIBDIR/libQt5AV1.a $TARGET/packages/com.qtav.product.dev/data/lib/libQt5AV.a
-[ -f $LIBDIR/libQt5AV1.so ] && cp -af $LIBDIR/libQt5AV1.so $TARGET/packages/com.qtav.product.dev/data/lib/libQt5AV.so
-[ -f $LIBDIR/Qt5AVWidgets1.lib ] && cp -af $LIBDIR/libQt5AVWidgets1.lib $TARGET/packages/com.qtav.product.dev/data/lib/Qt5AVWidgets.lib
-[ -f $LIBDIR/libQt5AVWidgets1.a ] && cp -af $LIBDIR/libQt5AVWidgets1.a $TARGET/packages/com.qtav.product.dev/data/lib/libQt5AVWidgets.a
-[ -f $LIBDIR/libQt5AVWidgets1.so ] && cp -af $LIBDIR/libQt5AVWidgets1.so $TARGET/packages/com.qtav.product.dev/data/lib/libQt5AVWidgets.so
-rm -f $TARGET/packages/com.qtav.product.dev/data/lib/{*.dll,*.so.*}
+cd $TARGET/packages/com.qtav.product.dev/data/lib
+cp -af $LIBDIR/*Qt*AV* .
+[ -f $LIBDIR/Qt5AV${QTAV_VER_MAJOR}.lib ] && cp -af $LIBDIR/libQt5AV${QTAV_VER_MAJOR}.lib Qt5AV.lib
+[ -f $LIBDIR/libQt5AV${QTAV_VER_MAJOR}.a ] && cp -af $LIBDIR/libQt5AV${QTAV_VER_MAJOR}.a libQt5AV.a
+[ -f $LIBDIR/Qt5AVWidgets${QTAV_VER_MAJOR}.lib ] && cp -af $LIBDIR/libQt5AVWidgets${QTAV_VER_MAJOR}.lib Qt5AVWidgets.lib
+[ -f $LIBDIR/libQt5AVWidgets${QTAV_VER_MAJOR}.a ] && cp -af $LIBDIR/libQt5AVWidgets${QTAV_VER_MAJOR}.a libQt5AVWidgets.a
+rm -f {*.dll,*.so.*,*.prl}
+# no copy, just link to real file in bin for linux development
+if [ -f $LIBDIR/libQt5AV.so ]; then
+  ln -sf ../bin/libQt5AV.so.${QTAV_VER_MAJOR} libQt5AV.so
+  ln -sf ../bin/libQt5AVWidgets.so.${QTAV_VER_MAJOR} libQt5AVWidgets.so  
+elif [ -f $LIBDIR/libQtAV.so ]; then
+  ln -sf ../bin/libQtAV.so.${QTAV_VER_MAJOR} libQtAV.so
+  ln -sf ../bin/libQtAVWidgets.so.${QTAV_VER_MAJOR} libQtAVWidgets.so
+fi
+cd -
 
 ### player
 echo "coping player files..."
@@ -170,6 +193,7 @@ else
   echo "default install dir is '$HOME/QtAV'"
   sed 's,rootDir,homeDir,g' config/config.xml >$TARGET/config.xml
 fi
+cp config/control.js $TARGET
 
 type -p binarycreator || {
   echo "Can not create installer. Make sure Qt Installer Framework tools can be found in \$PATH"

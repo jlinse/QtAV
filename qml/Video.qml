@@ -65,6 +65,7 @@ Item {
     property alias fastSeek: player.fastSeek
     property alias opengl: videoOut.opengl
     property alias timeout: player.timeout
+    property alias abortOnTimeout: player.abortOnTimeout
     property alias subtitle: subtitle
     property alias subtitleText: text_sub // not for ass.
     /*** Properties of VideoOutput ***/
@@ -140,7 +141,7 @@ Item {
         from 0.0 (empty) to 1.0
         (full).
     */
-    //property alias bufferProgress:  player.bufferProgress
+    property alias bufferProgress:  player.bufferProgress
 
     /*!
         \qmlproperty int Video::duration
@@ -295,6 +296,8 @@ Item {
         Setting to \c true also sets \l autoLoad to \c true. The default is \c false.
     */
     property alias autoPlay:        player.autoPlay
+
+    property alias loops:        player.loops
 
     /*!
         \qmlsignal Video::paused()

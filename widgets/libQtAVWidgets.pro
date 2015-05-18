@@ -13,10 +13,11 @@ greaterThan(QT_MAJOR_VERSION, 4) {
   }
 }
 CONFIG *= qtavwidgets-buildlib
+staticlib: DEFINES += BUILD_QTAVWIDGETS_STATIC
+
 INCLUDEPATH += $$[QT_INSTALL_HEADERS]
 #release: DEFINES += QT_NO_DEBUG_OUTPUT
 #var with '_' can not pass to pri?
-STATICLINK = 0
 PROJECTROOT = $$PWD/..
 !include($$PROJECTROOT/src/libQtAV.pri): error("could not find libQtAV.pri")
 !include(libQtAVWidgets.pri): error("could not find libQtAVWidgets.pri")
@@ -57,12 +58,15 @@ SDK_HEADERS *= \
     QtAVWidgets/QtAVWidgets.h \
     QtAVWidgets/global.h \
     QtAVWidgets/version.h \
+    QtAVWidgets/VideoPreviewWidget.h \
     QtAVWidgets/GraphicsItemRenderer.h \
     QtAVWidgets/WidgetRenderer.h
 
 HEADERS *= $$QTAVSRC/output/video/VideoOutputEventFilter.h
+
 SOURCES *= \
     global.cpp \
+    VideoPreviewWidget.cpp \
     $$QTAVSRC/output/video/VideoOutputEventFilter.cpp \
     $$QTAVSRC/output/video/GraphicsItemRenderer.cpp \
     $$QTAVSRC/output/video/WidgetRenderer.cpp
@@ -92,6 +96,7 @@ config_gdiplus {
   SOURCES += $$QTAVSRC/output/video/GDIRenderer.cpp
   LIBS += -lgdiplus -lgdi32
 }
+
 config_direct2d {
   DEFINES *= QTAV_HAVE_DIRECT2D=1
   !*msvc*: INCLUDEPATH += $$PROJECTROOT/contrib/d2d1headers

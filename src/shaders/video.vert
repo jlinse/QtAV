@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -19,27 +19,28 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 
-#ifndef QTAV_VIDEODECODER_P_H
-#define QTAV_VIDEODECODER_P_H
-
-#include <QtAV/private/AVDecoder_p.h>
-
-namespace QtAV {
-
-
-class Q_AV_PRIVATE_EXPORT VideoDecoderPrivate : public AVDecoderPrivate
-{
-public:
-    VideoDecoderPrivate():
-        AVDecoderPrivate()
-      , width(0)
-      , height(0)
-    {}
-    virtual ~VideoDecoderPrivate()
-    {}
-
-    int width, height;
-};
-
-} //namespace QtAV
-#endif // QTAV_VIDEODECODER_P_H
+attribute vec4 a_Position;
+attribute vec2 a_TexCoords0;
+uniform mat4 u_MVP_matrix;
+varying vec2 v_TexCoords0;
+#ifdef MULTI_COORD
+attribute vec2 a_TexCoords1;
+attribute vec2 a_TexCoords2;
+varying vec2 v_TexCoords1;
+varying vec2 v_TexCoords2;
+#ifdef PLANE_4
+attribute vec2 a_TexCoords3;
+varying vec2 v_TexCoords3;
+#endif
+#endif //MULTI_COORD
+void main() {
+  gl_Position = u_MVP_matrix * a_Position;
+  v_TexCoords0 = a_TexCoords0;
+#ifdef MULTI_COORD
+  v_TexCoords1 = a_TexCoords1;
+  v_TexCoords2 = a_TexCoords2;
+#ifdef PLANE_4
+  v_TexCoords3 = a_TexCoords3;
+#endif
+#endif //MULTI_COORD
+}

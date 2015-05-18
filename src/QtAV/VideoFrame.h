@@ -74,9 +74,12 @@ public:
     // plane width with padded bytes for alignment.
     int planeWidth(int plane) const;
     int planeHeight(int plane) const;
-
+    // display attributes
     float displayAspectRatio() const;
     void setDisplayAspectRatio(float displayAspectRatio);
+    // TODO: pixel aspect ratio
+    ColorSpace colorSpace() const;
+    void setColorSpace(ColorSpace value);
 
     // no padded bytes
     int effectiveBytesPerLine(int plane) const;
@@ -96,6 +99,12 @@ public:
      */
     void* map(SurfaceType type, void* handle, int plane = 0);
     void unmap(void* handle);
+    /*!
+     * \brief createInteropHandle
+     * \param handle input/output handle
+     * \return null on error. otherwise return the input handle
+     */
+    void* createInteropHandle(void* handle, SurfaceType type, int plane);
     //copy to host. Used if gpu filter not supported. To avoid copy too frequent, sort the filters first?
     //bool mapToHost();
     /*!

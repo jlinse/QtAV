@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -31,8 +31,10 @@ class AVError;
 class AVPlayer;
 class AVClock;
 class VideoRenderer;
-class LibAVFilter;
+class LibAVFilterAudio;
+class LibAVFilterVideo;
 class SubtitleFilter;
+class VideoPreviewWidget;
 }
 class QMenu;
 class QTimeEdit;
@@ -49,6 +51,7 @@ class VideoEQConfigPage;
 class StatisticsView;
 class OSDFilter;
 class AVFilterSubtitle;
+class Preview;
 class MainWindow : public QWidget
 {
     Q_OBJECT
@@ -109,6 +112,7 @@ private slots:
     void onTimeSliderLeave();
     void handleError(const QtAV::AVError& e);
     void onMediaStatusChanged();
+    void onBufferProgress(qreal percent);
 
     void onVideoEQEngineChanged();
     void onBrightnessChanged(int b);
@@ -117,7 +121,10 @@ private slots:
     void onSaturationChanged(int s);
 
     void onCaptureConfigChanged();
-    void onAVFilterConfigChanged();
+    void onAVFilterVideoConfigChanged();
+    void onAVFilterAudioConfigChanged();
+    void onBufferValueChanged();
+    void onAbortOnTimeoutChanged();
 
     void donate();
     void setup();
@@ -130,6 +137,7 @@ private slots:
     void setSubtitleEngine(const QString& value);
 
     void changeClockType(QAction* action);
+    void syncVolumeUi(qreal value);
 protected:
     virtual void closeEvent(QCloseEvent *e);
     virtual void resizeEvent(QResizeEvent *);
@@ -176,7 +184,8 @@ private:
     QtAV::AVClock *mpClock;
     QtAV::AVPlayer *mpPlayer;
     QtAV::VideoRenderer *mpRenderer, *mpTempRenderer;
-    QtAV::LibAVFilter *mpAVFilter;
+    QtAV::LibAVFilterVideo *mpVideoFilter;
+    QtAV::LibAVFilterAudio *mpAudioFilter;
     QString mFile;
     QString mTitle;
     QPixmap mPlayPixmap;
@@ -194,6 +203,7 @@ private:
 
     OSDFilter *mpOSD;
     QtAV::SubtitleFilter *mpSubtitle;
+    QtAV::VideoPreviewWidget *m_preview;
 };
 
 

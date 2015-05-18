@@ -49,9 +49,17 @@ NAME = QmlAV
 eval(LIB$$upper($$NAME)_PRI_INCLUDED = 1)
 
 LIB_VERSION = $$QTAV_VERSION #0.x.y may be wrong for dll
-ios: STATICLINK=1
-isEmpty(STATICLINK): STATICLINK = 0  #1 or 0. use static lib or not
-
+# If user haven't supplied STATICLINK, then auto-detect
+isEmpty(STATICLINK) {
+  contains(CONFIG, staticlib) {
+    STATICLINK = 1
+  } else {
+    STATICLINK = 0
+  }
+  # Override for ios. Dynamic link is only supported
+  # in iOS 8.1.
+  ios:STATICLINK = 1
+}
 TEMPLATE += fakelib
 PROJECT_TARGETNAME = $$qtLibraryTarget($$NAME)
 TEMPLATE -= fakelib
@@ -128,11 +136,8 @@ DEPENDPATH *= $$PROJECT_SRCPATH
 		INSTALLS += target
 	}
 }
+!no_rpath:!cross_compile:set_rpath($$PROJECT_LIBDIR)
 
-isEmpty(CROSS_COMPILE): RPATHDIR *= $$PROJECT_LIBDIR
-set_rpath($$RPATHDIR)
-
-unset(RPATHDIR)
 unset(LIB_VERSION)
 unset(PROJECT_SRCPATH)
 unset(PROJECT_LIBDIR)

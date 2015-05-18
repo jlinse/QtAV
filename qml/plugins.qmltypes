@@ -143,13 +143,13 @@ Module {
         Enum {
             name: "Status"
             values: {
-                "UnknownMediaStatus": 0,
+                "UnknownStatus": 0,
                 "NoMedia": 1,
-                "LoadingMedia": 2,
-                "LoadedMedia": 3,
-                "StalledMedia": 4,
-                "BufferingMedia": 5,
-                "BufferedMedia": 6,
+                "Loading": 2,
+                "Loaded": 3,
+                "Stalled": 4,
+                "Buffering": 5,
+                "Buffered": 6,
                 "EndOfMedia": 7,
                 "InvalidMedia": 8
             }
@@ -189,12 +189,14 @@ Module {
         Property { name: "playbackRate"; type: "double" }
         Property { name: "source"; type: "QUrl" }
         Property { name: "loops"; type: "int" }
+        Property { name: "bufferProgress"; type: "double"; isReadonly: true }
         Property { name: "seekable"; type: "bool"; isReadonly: true }
         Property { name: "metaData"; type: "MediaMetaData"; isReadonly: true; isPointer: true }
         Property { name: "mediaObject"; type: "QObject"; isReadonly: true; isPointer: true }
         Property { name: "errorString"; type: "string"; isReadonly: true }
         Property { name: "fastSeek"; type: "bool" }
         Property { name: "timeout"; type: "int" }
+        Property { name: "abortOnTimeout"; type: "bool" }
         Property { name: "channelLayout"; type: "ChannelLayout" }
         Property { name: "videoCodecs"; type: "QStringList"; isReadonly: true }
         Property { name: "videoCodecPriority"; type: "QStringList" }

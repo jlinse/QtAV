@@ -202,29 +202,44 @@ public:
         demuxer.seek(value);
         const int vstream = demuxer.videoStream();
         Packet pkt;
+        qint64 pts0 = -1;
+        bool warn_bad_seek = true;
+        bool warn_out_of_range = true;
         while (!demuxer.atEnd()) {
             if (!demuxer.readFrame())
                 continue;
             if (demuxer.stream() != vstream)
                 continue;
             pkt = demuxer.packet();
+            if (pts0 < 0LL)
+                pts0 = (qint64)(pkt.pts*1000.0);
             if ((qint64)(pkt.pts*1000.0) - value > (qint64)range) {
-                qDebug("read packet out of range");
-                return false;
+                if (warn_out_of_range)
+                    qDebug("read packet out of range");
+                warn_out_of_range = false;
+                // No return because decoder needs more packets before the desired frame is decoded
+                //return false;
             }
             //qDebug("video packet: %f", pkt.pts);
             // TODO: always key frame?
             if (pkt.hasKeyFrame)
                 break;
-            else
+            if (warn_bad_seek)
                 qWarning("Not seek to key frame!!!");
+            warn_bad_seek = false;
+        }
+        // enlarge range if seek to key-frame failed
+        const qint64 key_pts = (qint64)(pkt.pts*1000.0);
+        const bool enlarge_range = pts0 >= 0LL && key_pts - pts0 > 0LL;
+        if (enlarge_range) {
+            range = qMax<qint64>(key_pts - value, range);
+            qDebug() << "enlarge range ==>>>> " << range;
         }
         if (!pkt.isValid()) {
             qWarning("VideoFrameExtractor failed to get a packet at %lld", value);
             return false;
         }
-        // no flush is required because we compare the correct decoded timestamp
-        //decoder->flush(); //must flush otherwise old frames will be decoded at the beginning
+        decoder->flush(); //must flush otherwise old frames will be decoded at the beginning
         decoder->setOptions(dec_opt_normal);
         // must decode key frame
         int k = 0;
@@ -235,11 +250,13 @@ public:
             }
             ++k;
         }
-        // seek backward, so value >= t
+        // if seek backward correctly to key frame, diff0 = t - value <= 0
+        // but sometimes seek to no-key frame(and range is enlarged), diff0 >= 0
         // decode key frame
-        if (int(value - frame.timestamp()) <= range) {
+        const int diff0 = qint64(frame.timestamp()*1000.0) - value;
+        if (qAbs(diff0) <= range) { //TODO: flag forward: result pts must >= value
             if (frame.isValid()) {
-                qDebug() << "VideoFrameExtractor: key frame found. format: " <<  frame.format();
+                qDebug() << "VideoFrameExtractor: key frame found @" << frame.timestamp() <<" diff=" << diff0 << ". format: " <<  frame.format();
                 return true;
             }
         }
@@ -294,7 +311,7 @@ public:
             }
             // if decoder was not flushed, we may get old frame which is acceptable
             if (diff > range && t > pts) {
-                qWarning("out pts out of range");
+                qWarning("out pts out of range. diff=%lld, range=%d", diff, range);
                 frame = VideoFrame();
                 return false;
             }
@@ -302,6 +319,22 @@ public:
         ++seek_count;
         // now we get the final frame
         return true;
+    }
+    void releaseResourceInternal() {
+        decoder.reset(0);
+        demuxer.unload();
+    }
+
+    void safeReleaseResource() {
+        class Cleaner : public QRunnable {
+            VideoFrameExtractorPrivate *p;
+        public:
+            Cleaner(VideoFrameExtractorPrivate* pri) : p(pri) {}
+            void run() {
+                p->releaseResourceInternal();
+            }
+        };
+        thread.addTask(new Cleaner(this));
     }
 
     bool extracted;
@@ -343,6 +376,7 @@ void VideoFrameExtractor::setSource(const QString value)
     d.has_video = true;
     emit sourceChanged();
     d.frame = VideoFrame();
+    d.safeReleaseResource();
 }
 
 QString VideoFrameExtractor::source() const

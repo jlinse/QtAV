@@ -27,6 +27,7 @@
 #include "QtAV/AudioOutput.h"
 #include "QtAV/AudioResampler.h"
 #include "QtAV/AVClock.h"
+#include "QtAV/Filter.h"
 #include "output/OutputSet.h"
 #include "QtAV/private/AVCompat.h"
 #include <QtCore/QCoreApplication>
@@ -52,81 +53,21 @@ AudioThread::AudioThread(QObject *parent)
 {
 }
 
-/// from libavfilter/af_volume begin
-static inline void scale_samples_u8(quint8 *dst, const quint8 *src, int nb_samples, int volume, float)
+void AudioThread::applyFilters(AudioFrame &frame)
 {
-    for (int i = 0; i < nb_samples; i++)
-        dst[i] = av_clip_uint8(((((qint64)src[i] - 128) * volume + 128) >> 8) + 128);
-}
-
-static inline void scale_samples_u8_small(quint8 *dst, const quint8 *src, int nb_samples, int volume, float)
-{
-    for (int i = 0; i < nb_samples; i++)
-        dst[i] = av_clip_uint8((((src[i] - 128) * volume + 128) >> 8) + 128);
-}
-
-static inline void scale_samples_s16(quint8 *dst, const quint8 *src, int nb_samples, int volume, float)
-{
-    int16_t *smp_dst       = (int16_t *)dst;
-    const int16_t *smp_src = (const int16_t *)src;
-    for (int i = 0; i < nb_samples; i++)
-        smp_dst[i] = av_clip_int16(((qint64)smp_src[i] * volume + 128) >> 8);
-}
-
-static inline void scale_samples_s16_small(quint8 *dst, const quint8 *src, int nb_samples, int volume, float)
-{
-    int16_t *smp_dst       = (int16_t *)dst;
-    const int16_t *smp_src = (const int16_t *)src;
-    for (int i = 0; i < nb_samples; i++)
-        smp_dst[i] = av_clip_int16((smp_src[i] * volume + 128) >> 8);
-}
-
-static inline void scale_samples_s32(quint8 *dst, const quint8 *src, int nb_samples, int volume, float)
-{
-    qint32 *smp_dst       = (qint32 *)dst;
-    const qint32 *smp_src = (const qint32 *)src;
-    for (int i = 0; i < nb_samples; i++)
-        smp_dst[i] = av_clipl_int32((((qint64)smp_src[i] * volume + 128) >> 8));
-}
-/// from libavfilter/af_volume end
-
-template<typename T>
-static inline void scale_samples(quint8 *dst, const quint8 *src, int nb_samples, int, float volume)
-{
-    T *smp_dst = (T *)dst;
-    const T *smp_src = (const T *)src;
-    for (int i = 0; i < nb_samples; ++i)
-        smp_dst[i] = smp_src[i] * (T)volume;
-}
-
-typedef void (*scale_t)(quint8 *dst, const quint8 *src, int nb_samples, int volume, float volumef);
-
-scale_t get_scaler(AudioFormat::SampleFormat fmt, qreal vol, int* voli)
-{
-    int v = (int)(vol * 256.0 + 0.5);
-    if (voli)
-        *voli = v;
-    switch (fmt) {
-    case AudioFormat::SampleFormat_Unsigned8:
-    case AudioFormat::SampleFormat_Unsigned8Planar:
-        return v < 0x1000000 ? scale_samples_u8_small : scale_samples_u8;
-    case AudioFormat::SampleFormat_Signed16:
-    case AudioFormat::SampleFormat_Signed16Planar:
-        return v < 0x10000 ? scale_samples_s16_small : scale_samples_s16;
-    case AudioFormat::SampleFormat_Signed32:
-    case AudioFormat::SampleFormat_Signed32Planar:
-        return scale_samples_s32;
-    case AudioFormat::SampleFormat_Float:
-    case AudioFormat::SampleFormat_FloatPlanar:
-        return scale_samples<float>;
-    case AudioFormat::SampleFormat_Double:
-    case AudioFormat::SampleFormat_DoublePlanar:
-        return scale_samples<double>;
-    default:
-        return 0;
+    DPTR_D(AudioThread);
+    //QMutexLocker locker(&d.mutex);
+    //Q_UNUSED(locker);
+    if (!d.filters.isEmpty()) {
+        //sort filters by format. vo->defaultFormat() is the last
+        foreach (Filter *filter, d.filters) {
+            AudioFilter *af = static_cast<AudioFilter*>(filter);
+            if (!af->isEnabled())
+                continue;
+            af->apply(d.statistics, &frame);
+        }
     }
 }
-
 /*
  *TODO:
  * if output is null or dummy, the use duration to wait
@@ -143,7 +84,6 @@ void AudioThread::run()
     //TODO: bool need_sync in private class
     bool is_external_clock = d.clock->clockType() == AVClock::ExternalClock;
     Packet pkt;
-    scale_t scale = 0;
     while (!d.stop) {
         processNextTask();
         //TODO: why put it at the end of loop then playNextFrame() not work?
@@ -154,15 +94,13 @@ void AudioThread::run()
             if (isPaused())
                 continue;
         }
-        if (d.packets.isEmpty() && !d.stop) {
-            d.stop = d.demux_end;
-        }
-        if (d.stop) {
-            qDebug("audio thread stop before take packet");
-            break;
-        }
         if (!pkt.isValid()) {
             pkt = d.packets.take(); //wait to dequeue
+        }
+        if (pkt.isEOF()) {
+            d.stop = true;
+            qDebug("audio thread gets an eof packet. exit.");
+            break;
         }
         if (!pkt.isValid()) {
             qDebug("Invalid packet! flush audio codec context!!!!!!!! audio queue size=%d", d.packets.size());
@@ -222,6 +160,7 @@ void AudioThread::run()
         /* lock here to ensure decoder and ao can complete current work before they are changed
          * current packet maybe not supported by new decoder
          */
+        // TODO: smaller scope
         QMutexLocker locker(&d.mutex);
         Q_UNUSED(locker);
         AudioDecoder *dec = static_cast<AudioDecoder*>(d.dec);
@@ -281,18 +220,30 @@ void AudioThread::run()
             d.last_pts = d.clock->value(); //not pkt.pts! the delay is updated!
             continue;
         }
+#if USE_AUDIO_FRAME
+        AudioFrame frame(dec->frame());
+        if (frame) {
+            //TODO: apply filters here
+            if (has_ao) {
+                applyFilters(frame);
+                frame.setAudioResampler(dec->resampler()); //!!!
+                // FIXME: resample is required for audio frames from ffmpeg
+                //if (ao->audioFormat() != frame.format()) {
+                    frame = frame.to(ao->audioFormat());
+                //}
+            }
+        } // no continue if frame is invalid. decoder may need more data to get a frame
+
+        QByteArray decoded(frame.data());
+#else
         QByteArray decoded(dec->data());
+#endif
         int decodedSize = decoded.size();
         int decodedPos = 0;
         qreal delay = 0;
         //AudioFormat.durationForBytes() calculates int type internally. not accurate
         const AudioFormat &af = dec->resampler()->outAudioFormat();
         const qreal byte_rate = af.bytesPerSecond();
-        const qreal vol = ao->volume(); //keep const for 1 frame
-        int volume_i = 0;
-        if (has_ao) {
-            scale = get_scaler(af.sampleFormat(), vol, &volume_i);
-        }
         while (decodedSize > 0) {
             if (d.stop) {
                 qDebug("audio thread stop after decode()");
@@ -304,26 +255,12 @@ void AudioThread::run()
             const qreal chunk_delay = (qreal)chunk/(qreal)byte_rate;
             pkt.pts += chunk_delay;
             pkt.dts += chunk_delay;
-            QByteArray decodedChunk(chunk, 0); //volume == 0 || mute
             if (has_ao) {
-                //TODO: volume filter and other filters!!!
-                if (!ao->isMute()) {
-                    decodedChunk = QByteArray::fromRawData(decoded.constData() + decodedPos, chunk);
-                    if (vol != 1.0 && scale) {
-                        // TODO: af_volume needs samples_align to get nb_samples
-                        const int nb_samples = decodedChunk.size()/ao->audioFormat().bytesPerSample();
-                        quint8 *dst = (quint8*)decodedChunk.constData();
-                        scale(dst, dst, nb_samples, volume_i, vol);
-                    }
-                }
-                ao->waitForNextBuffer();
-                ao->receiveData(decodedChunk, pkt.pts);
-                ao->play();
+                QByteArray decodedChunk = QByteArray::fromRawData(decoded.constData() + decodedPos, chunk);
+                ao->play(decodedChunk, pkt.pts);
                 d.clock->updateValue(ao->timestamp());
-                emit frameDelivered();
             } else {
                 d.clock->updateDelay(delay += chunk_delay);
-
             /*
              * why need this even if we add delay? and usleep sounds weird
              * the advantage is if no audio device, the play speed is ok too
@@ -340,6 +277,8 @@ void AudioThread::run()
             decodedPos += chunk;
             decodedSize -= chunk;
         }
+        if (has_ao)
+            emit frameDelivered();
         int undecoded = dec->undecodedSize();
         if (undecoded > 0) {
             pkt.data.remove(0, pkt.data.size() - undecoded);

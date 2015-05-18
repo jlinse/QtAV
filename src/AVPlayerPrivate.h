@@ -25,6 +25,7 @@
 #include <limits>
 #include "QtAV/AVDemuxer.h"
 #include "QtAV/AVPlayer.h"
+#include "QtAV/CommonTypes.h"
 #include "AudioThread.h"
 #include "VideoThread.h"
 #include "AVDemuxThread.h"
@@ -39,6 +40,7 @@ public:
     Private();
     ~Private();
 
+    void updateNotifyInterval();
     void initStatistics();
     void initBaseStatistics();
     void initCommonStatistics(int s, Statistics::Common* st, AVCodecContext* avctx);
@@ -48,7 +50,9 @@ public:
 
     bool setupAudioThread(AVPlayer *player);
     bool setupVideoThread(AVPlayer *player);
-
+    // TODO: what if buffer mode changed during playback?
+    void updateBufferValue(PacketBuffer *buf);
+    void updateBufferValue();
     //TODO: addAVOutput()
     template<class Out>
     void setAVOutput(Out *&pOut, Out *pNew, AVThread *thread) {
@@ -93,7 +97,6 @@ public:
         }
     }
 
-
     bool auto_load;
     bool async_load;
     // can be QString, QIODevice*
@@ -116,6 +119,8 @@ public:
     int timer_id; //notify position change and check AB repeat range. active when playing
 
     int audio_track, video_track, subtitle_track;
+    BufferMode buffer_mode;
+    int buffer_value;
     //the following things are required and must be set not null
     AVDemuxer demuxer;
     AVDemuxThread *read_thread;
@@ -133,7 +138,6 @@ public:
     bool ao_enabled;
     OutputSet *vos, *aos;
     QVector<VideoDecoderId> vc_ids;
-    QVector<AudioOutputId> ao_ids;
     int brightness, contrast, saturation;
 
     QVariantHash ac_opt, vc_opt;
@@ -142,10 +146,12 @@ public:
     SeekType seek_type;
     qint64 seek_target; // relative time if relativeTimeMode is true
     qint64 interrupt_timeout;
-    bool mute;
 
+    qreal force_fps;
     // timerEvent interval in ms. can divide 1000. depends on media duration, fps etc.
+    // <0: auto compute internally, |notify_interval| is the real interval
     int notify_interval;
+    MediaStatus status; // status changes can be from demuxer or demux thread
 };
 
 } //namespace QtAV

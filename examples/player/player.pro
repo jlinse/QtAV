@@ -4,10 +4,10 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 TRANSLATIONS = res/player_zh_CN.ts
 VERSION = $$QTAV_VERSION
 
-STATICLINK = 0
 PROJECTROOT = $$PWD/../..
 include($$PROJECTROOT/src/libQtAV.pri)
 include($$PROJECTROOT/widgets/libQtAVWidgets.pri)
+STATICLINK=1
 include($$PWD/../common/libcommon.pri)
 preparePaths($$OUT_PWD/../../out)
 INCLUDEPATH += $$PWD
@@ -27,6 +27,7 @@ SOURCES += main.cpp \
     config/CaptureConfigPage.cpp \
     config/VideoEQConfigPage.cpp \
     config/DecoderConfigPage.cpp \
+    config/MiscPage.cpp \
     filters/OSD.cpp \
     filters/OSDFilter.cpp \
     playlist/PlayListModel.cpp \
@@ -51,6 +52,7 @@ HEADERS += \
     config/CaptureConfigPage.h \
     config/VideoEQConfigPage.h \
     config/DecoderConfigPage.h \
+    config/MiscPage.h \
     filters/OSD.h \
     filters/OSDFilter.h \
     playlist/PlayListModel.h \
@@ -62,10 +64,9 @@ HEADERS += \
     config/AVFilterConfigPage.h \
     filters/AVFilterSubtitle.h
 
-
 unix:!android:!mac {
 #debian
-player_bins = libcommon.so.* player QMLPlayer
+player_bins = player QMLPlayer
 DEB_INSTALL_LIST = $$join(player_bins, \\n.$$[QT_INSTALL_BINS]/, .$$[QT_INSTALL_BINS]/)
 DEB_INSTALL_LIST *= \
             usr/share/applications/player.desktop \

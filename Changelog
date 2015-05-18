@@ -1,3 +1,57 @@
+version 1.6.0 2015-04-23
+
+Changlog:
+- VDA: use NV12 as default format. Support 0 copy. Better performance than any other playrs
+- CUDA: fix wrong bitstream filters
+- OpenGL:
+  * PBO support (enable by enviroment var QTAV_PBO=1)
+  * rectangle texture support
+  * packed yuv formats support
+- Support buffer progress, buffer value control
+- Support frame rate setup (AVPlayer::setFrameRate())
+- Support RAW streams, such as h264, yuv
+- Audio filter support
+- Better libavfilter support. Now support libav avfilter, support audio filters from libavfilter
+- Add pulseaudio support
+- Detect volume change by per-app volume control
+- Simplify audio output API
+- Volume and mute control by audio backend API
+- Use float audio sample if possible
+- Fix iOS static link error
+- Fix error handling, EOF detect, Qt4.7 build etc.
+- Deploy: add qml, fix lib name, deploy sdk from installer, mingw deployment on linux.
+- player/QMLPlayer:
+  * decoder detail
+  * more options: preview config, buffer, fps, timeout
+  * unregister context menu(win32) if uninstalled, ifw2.0
+  * QMLPlayer file associate for android
+
+
+version 1.5.0 2015-02-13
+
+Changelog:
+- Add QtAVWidgets module contains widget based renderers, video preview widget
+- QtAV module only depends on QtCore and QtGui
+- Improve audio output API
+- Simplify deployment on OSX. Deploy sdk from release packages without build.
+- Improve seekable detection
+- Fix noise audio if volume increased
+- Fix noise and wrong playback speed for wmv videos
+- Preview is more accurate
+- Do not copy AVPacket but use reference count.
+- Faster audio track switch
+- Reopen audio output only if audio format changed
+- VideoFrame: new API for converting to another format or QImage
+- OpenGL VAO, VBO support.
+- QML
+  * Fix some crashes in QQuickItemRenderer
+  * Add FBO item renderer and use the same code path as other opengl renderers
+  * timeout property
+- player and QMLPlayer example
+  * player: real time preview on progress bar
+  * Fast seek and display if seek shortcut is pressed and hold
+
+
 version 1.4.2 2014-12-27
 
 Changelog:
