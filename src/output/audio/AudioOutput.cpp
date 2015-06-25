@@ -159,7 +159,6 @@ public:
     };
 
     void resetStatus() {
-        available = false;
         play_pos = 0;
         processed_remain = 0;
         msecs_ahead = 0;
@@ -170,6 +169,8 @@ public:
     }
     /// call this if sample format or volume is changed
     void updateSampleScaleFunc();
+    void tryVolume(qreal value);
+    void tryMute(bool value);
 
     bool mute;
     bool sw_volume, sw_mute;
@@ -225,6 +226,33 @@ void AudioOutputPrivate::playInitialData()
     backend->play();
 }
 
+void AudioOutputPrivate::tryVolume(qreal value)
+{
+    // if not open, try later
+    if (!available)
+        return;
+    if (features & AudioOutput::SetVolume) {
+        sw_volume = !backend->setVolume(value);
+        //if (!qFuzzyCompare(backend->volume(), value))
+        //    sw_volume = true;
+        if (sw_volume)
+            backend->setVolume(1.0); // TODO: partial software?
+    } else {
+        sw_volume = true;
+    }
+}
+
+void AudioOutputPrivate::tryMute(bool value)
+{
+    // if not open, try later
+    if (!available)
+        return;
+    if ((features & AudioOutput::SetMute) && backend)
+        sw_mute = !backend->setMute(value);
+    else
+        sw_mute = true;
+}
+
 AudioOutput::AudioOutput(QObject* parent)
     : QObject(parent)
     , AVOutput(*new AudioOutputPrivate())
@@ -233,17 +261,17 @@ AudioOutput::AudioOutput(QObject* parent)
     d_func().format.setSampleFormat(AudioFormat::SampleFormat_Signed16);
     d_func().format.setChannelLayout(AudioFormat::ChannelLayout_Stero);
     static const QStringList all = QStringList()
-#if QTAV_HAVE(PULSEAUDIO)
+#if QTAV_HAVE(PULSEAUDIO)&& !defined(Q_OS_MAC)
             << "Pulse"
+#endif
+#if QTAV_HAVE(OPENSL)
+            << "OpenSL"
 #endif
 #if QTAV_HAVE(OPENAL)
             << "OpenAL"
 #endif
 #if QTAV_HAVE(PORTAUDIO)
             << "PortAudio"
-#endif
-#if QTAV_HAVE(OPENSL)
-            << "OpenSL"
 #endif
 #if QTAV_HAVE(DSOUND)
             << "DirectSound"
@@ -320,6 +348,9 @@ QString AudioOutput::backend() const
 bool AudioOutput::open()
 {
     DPTR_D(AudioOutput);
+    QMutexLocker lock(&d.mutex);
+    Q_UNUSED(lock);
+    d.available = false;
     d.resetStatus();
     if (!d.backend)
         return false;
@@ -331,6 +362,8 @@ bool AudioOutput::open()
     if (!d.backend->open())
         return false;
     d.available = true;
+    d.tryVolume(volume());
+    d.tryMute(isMute());
     d.playInitialData();
     return true;
 }
@@ -338,11 +371,20 @@ bool AudioOutput::open()
 bool AudioOutput::close()
 {
     DPTR_D(AudioOutput);
+    QMutexLocker lock(&d.mutex);
+    Q_UNUSED(lock);
+    d.available = false;
     d.resetStatus();
     if (!d.backend)
         return false;
+    // TODO: drain() before close
     d.backend->audio = 0;
     return d.backend->close();
+}
+
+bool AudioOutput::isOpen() const
+{
+    return d_func().available;
 }
 
 bool AudioOutput::play(const QByteArray &data, qreal pts)
@@ -377,9 +419,13 @@ bool AudioOutput::receiveData(const QByteArray &data, qreal pts)
         }
     }
     // wait after all data processing finished to reduce time error
-    waitForNextBuffer();
+    if (!waitForNextBuffer()) {
+        qWarning("ao backend maybe not open");
+        d.resetStatus();
+        return false;
+    }
     d.frame_infos.push_back(AudioOutputPrivate::FrameInfo(pts, data.size()));
-    if (!d.backend)
+    if (!d.backend || !isOpen())
         return false;
     return d.backend->write(d.data);
 }
@@ -426,25 +472,17 @@ int AudioOutput::channels() const
     return d_func().format.channels();
 }
 
-void AudioOutput::setVolume(qreal volume)
+void AudioOutput::setVolume(qreal value)
 {
     DPTR_D(AudioOutput);
-    if (volume < 0.0)
+    if (value < 0.0)
         return;
-    if (d.vol == volume) //fuzzy compare?
+    if (d.vol == value) //fuzzy compare?
         return;
-    d.vol = volume;
-    emit volumeChanged(d.vol);
+    d.vol = value;
+    Q_EMIT volumeChanged(value);
     d.updateSampleScaleFunc();
-    if (deviceFeatures() & SetVolume) {
-        d.sw_volume = !d.backend->setVolume(d.vol);
-        //if (!qFuzzyCompare(deviceGetVolume(), d.vol))
-        //    d.sw_volume = true;
-        if (d.sw_volume)
-            d.backend->setVolume(1.0); // TODO: partial software?
-    } else {
-        d.sw_volume = true;
-    }
+    d.tryVolume(value);
 }
 
 qreal AudioOutput::volume() const
@@ -458,11 +496,8 @@ void AudioOutput::setMute(bool value)
     if (d.mute == value)
         return;
     d.mute = value;
-    emit muteChanged(value);
-    if ((deviceFeatures() & SetMute) && d.backend)
-        d.sw_mute = !d.backend->setMute(value);
-    else
-        d.sw_mute = true;
+    Q_EMIT muteChanged(value);
+    d.tryMute(value);
 }
 
 bool AudioOutput::isMute() const
@@ -566,11 +601,11 @@ AudioOutput::DeviceFeatures AudioOutput::supportedDeviceFeatures() const
     return d.backend->supportedFeatures();
 }
 
-void AudioOutput::waitForNextBuffer()
+bool AudioOutput::waitForNextBuffer()
 {
     DPTR_D(AudioOutput);
     if (!d.backend)
-        return;
+        return false;
     //don't return even if we can add buffer because we don't know when a buffer is processed and we have /to update dequeue index
     // openal need enqueue to a dequeued buffer! why sl crash
     bool no_wait = false;//d.canAddBuffer();
@@ -578,12 +613,16 @@ void AudioOutput::waitForNextBuffer()
     int remove = 0;
     if (f & AudioOutputBackend::Blocking) {
         remove = 1;
-    } else if (f & AudioOutputBackend::Callback) {
+    } else if (f & AudioOutputBackend::CountCallback) {
+        remove = 1;
+    } else if (f & AudioOutputBackend::BytesCallback) {
 #if AO_USE_TIMER
         d.timer.restart();
 #endif //AO_USE_TIMER
         int processed = d.processed_remain;
         d.processed_remain = d.backend->getWritableBytes();
+        if (d.processed_remain < 0)
+            return false;
         const int next = d.frame_infos.front().data_size;
         //qDebug("remain: %d-%d, size: %d, next: %d", processed, d.processed_remain, d.data.size(), next);
         qint64 last_wait = 0LL;
@@ -593,12 +632,18 @@ void AudioOutput::waitForNextBuffer()
             Q_UNUSED(lock);
             d.cond.wait(&d.mutex, us/1000LL);
             d.processed_remain = d.backend->getWritableBytes();
-            if (us == last_wait
+            if (d.processed_remain < 0)
+                return false;
+            if (!d.timer.isValid()) {
+                qWarning("invalid timer. closed in another thread");
+                return false;
+            }
+            if (us >= last_wait
 #if AO_USE_TIMER
                     && d.timer.elapsed() > 1000
 #endif //AO_USE_TIMER
                     ) {
-                break;
+                return false;
             }
             last_wait = us;
         }
@@ -685,7 +730,7 @@ void AudioOutput::waitForNextBuffer()
         remove = processed;
     } else {
         qFatal("User defined waitForNextBuffer() not implemented!");
-        return;
+        return false;
     }
     if (remove < 0) {
         int next = d.frame_infos.front().data_size;
@@ -700,7 +745,7 @@ void AudioOutput::waitForNextBuffer()
             next = d.frame_infos.front().data_size;
         }
         //qDebug("remove: %d, unremoved bytes < %d, writable_bytes: %d", remove, free_bytes, d.processed_remain);
-        return;
+        return true;
     }
     //qDebug("remove count: %d", remove);
     while (remove-- > 0) {
@@ -710,6 +755,7 @@ void AudioOutput::waitForNextBuffer()
         }
         d.frame_infos.pop_front();
     }
+    return true;
 }
 
 

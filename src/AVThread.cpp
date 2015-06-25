@@ -22,12 +22,16 @@
 #include "AVThread.h"
 #include "AVThread_p.h"
 #include "QtAV/AVClock.h"
+#include "QtAV/AVDecoder.h"
 #include "QtAV/AVOutput.h"
 #include "QtAV/Filter.h"
 #include "output/OutputSet.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
+
+QVariantHash AVThreadPrivate::dec_opt_framedrop;
+QVariantHash AVThreadPrivate::dec_opt_normal;
 
 AVThreadPrivate::~AVThreadPrivate() {
     stop = true;
@@ -108,28 +112,23 @@ void AVThread::scheduleTask(QRunnable *task)
     d_func().tasks.put(task);
 }
 
-void AVThread::skipRenderUntil(qreal pts)
+void AVThread::scheduleFrameDrop(bool value)
 {
-    /*
-     * Lock here is useless because in Audio/VideoThread, the lock scope is very small.
-     * So render_pts0 may be reset to 0 after set here
-     */
-    DPTR_D(AVThread);
-    class SetRenderPTS0Task : public QRunnable {
+    class FrameDropTask : public QRunnable {
+        AVDecoder *decoder;
+        bool drop;
     public:
-        SetRenderPTS0Task(qreal* pts0, qreal value)
-            : ptr(pts0)
-            , pts(value)
-        {}
-        void run() {
-            *ptr = pts;
+        FrameDropTask(AVDecoder *dec, bool value) : decoder(dec), drop(value) {}
+        void run() Q_DECL_OVERRIDE {
+            if (!decoder)
+                return;
+            if (drop)
+                decoder->setOptions(AVThreadPrivate::dec_opt_framedrop);
+            else
+                decoder->setOptions(AVThreadPrivate::dec_opt_normal);
         }
-    private:
-        qreal *ptr;
-        qreal pts;
     };
-
-    scheduleTask(new SetRenderPTS0Task(&d.render_pts0, pts));
+    scheduleTask(new FrameDropTask(decoder(), value));
 }
 
 // TODO: shall we close decoder here?
@@ -245,7 +244,7 @@ void AVThread::resetState()
     DPTR_D(AVThread);
     pause(false);
     d.tasks.clear();
-    d.render_pts0 = 0;
+    d.render_pts0 = -1;
     d.stop = false;
     d.packets.setBlocking(true);
     d.packets.clear();

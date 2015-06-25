@@ -28,6 +28,7 @@
 #include <QmlAV/MediaMetaData.h>
 #include <QtAV/AVError.h>
 #include <QtAV/CommonTypes.h>
+#include <QtAV/VideoCapture.h>
 
 namespace QtAV {
 class AVPlayer;
@@ -54,7 +55,7 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(qreal bufferProgress READ bufferProgress NOTIFY bufferProgressChanged)
     Q_PROPERTY(bool seekable READ isSeekable NOTIFY seekableChanged)
     Q_PROPERTY(MediaMetaData *metaData READ metaData CONSTANT)
-    Q_PROPERTY(QObject *mediaObject READ mediaObject)
+    Q_PROPERTY(QObject *mediaObject READ mediaObject  NOTIFY mediaObjectChanged SCRIPTABLE false DESIGNABLE false)
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorChanged)
     Q_ENUMS(Loop)
     Q_ENUMS(PlaybackState)
@@ -69,6 +70,11 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(QStringList videoCodecs READ videoCodecs)
     Q_PROPERTY(QStringList videoCodecPriority READ videoCodecPriority WRITE setVideoCodecPriority NOTIFY videoCodecPriorityChanged)
     Q_PROPERTY(QVariantMap videoCodecOptions READ videoCodecOptions WRITE setVideoCodecOptions NOTIFY videoCodecOptionsChanged)
+    Q_PROPERTY(QtAV::VideoCapture *videoCapture READ videoCapture CONSTANT)
+    Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
+    Q_PROPERTY(QUrl externalAudio READ externalAudio WRITE setExternalAudio NOTIFY externalAudioChanged)
+    Q_PROPERTY(QVariantList internalAudioTracks READ internalAudioTracks NOTIFY internalAudioTracksChanged)
+    Q_PROPERTY(QVariantList externalAudioTracks READ externalAudioTracks NOTIFY externalAudioTracksChanged)
 public:
     enum Loop { Infinite = -1 };
     enum PlaybackState {
@@ -153,6 +159,7 @@ public:
 
     MediaMetaData *metaData() const;
     QObject *mediaObject() const;
+    QtAV::VideoCapture *videoCapture() const;
 
     // "FFmpeg", "CUDA", "DXVA", "VAAPI" etc
     QStringList videoCodecs() const;
@@ -170,6 +177,25 @@ public:
     int timeout() const;
     void setAbortOnTimeout(bool value);
     bool abortOnTimeout() const;
+
+    /*!
+     * \brief audioTrack
+     * The audio stream number in current media or external audio.
+     * Value can be: 0, 1, 2.... 0 means the 1st audio stream in current media or external audio
+     */
+    int audioTrack() const;
+    void setAudioTrack(int value);
+    QVariantList internalAudioTracks() const;
+    /*!
+     * \brief externalAudio
+     * If externalAudio url is valid, player will use audioTrack of external audio as audio source.
+     * Set an invalid url to disable external audio
+     * \return external audio url or an invalid url if use internal audio tracks
+     */
+    QUrl externalAudio() const;
+    void setExternalAudio(const QUrl& url);
+    QVariantList externalAudioTracks() const;
+
 public Q_SLOTS:
     void play();
     void pause();
@@ -198,6 +224,7 @@ Q_SIGNALS:
     void stopped();
     void playing();
     void seekableChanged();
+    void seekFinished();
     void fastSeekChanged();
     void bufferProgressChanged();
     void videoCodecPriorityChanged();
@@ -205,6 +232,10 @@ Q_SIGNALS:
     void channelLayoutChanged();
     void timeoutChanged();
     void abortOnTimeoutChanged();
+    void audioTrackChanged();
+    void internalAudioTracksChanged();
+    void externalAudioChanged();
+    void externalAudioTracksChanged();
 
     void errorChanged();
     void error(Error error, const QString &errorString);
@@ -244,6 +275,9 @@ private:
     ChannelLayout mChannelLayout;
     int m_timeout;
     bool m_abort_timeout;
+    QVariantList m_audio_streams, m_external_audio_streams;
+    int m_audio_track;
+    QUrl m_audio;
 
     QScopedPointer<MediaMetaData> m_metaData;
     QVariantMap vcodec_opt;

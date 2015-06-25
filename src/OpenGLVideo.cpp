@@ -60,9 +60,16 @@ public:
         , update_geo(true)
         , try_vbo(true)
         , try_vao(true)
+        , tex_target(0)
         , valiad_tex_width(1.0)
     {
         static bool disable_vbo = qgetenv("QTAV_NO_VBO").toInt() > 0;
+#if defined(Q_OS_WIN) && (defined(QT_OPENGL_ES_2) || defined(QT_OPENGL_DYNAMIC))
+        if (!disable_vbo && qEnvironmentVariableIsEmpty("QTAV_NO_VBO") && OpenGLHelper::isOpenGLES()) {
+            qDebug("Disable VBO for ANGLE to let QPainter on renderers work. Set QTAV_NO_VBO=0 to enable VBO");
+            disable_vbo = true;
+        }
+#endif
         try_vbo = !disable_vbo;
         static bool disable_vao = qgetenv("QTAV_NO_VAO").toInt() > 0;
         try_vao = !disable_vao;
@@ -116,6 +123,7 @@ public:
 #if QT_VAO
     QOpenGLVertexArrayObject vao;
 #endif //QT_VAO
+    int tex_target;
     qreal valiad_tex_width;
     QSize video_size;
     QRectF target;
@@ -136,6 +144,10 @@ void OpenGLVideoPrivate::bindAttributes(VideoShader* shader, const QRectF &t, co
         valiad_tex_width = material->validTextureWidth();
         video_size = material->frameSize();
     }
+    if (tex_target != shader->textureTarget()) {
+        tex_target = shader->textureTarget();
+        update_geo = true;
+    }
     QRectF& target_rect = rect;
     if (target.isValid()) {
         if (roi_changed || target != t) {
@@ -143,8 +155,8 @@ void OpenGLVideoPrivate::bindAttributes(VideoShader* shader, const QRectF &t, co
             update_geo = true;
         }
     } else {
-        if (roi_changed || update_geo) {
-            update_geo = true; // roi_changed
+        if (roi_changed) {
+            update_geo = true;
         }
     }
     if (!update_geo)

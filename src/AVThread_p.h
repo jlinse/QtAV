@@ -24,6 +24,7 @@
 
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
+#include <QtCore/QVariant>
 #include <QtCore/QWaitCondition>
 #include "PacketBuffer.h"
 
@@ -51,9 +52,15 @@ public:
       , delay(0)
       , statistics(0)
       , ready(false)
-      , render_pts0(0)
+      , render_pts0(-1)
     {
         tasks.blockFull(false);
+
+        QVariantHash opt;
+        opt["skip_frame"] = 8; // 8 for "avcodec", "NoRef" for "FFmpeg". see AVDiscard
+        dec_opt_framedrop["avcodec"] = opt;
+        opt["skip_frame"] = 0; // 0 for "avcodec", "Default" for "FFmpeg". see AVDiscard
+        dec_opt_normal["avcodec"] = opt; // avcodec need correct string or value in libavcodec
     }
     virtual ~AVThreadPrivate();
 
@@ -74,6 +81,8 @@ public:
     bool ready;
     //only decode video without display or skip decode audio until pts reaches
     qreal render_pts0;
+
+    static QVariantHash dec_opt_framedrop, dec_opt_normal;
 };
 
 } //namespace QtAV

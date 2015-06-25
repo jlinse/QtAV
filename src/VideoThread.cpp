@@ -47,11 +47,6 @@ public:
       , capture(0)
       , filter_context(0)
     {
-        QVariantHash opt;
-        opt["skip_frame"] = 8; // 8 for "avcodec", "NoRef" for "FFmpeg". see AVDiscard
-        dec_opt_framedrop["avcodec"] = opt;
-        opt["skip_frame"] = 0; // 0 for "avcodec", "Default" for "FFmpeg". see AVDiscard
-        dec_opt_normal["avcodec"] = opt; // avcodec need correct string or value in libavcodec
     }
     ~VideoThreadPrivate() {
         //not neccesary context is managed by filters.
@@ -68,11 +63,7 @@ public:
     VideoCapture *capture;
     VideoFilterContext *filter_context;//TODO: use own smart ptr. QSharedPointer "=" is ugly
     VideoFrame displayed_frame;
-    static QVariantHash dec_opt_framedrop, dec_opt_normal;
 };
-
-QVariantHash VideoThreadPrivate::dec_opt_framedrop;
-QVariantHash VideoThreadPrivate::dec_opt_normal;
 
 VideoThread::VideoThread(QObject *parent) :
     AVThread(*new VideoThreadPrivate(), parent)
@@ -188,25 +179,6 @@ void VideoThread::setEQ(int b, int c, int s)
     }
 }
 
-void VideoThread::scheduleFrameDrop(bool value)
-{
-    class FrameDropTask : public QRunnable {
-        AVDecoder *decoder;
-        bool drop;
-    public:
-        FrameDropTask(AVDecoder *dec, bool value) : decoder(dec), drop(value) {}
-        void run() Q_DECL_OVERRIDE {
-            if (!decoder)
-                return;
-            if (drop)
-                decoder->setOptions(VideoThreadPrivate::dec_opt_framedrop);
-            else
-                decoder->setOptions(VideoThreadPrivate::dec_opt_normal);
-        }
-    };
-    scheduleTask(new FrameDropTask(decoder(), value));
-}
-
 void VideoThread::applyFilters(VideoFrame &frame)
 {
     DPTR_D(VideoThread);
@@ -298,7 +270,6 @@ void VideoThread::run()
     int nb_dec_slow = 0;
     int nb_dec_fast = 0;
 
-    bool is_pkt_bf_seek = true; // when seeking, a packet token from queue maybe before queue.clear() and packet is old. we may skip compare, wait and decode.
     qint32 seek_count = 0; // wm4 says: 1st seek can not use frame drop for decoder
     // TODO: kNbSlowSkip depends on video fps, ensure slow time <= 2s
     /* kNbSlowSkip: if video frame slow count >= kNbSlowSkip, skip decoding all frames until next keyframe reaches.
@@ -307,10 +278,11 @@ void VideoThread::run()
     const int kNbSlowSkip = 120; // about 1s for 120fps video
     // kNbSlowFrameDrop: if video frame slow count > kNbSlowFrameDrop, skip decoding nonref frames. only some of ffmpeg based decoders support it.
     const int kNbSlowFrameDrop = 10;
-    int seek_done_count = 0; // seek_done_count > 1 means seeking is really finished. theorically can't be >1 if seeking!
     bool sync_audio = d.clock->clockType() == AVClock::AudioClock;
     bool sync_video = d.clock->clockType() == AVClock::VideoClock; // no frame drop
     const qint64 start_time = QDateTime::currentMSecsSinceEpoch();
+    bool skip_render = false; // keep true if decoded frame does not reach desired time
+    qreal v_a = 0;
     while (!d.stop) {
         processNextTask();
         //TODO: why put it at the end of loop then playNextFrame() not work?
@@ -336,6 +308,7 @@ void VideoThread::run()
             wait_key_frame = true;
             qDebug("Invalid packet! flush video codec context!!!!!!!!!! video packet queue size: %d", d.packets.size());
             dec->flush();
+            d.render_pts0 = pkt.pts;
             continue;
         }
         if (d.clock->clockType() == AVClock::AudioClock) {
@@ -350,7 +323,7 @@ void VideoThread::run()
         }
         const qreal dts = pkt.dts; //FIXME: pts and dts
         // TODO: delta ref time
-        qreal diff = dts - d.clock->value();
+        qreal diff = dts - d.clock->value() + v_a;
         if (diff < 0 && sync_video)
             diff = 0; // this ensures no frame drop
         if (diff > kSyncThreshold) {
@@ -358,14 +331,13 @@ void VideoThread::run()
         } else {
             nb_dec_fast /= 2;
         }
-        bool seeking = !qFuzzyIsNull(d.render_pts0);
+        bool seeking = d.render_pts0 >= 0.0;
         if (seeking) {
             nb_dec_slow = 0;
             nb_dec_fast = 0;
         }
-        //qDebug("nb_fast: %d", nb_dec_fast);
+        //qDebug("nb_fast: %d. diff: %f, dts: %f, clock: %f", nb_dec_fast, diff, dts, clock()->value());
         if (d.delay < -0.5 && d.delay > diff) {
-            seeking = !qFuzzyIsNull(d.render_pts0);
             if (!seeking) {
                 // ensure video will not later than 2s
                 if (diff < -2 || (nb_dec_slow > kNbSlowSkip && diff < -1.0 && !pkt.hasKeyFrame)) {
@@ -393,15 +365,18 @@ void VideoThread::run()
          *after seeking forward, a packet may be the old, v packet may be
          *the new packet, then the d.delay is very large, omit it.
         */
-        bool skip_render = dts < d.render_pts0; // FIXME: check after decode()
+        if (pkt.pts < d.render_pts0) // skip rendering until decoded frame reaches desired pts
+            skip_render = true;
+        if (seeking)
+            diff = 0; // TODO: here?
         if (!sync_audio && diff > 0) {
             // wait to dts reaches
-            waitAndCheck(diff*1000UL, dts); // TODO: count decoding and filter time
+            if (d.force_fps < 0.0)
+                waitAndCheck(diff*1000UL, dts); // TODO: count decoding and filter time
             diff = 0; // TODO: can not change delay!
         }
         // update here after wait
         d.clock->updateVideoTime(dts); // FIXME: dts or pts?
-        seeking = !qFuzzyIsNull(d.render_pts0);
         if (qAbs(diff) < 0.5) {
             if (diff < -kSyncThreshold) { //Speed up. drop frame?
                 //continue;
@@ -425,41 +400,25 @@ void VideoThread::run()
                     }
                 }
             } else {
-                // video too fast if old packet before seek backward compared with new audio packet after seek backward
-                // what about video too late?
-                if (is_pkt_bf_seek && diff > 2.0) {
-                    // if seeking, we can not continue without decoding
-                    // FIXME: also happens after seek but not seeking. so must check seek_done_count
-                    is_pkt_bf_seek = false;
-                    if (seek_done_count <= 1) { // is seeking
-                        qDebug("old video packet before seek detected!!!!!!!!!!!!!");
-                        pkt = Packet();
-                        continue; // seeking and this v packet is before seeking
-                    }
-                }
                 const double s = qMin<qreal>(0.01*(nb_dec_fast>>1), diff);
                 qWarning("video too fast!!! sleep %.2f s, nb fast: %d", s, nb_dec_fast);
                 waitAndCheck(s*1000UL, dts);
                 diff = 0;
             }
         }
-        seeking = !qFuzzyIsNull(d.render_pts0);
-        //qDebug("d.render_pts0: %f, seeking: %d", d.render_pts0, seeking);
         //audio packet not cleaned up?
         if (diff > 0 && diff < 1.0 && !seeking) {
             // can not change d.delay here! we need it to comapre to next loop
             waitAndCheck(diff*1000UL, dts);
         }
         if (wait_key_frame) {
-            if (pkt.hasKeyFrame)
-                wait_key_frame = false;
-            else {
+            if (!pkt.hasKeyFrame) {
                 qDebug("waiting for key frame. queue size: %d. pkt.size: %d", d.packets.size(), pkt.data.size());
                 pkt = Packet();
                 continue;
             }
+            wait_key_frame = false;
         }
-        seeking = !qFuzzyIsNull(d.render_pts0);
         QVariantHash *dec_opt_old = dec_opt;
         if (!seeking) { // MAYBE not seeking
             if (nb_dec_slow < kNbSlowFrameDrop) {
@@ -486,48 +445,34 @@ void VideoThread::run()
         if (dec_opt != dec_opt_old)
             dec->setOptions(*dec_opt);
         if (!dec->decode(pkt)) {
+            qWarning("Decode video failed. undecoded: %d", dec->undecodedSize());
             pkt = Packet();
             continue;
-        } else {
-            int undecoded = dec->undecodedSize();
-            if (undecoded > 0) {
-                qDebug("undecoded size: %d", undecoded);
-                const int remove = pkt.data.size() - undecoded;
-                if (remove > 0)
-                    pkt.data.remove(0, pkt.data.size() - undecoded);
-            } else {
-                pkt = Packet();
-            }
         }
+        // reduce here to ensure to decode the rest data in the next loop
+        pkt.data = QByteArray::fromRawData(pkt.data.constData() + pkt.data.size() - dec->undecodedSize(), dec->undecodedSize());
         VideoFrame frame = dec->frame();
         if (!frame.isValid()) {
-            pkt = Packet(); //mark invalid to take next
-            qWarning() << "invalid video frame from decoder";
+            qWarning("invalid video frame from decoder. undecoded data size: %d", pkt.data.size());
             continue;
         }
-        is_pkt_bf_seek = true;
-        if (skip_render) {
-            pkt = Packet(); //mark invalid to take next
-            continue;
-        }
-        if (frame.timestamp() == 0)
+        if (frame.timestamp() <= 0)
             frame.setTimestamp(pkt.pts); // pkt.pts is wrong. >= real timestamp
         const qreal pts = frame.timestamp();
-        // can not check only pts > render_pts0 for seek backward. delta can not be too small(smaller than 1/fps)
-        // FIXME: what if diff too large?
-        if (d.render_pts0 > 0 && pts > d.render_pts0) {
-            if (seek_done_count > 1)
-                seek_done_count = 0;
-            seek_done_count++;
-            if (seek_done_count > 1) { // theorically can't be >1 if seeking!
-                qDebug("reset render_pts0");
-                d.render_pts0 = 0;
+        // seek finished because we can ensure no packet before seek decoded when render_pts0 is set
+        //qDebug("pts0: %f, pts: %f", d.render_pts0, pts);
+        if (d.render_pts0 >= 0.0) {
+            if (pts < d.render_pts0) {
+                pkt = Packet();
+                continue;
             }
+            d.render_pts0 = -1;
+            Q_EMIT seekFinished(qint64(pts*1000.0));
+            if (seek_count == -1)
+                seek_count = 1;
+            else if (seek_count > 0)
+                seek_count++;
         }
-        if (seek_count == -1 && seek_done_count > 0)
-            seek_count = 1;
-        else if (seek_count > 0)
-            seek_count++;
         Q_ASSERT(d.statistics);
         d.statistics->video.current_time = QTime(0, 0, 0).addMSecs(int(pts * 1000.0)); //TODO: is it expensive?
         applyFilters(frame);
@@ -563,7 +508,6 @@ void VideoThread::run()
                     ++d.force_dt;
             }
         } else if (false) { //FIXME: may block a while when seeking
-            seeking = !qFuzzyIsNull(d.render_pts0);
             const qreal display_wait = pts - clock()->value();
             if (!seeking && display_wait > 0.0) {
                 // wait to pts reaches. TODO: count rendering time
@@ -578,6 +522,7 @@ void VideoThread::run()
         d.last_deliver_time = d.statistics->video_only.frameDisplayed(frame.timestamp());
         // TODO: store original frame. now the frame is filtered and maybe converted to renderer perferred format
         d.displayed_frame = frame;
+        v_a = frame.timestamp() - d.clock->value();
     }
     d.packets.clear();
     d.outputSet->sendVideoFrame(VideoFrame()); // TODO: let user decide what to display

@@ -22,6 +22,7 @@
 #include "QmlAV/QmlAVPlayer.h"
 #include <QtAV/AVPlayer.h>
 #include <QtAV/AudioOutput.h>
+#include <QtAV/VideoCapture.h>
 
 template<typename ID, typename Factory>
 static QStringList idsToNames(QVector<ID> ids) {
@@ -71,12 +72,20 @@ QmlAVPlayer::QmlAVPlayer(QObject *parent) :
   , mpPlayer(0)
   , mChannelLayout(ChannelLayoutAuto)
   , m_timeout(30000)
+  , m_abort_timeout(true)
+  , m_audio_track(0)
 {
+    classBegin();
 }
 
 void QmlAVPlayer::classBegin()
 {
+    if (mpPlayer)
+        return;
     mpPlayer = new AVPlayer(this);
+    connect(mpPlayer, SIGNAL(internalAudioTracksChanged(QVariantList)), SIGNAL(internalAudioTracksChanged()));
+    connect(mpPlayer, SIGNAL(externalAudioTracksChanged(QVariantList)), SIGNAL(externalAudioTracksChanged()));
+    connect(mpPlayer, SIGNAL(durationChanged(qint64)), SIGNAL(durationChanged()));
     connect(mpPlayer, SIGNAL(mediaStatusChanged(QtAV::MediaStatus)), SLOT(_q_statusChanged()));
     connect(mpPlayer, SIGNAL(error(QtAV::AVError)), SLOT(_q_error(QtAV::AVError)));
     connect(mpPlayer, SIGNAL(paused(bool)), SLOT(_q_paused(bool)));
@@ -84,6 +93,7 @@ void QmlAVPlayer::classBegin()
     connect(mpPlayer, SIGNAL(stopped()), SLOT(_q_stopped()));
     connect(mpPlayer, SIGNAL(positionChanged(qint64)), SIGNAL(positionChanged()));
     connect(mpPlayer, SIGNAL(seekableChanged()), SIGNAL(seekableChanged()));
+    connect(mpPlayer, SIGNAL(seekFinished()), this, SIGNAL(seekFinished()), Qt::DirectConnection);
     connect(mpPlayer, SIGNAL(bufferProgressChanged(qreal)), SIGNAL(bufferProgressChanged()));
     connect(this, SIGNAL(channelLayoutChanged()), SLOT(applyChannelLayout()));
     // direct connection to ensure volume() in slots is correct
@@ -160,6 +170,8 @@ void QmlAVPlayer::setSource(const QUrl &url)
         stop();
         //mpPlayer->load(); //QtAV internal bug: load() or play() results in reload
         if (mAutoPlay) {
+            //mPlaybackState is actually changed in slots. But if set to a new source the state may not change before call play()
+            mPlaybackState = StoppedState;
             play();
         }
     }
@@ -201,6 +213,11 @@ MediaMetaData* QmlAVPlayer::metaData() const
 QObject* QmlAVPlayer::mediaObject() const
 {
     return mpPlayer;
+}
+
+VideoCapture *QmlAVPlayer::videoCapture() const
+{
+    return mpPlayer->videoCapture();
 }
 
 QStringList QmlAVPlayer::videoCodecs() const
@@ -293,6 +310,45 @@ void QmlAVPlayer::setAbortOnTimeout(bool value)
 bool QmlAVPlayer::abortOnTimeout() const
 {
     return m_abort_timeout;
+}
+
+int QmlAVPlayer::audioTrack() const
+{
+    return m_audio_track;
+}
+
+void QmlAVPlayer::setAudioTrack(int value)
+{
+    if (m_audio_track == value)
+        return;
+    m_audio_track = value;
+    emit audioTrackChanged();
+    if (mpPlayer)
+        mpPlayer->setAudioStream(value);
+}
+
+QUrl QmlAVPlayer::externalAudio() const
+{
+    return m_audio;
+}
+
+void QmlAVPlayer::setExternalAudio(const QUrl &url)
+{
+    if (m_audio == url)
+        return;
+    m_audio = url;
+    mpPlayer->setExternalAudio(QUrl::fromPercentEncoding(m_audio.toEncoded()));
+    emit externalAudioChanged();
+}
+
+QVariantList QmlAVPlayer::externalAudioTracks() const
+{
+    return mpPlayer ? mpPlayer->externalAudioTracks() : QVariantList();
+}
+
+QVariantList QmlAVPlayer::internalAudioTracks() const
+{
+    return mpPlayer ? mpPlayer->internalAudioTracks() : QVariantList();
 }
 
 QStringList QmlAVPlayer::videoCodecPriority() const
@@ -415,8 +471,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
     }
     if (!m_complete || !mpPlayer)
         return;
-    mPlaybackState = playbackState;
-    switch (mPlaybackState) {
+    switch (playbackState) {
     case PlayingState:
         if (mpPlayer->isPaused()) {
             mpPlayer->pause(false);
@@ -424,6 +479,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
             mpPlayer->setInterruptTimeout(m_timeout);
             mpPlayer->setInterruptOnTimeout(m_abort_timeout);
             mpPlayer->setRepeat(mLoopCount - 1);
+            mpPlayer->setAudioStream(m_audio_track);
             if (!vcodec_opt.isEmpty()) {
                 QVariantHash vcopt;
                 for (QVariantMap::const_iterator cit = vcodec_opt.cbegin(); cit != vcodec_opt.cend(); ++cit) {
@@ -437,10 +493,12 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
         break;
     case PausedState:
         mpPlayer->pause(true);
+        mPlaybackState = PausedState;
         break;
     case StoppedState:
         mpPlayer->stop();
         mpPlayer->unload();
+        mPlaybackState = StoppedState;
         break;
     default:
         break;
@@ -469,10 +527,11 @@ AVPlayer* QmlAVPlayer::player()
 
 void QmlAVPlayer::play(const QUrl &url)
 {
-    if (mSource == url)
+    if (mSource == url && playbackState() != StoppedState)
         return;
     setSource(url);
-    play();
+    if (!autoPlay())
+        play();
 }
 
 void QmlAVPlayer::play()

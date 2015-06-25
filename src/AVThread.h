@@ -75,8 +75,7 @@ public:
 
     // TODO: resample, resize task etc.
     void scheduleTask(QRunnable *task);
-    //only decode video without display or skip decode audio until pts reaches
-    void skipRenderUntil(qreal pts);
+    void scheduleFrameDrop(bool value = true);
 
 public slots:
     virtual void stop();
@@ -86,7 +85,11 @@ public slots:
 
 Q_SIGNALS:
     void frameDelivered();
-
+    /*!
+     * \brief seekFinished
+     * \param timestamp the frame pts after seek
+     */
+    void seekFinished(qint64 timestamp);
 protected:
     AVThread(AVThreadPrivate& d, QObject *parent = 0);
     void resetState();

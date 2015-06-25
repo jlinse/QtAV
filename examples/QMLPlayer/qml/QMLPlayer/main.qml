@@ -22,7 +22,7 @@
 import QtQuick 2.0
 import QtQuick.Dialogs 1.0
 //import QtMultimedia 5.0
-import QtAV 1.5
+import QtAV 1.6
 import QtQuick.Window 2.1
 import "utils.js" as Utils
 
@@ -76,19 +76,41 @@ Rectangle {
         autoPlay: true
         videoCodecPriority: PlayerConfig.decoderPriorityNames
         onPositionChanged: control.setPlayingProgress(position/duration)
+        videoCapture {
+            autoSave: true
+            onSaved: {
+                msg.info("capture saved at: " + path)
+            }
+        }
+
+        onDurationChanged: control.duration = duration
         onPlaying: {
             control.mediaSource = player.source
-            control.duration = duration
             control.setPlayingState()
             if (!pageLoader.item)
                 return
-            pageLoader.item.information = {
-                source: player.source,
-                hasAudio: player.hasAudio,
-                hasVideo: player.hasVideo,
-                metaData: player.metaData
+            if (pageLoader.item.information) {
+                pageLoader.item.information = {
+                    source: player.source,
+                    hasAudio: player.hasAudio,
+                    hasVideo: player.hasVideo,
+                    metaData: player.metaData
+                }
             }
         }
+        onSeekFinished: {
+            console.log("seek finished " + Utils.msec2string(position))
+        }
+
+        onInternalAudioTracksChanged: {
+            if (typeof(pageLoader.item.internalTracks) != "undefined")
+                pageLoader.item.internalTracks = player.internalAudioTracks
+        }
+        onExternalAudioTracksChanged: {
+            if (typeof(pageLoader.item.externalTracks) != "undefined")
+                pageLoader.item.externalTracks = player.externalAudioTracks
+        }
+
         onStopped: control.setStopState()
         onPaused: control.setPauseState()
         onError: {
@@ -117,6 +139,7 @@ Rectangle {
         onBufferProgressChanged: {
             msg.info("Buffering " + Math.floor(bufferProgress*100) + "%...")
         }
+       // onSeekFinished: msg.info("Seek finished: " + Utils.msec2string(position))
     }
     Subtitle {
         id: subtitle
@@ -124,6 +147,8 @@ Rectangle {
         enabled: PlayerConfig.subtitleEnabled
         autoLoad: PlayerConfig.subtitleAutoLoad
         engines: PlayerConfig.subtitleEngines
+        delay: PlayerConfig.subtitleDelay
+
         onContentChanged: { //already enabled
             if (!canRender || !subtitleItem.visible)
                 subtitleLabel.text = text
@@ -141,7 +166,8 @@ Rectangle {
             subtitleItem.visible = canRender
             subtitleLabel.visible = !canRender
         }
-        onEnableChanged: {
+
+        onEnabledChanged: {
             subtitleItem.visible = enabled
             subtitleLabel.visible = enabled
         }
@@ -149,13 +175,18 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
-        onPressed: {
+        onClicked: {
             control.toggleVisible()
             if (root.width - mouseX < Utils.scaled(60)) {
                 configPanel.state = "show"
             } else {
                 configPanel.state = "hide"
             }
+        }
+        onMouseXChanged: {
+            if (player.playbackState == MediaPlayer.StoppedState || !player.hasVideo)
+                return;
+            control.showPreview(mouseX/parent.width)
         }
     }
     Text {
@@ -270,6 +301,9 @@ Rectangle {
             case Qt.Key_T:
                 videoOut.orientation -= 90
                 break;
+            case Qt.Key_C:
+                player.videoCapture.capture()
+                break
             case Qt.Key_A:
                 if (videoOut.fillMode === VideoOutput.Stretch) {
                     videoOut.fillMode = VideoOutput.PreserveAspectFit
@@ -312,12 +346,19 @@ Rectangle {
             onLoaded: {
                 if (!item)
                     return
-                item.information = {
-                    source: player.source,
-                    hasAudio: player.hasAudio,
-                    hasVideo: player.hasVideo,
-                    metaData: player.metaData
+                if (item.information) {
+                    item.information = {
+                        source: player.source,
+                        hasAudio: player.hasAudio,
+                        hasVideo: player.hasVideo,
+                        metaData: player.metaData
+                    }
                 }
+                console.log("onXXXternalAudioTracksChanged...")
+                if (typeof(item.internalTracks) != "undefined")
+                    item.internalTracks = player.internalAudioTracks
+                if (typeof(item.externalTracks) != "undefined")
+                    item.externalTracks = player.externalAudioTracks
             }
         }
         Connections {
@@ -329,6 +370,20 @@ Rectangle {
             onChannelChanged: player.channelLayout = channel
             onSubtitleChanged: subtitle.file = file
             onMuteChanged: player.muted = value
+            onExternalAudioChanged: player.externalAudio = file
+            onAudioTrackChanged: player.audioTrack = track
+            onZeroCopyChanged: {
+                var opt = player.videoCodecOptions
+                if (value) {
+                    opt["copyMode"] = "ZeroCopy"
+                } else {
+                    if (Qt.platform.os == "osx")
+                        opt["copyMode"] = "LazyCopy"
+                    else
+                        opt["copyMode"] = "OptimizedCopy"
+                }
+                player.videoCodecOptions = opt
+            }
         }
     }
     ConfigPanel {

@@ -68,6 +68,11 @@ Item {
     property alias abortOnTimeout: player.abortOnTimeout
     property alias subtitle: subtitle
     property alias subtitleText: text_sub // not for ass.
+    property alias videoCapture: player.videoCapture
+    property alias audioTrack: player.audioTrack
+    property alias externalAudio: player.externalAudio
+    property alias internalAudioTracks: player.internalAudioTracks
+    property alias externalAudioTracks: player.externalAudioTracks
     /*** Properties of VideoOutput ***/
     /*!
         \qmlproperty enumeration Video::fillMode
@@ -320,32 +325,33 @@ Item {
     */
     signal playing
 
+    signal seekFinished
+
     VideoOutput2 {
         id: videoOut
         anchors.fill: video
         source: player
-
-        SubtitleItem {
-            id: ass_sub
-            rotation: -videoOut.orientation
-            fillMode: parent.fillMode
-            source: subtitle
-            anchors.fill: parent
+    }
+    SubtitleItem {
+        id: ass_sub
+        rotation: -videoOut.orientation
+        fillMode: videoOut.fillMode
+        source: subtitle
+        anchors.fill: videoOut
+    }
+    Text {
+        id: text_sub
+        rotation: -videoOut.orientation
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignBottom
+        font {
+            pointSize: 20
+            bold: true
         }
-        Text {
-            id: text_sub
-            rotation: -videoOut.orientation
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignBottom
-            font {
-                pointSize: 20
-                bold: true
-            }
-            style: Text.Outline
-            styleColor: "blue"
-            color: "white"
-            anchors.fill: parent
-        }
+        style: Text.Outline
+        styleColor: "blue"
+        color: "white"
+        anchors.fill: videoOut
     }
 
     MediaPlayer {
@@ -353,6 +359,7 @@ Item {
         onPaused:  video.paused()
         onStopped: video.stopped()
         onPlaying: video.playing()
+        onSeekFinished: video.seekFinished()
     }
 
     /*!
@@ -408,7 +415,7 @@ Item {
             ass_sub.visible = canRender
             text_sub.visible = !canRender
         }
-        onEnableChanged: {
+        onEnabledChanged: {
             ass_sub.visible = enabled
             text_sub.visible = enabled
         }
