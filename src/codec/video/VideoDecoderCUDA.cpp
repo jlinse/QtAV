@@ -20,8 +20,9 @@
 ******************************************************************************/
 
 #include "QtAV/VideoDecoder.h"
+#include "QtAV/Packet.h"
 #include "QtAV/private/AVDecoder_p.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include <QtCore/QQueue>
 #if QTAV_HAVE(DLLAPI_CUDA)
 #include "dllapi.h"
@@ -45,6 +46,7 @@
 #include "cuda/helper_cuda.h"
 #include "cuda/cuda_api.h"
 #include "utils/Logger.h"
+#include "SurfaceInteropCUDA.h"
 
 //decode error if not floating context
 
@@ -56,12 +58,14 @@ class VideoDecoderCUDA : public VideoDecoder
 {
     Q_OBJECT
     DPTR_DECLARE_PRIVATE(VideoDecoderCUDA)
+    Q_PROPERTY(CopyMode copyMode READ copyMode WRITE setCopyMode NOTIFY copyModeChanged)
     Q_PROPERTY(int surfaces READ surfaces WRITE setSurfaces)
     Q_PROPERTY(Flags flags READ flags WRITE setFlags)
     Q_PROPERTY(Deinterlace deinterlace READ deinterlace WRITE setDeinterlace)
     Q_FLAGS(Flags)
     Q_ENUMS(Flags)
     Q_ENUMS(Deinterlace)
+    Q_ENUMS(CopyMode)
 public:
     enum Flags {
         Default = cudaVideoCreate_Default,   // Default operation mode: use dedicated video engines
@@ -74,16 +78,20 @@ public:
         Weave = cudaVideoDeinterlaceMode_Weave,       // Weave both fields (no deinterlacing)
         Adaptive = cudaVideoDeinterlaceMode_Adaptive  // Adaptive deinterlacing
     };
+    enum CopyMode {
+        ZeroCopy,
+        DirectCopy, // use the same host address without additional copy to frame. If address does not change, it should be safe
+        GenericCopy
+    };
 
     VideoDecoderCUDA();
-    virtual ~VideoDecoderCUDA();
-    virtual VideoDecoderId id() const;
-    virtual QString description() const;
-    virtual void flush();
-    virtual bool prepare();
+    ~VideoDecoderCUDA();
+    VideoDecoderId id() const Q_DECL_OVERRIDE;
+    QString description() const Q_DECL_OVERRIDE;
+    void flush() Q_DECL_OVERRIDE;
     QTAV_DEPRECATED bool decode(const QByteArray &encoded) Q_DECL_FINAL;
-    bool decode(const Packet &packet) Q_DECL_FINAL;
-    virtual VideoFrame frame();
+    bool decode(const Packet &packet) Q_DECL_OVERRIDE Q_DECL_FINAL;
+    virtual VideoFrame frame() Q_DECL_OVERRIDE;
 
     // properties
     int surfaces() const;
@@ -92,16 +100,13 @@ public:
     void setFlags(Flags f);
     Deinterlace deinterlace() const;
     void setDeinterlace(Deinterlace di);
+    CopyMode copyMode() const;
+    void setCopyMode(CopyMode value);
+Q_SIGNALS:
+    void copyModeChanged(CopyMode value);
 };
-
-
 extern VideoDecoderId VideoDecoderId_CUDA;
-FACTORY_REGISTER_ID_AUTO(VideoDecoder, CUDA, "CUDA")
-
-void RegisterVideoDecoderCUDA_Man()
-{
-    FACTORY_REGISTER_ID_MAN(VideoDecoder, CUDA, "CUDA")
-}
+FACTORY_REGISTER(VideoDecoder, CUDA, "CUDA")
 
 static struct {
     AVCodecID ffCodec;
@@ -114,10 +119,13 @@ static struct {
     { QTAV_CODEC_ID(H264),       cudaVideoCodec_H264  },
     { QTAV_CODEC_ID(H264),       cudaVideoCodec_H264_SVC},
     { QTAV_CODEC_ID(H264),       cudaVideoCodec_H264_MVC},
-    // AV_CODEC_ID_H265 is a macro defined as AV_CODEC_ID_HEVC. so we can avoid libavcodec version check. (from ffmpeg 2.1)
-#if defined(AV_CODEC_ID_H265) && (CUDA_VERSION >= 6050) //TODO: check avcodec
+#if defined(FF_PROFILE_HEVC_MAIN) && (CUDA_VERSION >= 6050)
     { QTAV_CODEC_ID(HEVC),       cudaVideoCodec_HEVC },
 #endif //
+    { QTAV_CODEC_ID(VP8),        cudaVideoCodec_VP8 },
+#if FFMPEG_MODULE_CHECK(LIBAVCODEC, 54, 92, 100) || LIBAV_MODULE_CHECK(LIBAVCODEC, 55, 34, 1) //ffmpeg1.2 libav10
+    { QTAV_CODEC_ID(VP9),        cudaVideoCodec_VP9 },
+#endif
     { QTAV_CODEC_ID(NONE),       cudaVideoCodec_NumCodecs}
 };
 static cudaVideoCodec mapCodecFromFFmpeg(AVCodecID codec)
@@ -140,29 +148,19 @@ static AVCodecID mapCodecToFFmpeg(cudaVideoCodec cudaCodec)
     return QTAV_CODEC_ID(NONE);
 }
 
-#if NV_CONFIG(DLLAPI_CUDA) || defined(CUDA_LINK)
-class AutoCtxLock
-{
-private:
-    CUvideoctxlock m_lock;
-public:
-    AutoCtxLock(cuda_api*, CUvideoctxlock lck) { m_lock=lck; cuvidCtxLock(m_lock, 0); }
-    ~AutoCtxLock() { cuvidCtxUnlock(m_lock, 0); }
-};
-#endif //NV_CONFIG(DLLAPI_CUDA) || defined(CUDA_LINK)
-class VideoDecoderCUDAPrivate : public VideoDecoderPrivate
-                , public cuda_api
+class VideoDecoderCUDAPrivate Q_DECL_FINAL: public VideoDecoderPrivate
+                , protected cuda_api
 {
 public:
     VideoDecoderCUDAPrivate():
         VideoDecoderPrivate()
       , can_load(true)
-      , flushing(false)
       , host_data(0)
       , host_data_size(0)
       , create_flags(cudaVideoCreate_Default)
       , deinterlace(cudaVideoDeinterlaceMode_Adaptive)
       , nb_dec_surface(kMaxDecodeSurfaces)
+      , copy_mode(VideoDecoderCUDA::GenericCopy) //TODO: check whether intel driver is used
     {
 #if QTAV_HAVE(DLLAPI_CUDA)
         can_load = dllapi::testLoad("nvcuvid");
@@ -192,29 +190,30 @@ public:
             return;
         if (!isLoaded()) //cuda_api
             return;
+        // if not reset here, CUDA_ERROR_CONTEXT_IS_DESTROYED in ~cuda::InteropResource()
+        // QSharedPointer.reset() is in qt5
+        interop_res = cuda::InteropResourcePtr(); // in interop object it's weak ptr. It's safe to reset here before cuda resouce is released.
         releaseCuda();
     }
+    bool open() Q_DECL_OVERRIDE;
     bool initCuda();
     bool releaseCuda();
-    bool createCUVIDDecoder(cudaVideoCodec cudaCodec, int w, int h);
+    bool createCUVIDDecoder(cudaVideoCodec cudaCodec, int cw, int ch);
     bool createCUVIDParser();
     bool flushParser();
     bool processDecodedData(CUVIDPARSERDISPINFO *cuviddisp, VideoFrame* outFrame = 0);
     bool doParseVideoData(CUVIDSOURCEDATAPACKET* pPkt) {
+        //CUDA_ENSURE(cuCtxPushCurrent(cuctx), false);
         AutoCtxLock lock(this, vid_ctx_lock);
         Q_UNUSED(lock);
-        CUresult cuStatus = cuvidParseVideoData(parser, pPkt);
-        if (cuStatus != CUDA_SUCCESS) {
-            qWarning("cuvidParseVideoData failed (%#x, %s)", cuStatus, _cudaGetErrorEnum(cuStatus));
-            return false;
-        }
+        CUDA_ENSURE(cuvidParseVideoData(parser, pPkt), false);
         return true;
     }
 
     bool doDecodePicture(CUVIDPICPARAMS *cuvidpic) {
         AutoCtxLock lock(this, vid_ctx_lock);
         Q_UNUSED(lock);
-        checkCudaErrors(cuvidDecodePicture(dec, cuvidpic));
+        CUDA_ENSURE(cuvidDecodePicture(dec, cuvidpic), false);
         return true;
     }
 
@@ -243,33 +242,19 @@ public:
             p->createCUVIDDecoder(cuvidfmt->codec, cuvidfmt->coded_width, cuvidfmt->coded_height);
             // how about parser.ulMaxNumDecodeSurfaces? recreate?
             AVCodecID codec = mapCodecToFFmpeg(cuvidfmt->codec);
-            if (codec == QTAV_CODEC_ID(H264)) {
-                if (!p->bitstream_filter_ctx) {
-                    p->bitstream_filter_ctx = av_bitstream_filter_init("h264_mp4toannexb");
-                    Q_ASSERT_X(p->bitstream_filter_ctx, "av_bitstream_filter_init", "Unknown bitstream filter");
-                }
-            } else {
-                if (p->bitstream_filter_ctx) {
-                    av_bitstream_filter_close(p->bitstream_filter_ctx);
-                    p->bitstream_filter_ctx = 0;
-                }
-            }
+            p->setBSF(codec);
         }
         //TODO: lavfilter
         return 1;
     }
     static int CUDAAPI HandlePictureDecode(void *obj, CUVIDPICPARAMS *cuvidpic) {
         VideoDecoderCUDAPrivate *p = reinterpret_cast<VideoDecoderCUDAPrivate*>(obj);
-        if (p->flushing)
-            return 0;
         //qDebug("%s @%d tid=%p dec=%p idx=%d inUse=%d", __FUNCTION__, __LINE__, QThread::currentThread(), p->dec, cuvidpic->CurrPicIdx, p->surface_in_use[cuvidpic->CurrPicIdx]);
         p->doDecodePicture(cuvidpic);
         return 1;
     }
     static int CUDAAPI HandlePictureDisplay(void *obj, CUVIDPARSERDISPINFO *cuviddisp) {
         VideoDecoderCUDAPrivate *p = reinterpret_cast<VideoDecoderCUDAPrivate*>(obj);
-        if (p->flushing)
-            return 0;
         p->surface_in_use[cuviddisp->picture_index] = true;
         //qDebug("mark in use pic_index: %d", cuviddisp->picture_index);
 #if COPY_ON_DECODE
@@ -279,9 +264,8 @@ public:
         return 1;
 #endif
     }
-    void setBSF(AVCodecID codec) {}
+    void setBSF(AVCodecID codec);
     bool can_load; //if linked to cuvid, it's true. otherwise(use dllapi) equals to whether cuvid can be loaded
-    bool flushing;
     uchar *host_data;
     int host_data_size;
     CUcontext cuctx;
@@ -311,6 +295,9 @@ public:
     QString description;
 
     AVBitStreamFilterContext *bitstream_filter_ctx; //TODO: rename bsf_ctx
+
+    VideoDecoderCUDA::CopyMode copy_mode;
+    cuda::InteropResourcePtr interop_res; //may be still used in video frames when decoder is destroyed
 };
 
 VideoDecoderCUDA::VideoDecoderCUDA():
@@ -318,8 +305,18 @@ VideoDecoderCUDA::VideoDecoderCUDA():
 {
     // dynamic properties about static property details. used by UI
     // format: detail_property
-    setProperty("detail_surfaces", tr("Decoding surfaces."));
+    setProperty("detail_surfaces", tr("Decoding surfaces"));
     setProperty("detail_flags", tr("Decoder flags"));
+    setProperty("detail_copyMode", QString("%1\n%2\n%3\%4")
+                .arg(tr("Performace: ZeroCopy > DirectCopy > GenericCopy"))
+                .arg(tr("ZeroCopy: no copy back from GPU to System memory. Directly render the decoded data on GPU"))
+                .arg(tr("DirectCopy: copy back to host memory but video frames use the same host memory address and maybe not safe"))
+                .arg(tr("GenericCopy: copy back to host memory and each video frame"))
+                );
+    Q_UNUSED(QObject::tr("ZeroCopy"));
+    Q_UNUSED(QObject::tr("DirectCopy"));
+    Q_UNUSED(QObject::tr("GenericCopy"));
+    Q_UNUSED(QObject::tr("copyMode"));
 }
 
 VideoDecoderCUDA::~VideoDecoderCUDA()
@@ -336,7 +333,7 @@ QString VideoDecoderCUDA::description() const
     DPTR_D(const VideoDecoderCUDA);
     if (!d.description.isEmpty())
         return d.description;
-    return "NVIDIA CUVID";
+    return QStringLiteral("NVIDIA CUVID");
 }
 
 void VideoDecoderCUDA::flush()
@@ -344,39 +341,6 @@ void VideoDecoderCUDA::flush()
     DPTR_D(VideoDecoderCUDA);
     d.frame_queue.clear();
     d.surface_in_use.fill(false);
-}
-
-bool VideoDecoderCUDA::prepare()
-{
-    //TODO: destroy decoder
-    DPTR_D(VideoDecoderCUDA);
-    if (!d.codec_ctx) {
-        qWarning("AVCodecContext not ready");
-        return false;
-    }
-    // d.available is true if cuda decoder is ready
-    if (!d.can_load) {
-        qWarning("VideoDecoderCUDA::prepare(): CUVID library not available");
-        return false;
-    }
-    if (!d.isLoaded()) //cuda_api
-        return false;
-    if (!d.cuctx)
-        d.initCuda();
-    if (d.codec_ctx->codec_id == QTAV_CODEC_ID(H264)) {
-        if (!d.bitstream_filter_ctx) {
-            d.bitstream_filter_ctx = av_bitstream_filter_init("h264_mp4toannexb");
-            Q_ASSERT_X(d.bitstream_filter_ctx, "av_bitstream_filter_init", "Unknown bitstream filter");
-        }
-    } else {
-        if (d.bitstream_filter_ctx) {
-            av_bitstream_filter_close(d.bitstream_filter_ctx);
-            d.bitstream_filter_ctx = 0;
-        }
-    }
-    // max decoder surfaces is computed in createCUVIDDecoder. createCUVIDParser use the value
-    return d.createCUVIDDecoder(mapCodecFromFFmpeg(d.codec_ctx->codec_id), d.codec_ctx->coded_width, d.codec_ctx->coded_height)
-            && d.createCUVIDParser();
 }
 
 bool VideoDecoderCUDA::decode(const QByteArray &encoded)
@@ -437,6 +401,13 @@ bool VideoDecoderCUDA::decode(const Packet &packet)
         qWarning("CUVID parser not ready");
         return false;
     }
+    if (packet.isEOF()) {
+        if (!d.flushParser()) {
+            qDebug("Error decode EOS"); // when?
+            return false;
+        }
+        return !d.frame_queue.isEmpty();
+    }
     uint8_t *outBuf = 0;
     int outBufSize = 0;
     int filtered = 0;
@@ -478,50 +449,13 @@ bool VideoDecoderCUDA::decode(const Packet &packet)
 VideoFrame VideoDecoderCUDA::frame()
 {
     DPTR_D(VideoDecoderCUDA);
+    if (d.frame_queue.isEmpty())
+        return VideoFrame();
 #if COPY_ON_DECODE
     return d.frame_queue.take();
 #else
     return d.getNextFrame();
 #endif
-}
-
-bool VideoDecoderCUDAPrivate::initCuda()
-{
-    CUresult result = cuInit(0);
-    if (result != CUDA_SUCCESS) {
-        available = false;
-        qWarning("cuInit(0) faile (%d)", result);
-        return false;
-    }
-    cudev = GetMaxGflopsGraphicsDeviceId();
-
-    int clockRate;
-    cuDeviceGetAttribute(&clockRate, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, cudev);
-    int major, minor;
-    cuDeviceComputeCapability(&major, &minor, cudev);
-    char devname[256];
-    cuDeviceGetName(devname, 256, cudev);
-    description = QString("CUDA device: %1 %2.%3 %4 MHz").arg(devname).arg(major).arg(minor).arg(clockRate/1000);
-
-    //TODO: cuD3DCtxCreate > cuGLCtxCreate > cuCtxCreate
-    checkCudaErrors(cuCtxCreate(&cuctx, CU_CTX_SCHED_BLOCKING_SYNC, cudev)); //CU_CTX_SCHED_AUTO?
-    CUcontext cuCurrent = NULL;
-    result = cuCtxPopCurrent(&cuCurrent);
-    if (result != CUDA_SUCCESS) {
-        qWarning("cuCtxPopCurrent: %d\n", result);
-        return false;
-    }
-    checkCudaErrors(cuvidCtxLockCreate(&vid_ctx_lock, cuctx));
-    {
-        AutoCtxLock lock(this, vid_ctx_lock);
-        Q_UNUSED(lock);
-        //Flags- Parameters for stream creation (must be 0 (CU_STREAM_DEFAULT=0 in cuda5) in cuda 4.2, no CU_STREAM_NON_BLOCKING)
-        checkCudaErrors(cuStreamCreate(&stream, 0));//CU_STREAM_NON_BLOCKING)); //CU_STREAM_DEFAULT
-        //require compute capability >= 1.1
-        //flag: Reserved for future use, must be 0
-        //cuStreamAddCallback(stream, CUstreamCallback, this, 0);
-    }
-    return true;
 }
 
 int VideoDecoderCUDA::surfaces() const
@@ -559,40 +493,103 @@ void VideoDecoderCUDA::setDeinterlace(Deinterlace di)
     d_func().deinterlace = (cudaVideoDeinterlaceMode)di;
 }
 
+VideoDecoderCUDA::CopyMode VideoDecoderCUDA::copyMode() const
+{
+    return d_func().copy_mode;
+}
+
+void VideoDecoderCUDA::setCopyMode(CopyMode value)
+{
+    DPTR_D(VideoDecoderCUDA);
+    if (d.copy_mode == value)
+        return;
+    d.copy_mode = value;
+    Q_EMIT copyModeChanged(value);
+}
+
+bool VideoDecoderCUDAPrivate::open()
+{
+    //TODO: destroy decoder
+    // d.available is true if cuda decoder is ready
+    if (!can_load) {
+        qWarning("VideoDecoderCUDAPrivate::open(): CUVID library not available");
+        return false;
+    }
+    if (!isLoaded()) //cuda_api
+        return false;
+    if (!cuctx)
+        available = initCuda();
+    setBSF(codec_ctx->codec_id);
+    // max decoder surfaces is computed in createCUVIDDecoder. createCUVIDParser use the value
+    return createCUVIDDecoder(mapCodecFromFFmpeg(codec_ctx->codec_id), codec_ctx->coded_width, codec_ctx->coded_height)
+            && createCUVIDParser();
+}
+
+bool VideoDecoderCUDAPrivate::initCuda()
+{
+    CUDA_ENSURE(cuInit(0), false);
+    cudev = GetMaxGflopsGraphicsDeviceId();
+
+    int clockRate;
+    cuDeviceGetAttribute(&clockRate, CU_DEVICE_ATTRIBUTE_CLOCK_RATE, cudev);
+    int major, minor;
+    CUDA_WARN(cuDeviceComputeCapability(&major, &minor, cudev));
+    char devname[256];
+    CUDA_WARN(cuDeviceGetName(devname, 256, cudev));
+    description = QStringLiteral("CUDA device: %1 %2.%3 %4 MHz @%5").arg(QLatin1String((const char*)devname)).arg(major).arg(minor).arg(clockRate/1000).arg(cudev);
+
+    // cuD3DCtxCreate > cuGLCtxCreate(deprecated) > cuCtxCreate (fallback if d3d and gl return status is failed)
+    CUDA_ENSURE(cuCtxCreate(&cuctx, CU_CTX_SCHED_BLOCKING_SYNC, cudev), false); //CU_CTX_SCHED_AUTO?
+    CUDA_ENSURE(cuCtxPopCurrent(&cuctx), false);
+    CUDA_ENSURE(cuvidCtxLockCreate(&vid_ctx_lock, cuctx), 0);
+    {
+        AutoCtxLock lock(this, vid_ctx_lock);
+        Q_UNUSED(lock);
+        //Flags- Parameters for stream creation (must be 0 (CU_STREAM_DEFAULT=0 in cuda5) in cuda 4.2, no CU_STREAM_NON_BLOCKING)
+        CUDA_ENSURE(cuStreamCreate(&stream, CU_STREAM_DEFAULT), false);
+        //require compute capability >= 1.1
+        //flag: Reserved for future use, must be 0
+        //cuStreamAddCallback(stream, CUstreamCallback, this, 0);
+    }
+    return true;
+}
+
 bool VideoDecoderCUDAPrivate::releaseCuda()
 {
     available = false;
+    if (cuctx)
+        CUDA_WARN(cuCtxPushCurrent(cuctx)); //cuMemFreeHost need the context
     if (!can_load)
         return true;
     if (dec) {
-        cuvidDestroyDecoder(dec);
+        CUDA_WARN(cuvidDestroyDecoder(dec));
         dec = 0;
     }
     if (parser) {
-        cuvidDestroyVideoParser(parser);
+        CUDA_WARN(cuvidDestroyVideoParser(parser));
         parser = 0;
     }
     if (stream) {
-        cuStreamDestroy(stream);
+        CUDA_WARN(cuStreamDestroy(stream));
         stream = 0;
     }
     if (host_data) {
-        cuMemFreeHost(host_data);
+        CUDA_WARN(cuMemFreeHost(host_data)); //CUDA_ERROR_INVALID_CONTEXT
         host_data = 0;
         host_data_size = 0;
     }
     if (vid_ctx_lock) {
-        cuvidCtxLockDestroy(vid_ctx_lock);
+        CUDA_WARN(cuvidCtxLockDestroy(vid_ctx_lock));
         vid_ctx_lock = 0;
     }
     if (cuctx) {
-        checkCudaErrors(cuCtxDestroy(cuctx));
+        CUDA_ENSURE(cuCtxDestroy(cuctx), false);
+        cuctx = 0;
     }
-    // TODO: dllapi unload
     return true;
 }
 
-bool VideoDecoderCUDAPrivate::createCUVIDDecoder(cudaVideoCodec cudaCodec, int w, int h)
+bool VideoDecoderCUDAPrivate::createCUVIDDecoder(cudaVideoCodec cudaCodec, int cw, int ch)
 {
     if (cudaCodec == cudaVideoCodec_NumCodecs) {
         return false;
@@ -600,11 +597,11 @@ bool VideoDecoderCUDAPrivate::createCUVIDDecoder(cudaVideoCodec cudaCodec, int w
     AutoCtxLock lock(this, vid_ctx_lock);
     Q_UNUSED(lock);
     if (dec) {
-        checkCudaErrors(cuvidDestroyDecoder(dec));
+        CUDA_ENSURE(cuvidDestroyDecoder(dec), false);
     }
     memset(&dec_create_info, 0, sizeof(CUVIDDECODECREATEINFO));
-    dec_create_info.ulWidth = w;
-    dec_create_info.ulHeight = h;
+    dec_create_info.ulWidth = cw; // Coded Sequence Width
+    dec_create_info.ulHeight = ch;
     dec_create_info.ulNumDecodeSurfaces = nb_dec_surface; //same as ulMaxNumDecodeSurfaces
     dec_create_info.CodecType = cudaCodec;
     dec_create_info.ChromaFormat = cudaVideoChromaFormat_420;  // cudaVideoChromaFormat_XXX (only 4:2:0 is currently supported)
@@ -614,8 +611,8 @@ bool VideoDecoderCUDAPrivate::createCUVIDDecoder(cudaVideoCodec cudaCodec, int w
     dec_create_info.OutputFormat = cudaVideoSurfaceFormat_NV12; // NV12 (currently the only supported output format)
     dec_create_info.DeinterlaceMode = deinterlace;
     // No scaling
-    dec_create_info.ulTargetWidth = dec_create_info.ulWidth;
-    dec_create_info.ulTargetHeight = dec_create_info.ulHeight;
+    dec_create_info.ulTargetWidth = cw;
+    dec_create_info.ulTargetHeight = ch;
     dec_create_info.ulNumOutputSurfaces = 2;  // We won't simultaneously map more than 8 surfaces
     dec_create_info.vidLock = vid_ctx_lock;//vidCtxLock; //FIXME
 
@@ -633,8 +630,21 @@ bool VideoDecoderCUDAPrivate::createCUVIDDecoder(cudaVideoCodec cudaCodec, int w
 #endif
     // create the decoder
     available = false;
-    checkCudaErrors(cuvidCreateDecoder(&dec, &dec_create_info));
+    CUDA_ENSURE(cuvidCreateDecoder(&dec, &dec_create_info), false);
     available = true;
+    if (copy_mode == VideoDecoderCUDA::ZeroCopy) {
+#if QTAV_HAVE(CUDA_GL)
+        // TODO: runtime gles check
+        if (!OpenGLHelper::isOpenGLES())
+            interop_res = cuda::InteropResourcePtr(new cuda::GLInteropResource(cudev, dec, vid_ctx_lock));
+#endif //QTAV_HAVE(CUDA_GL)
+#if QTAV_HAVE(CUDA_EGL)
+        // TODO: runtime gles check
+        if (OpenGLHelper::isOpenGLES())
+            interop_res = cuda::InteropResourcePtr(new cuda::EGLInteropResource(cudev, dec, vid_ctx_lock));
+#endif //QTAV_HAVE(CUDA_EGL)
+
+    }
     return true;
 }
 
@@ -642,14 +652,14 @@ bool VideoDecoderCUDAPrivate::createCUVIDParser()
 {
     cudaVideoCodec cudaCodec = mapCodecFromFFmpeg(codec_ctx->codec_id);
     if (cudaCodec == cudaVideoCodec_NumCodecs) {
-        QString es(QObject::tr("Codec %1 is not supported by CUDA").arg(avcodec_get_name(codec_ctx->codec_id)));
+        QString es(QObject::tr("Codec %1 is not supported by CUDA").arg(QLatin1String(avcodec_get_name(codec_ctx->codec_id))));
         //emit error(AVError::CodecError, es);
         qWarning() << es;
         available = false;
         return false;
     }
     if (parser) {
-        cuvidDestroyVideoParser(parser);
+        CUDA_WARN(cuvidDestroyVideoParser(parser));
         parser = 0;
     }
     //lavfilter check level C
@@ -697,7 +707,7 @@ bool VideoDecoderCUDAPrivate::createCUVIDParser()
     }
     parser_params.pExtVideoInfo = &extra_parser_info;
 #endif
-    checkCudaErrors(cuvidCreateVideoParser(&parser, &parser_params));
+    CUDA_ENSURE(cuvidCreateVideoParser(&parser, &parser_params), false);
     //lavfilter: cuStreamCreate
     force_sequence_update = true;
     //DecodeSequenceData()
@@ -706,7 +716,6 @@ bool VideoDecoderCUDAPrivate::createCUVIDParser()
 
 bool VideoDecoderCUDAPrivate::flushParser()
 {
-    flushing = true;
     CUVIDSOURCEDATAPACKET flush_packet;
     memset(&flush_packet, 0, sizeof(CUVIDSOURCEDATAPACKET));
     flush_packet.flags |= CUVID_PKT_ENDOFSTREAM;
@@ -715,7 +724,6 @@ bool VideoDecoderCUDAPrivate::flushParser()
 
 bool VideoDecoderCUDAPrivate::processDecodedData(CUVIDPARSERDISPINFO *cuviddisp, VideoFrame* outFrame) {
     int num_fields = cuviddisp->progressive_frame ? 1 : 2+cuviddisp->repeat_first_field;
-
     for (int active_field = 0; active_field < num_fields; ++active_field) {
         CUVIDPROCPARAMS proc_params;
         memset(&proc_params, 0, sizeof(CUVIDPROCPARAMS));
@@ -724,69 +732,64 @@ bool VideoDecoderCUDAPrivate::processDecodedData(CUVIDPARSERDISPINFO *cuviddisp,
         proc_params.top_field_first = cuviddisp->top_field_first;
         proc_params.unpaired_field = cuviddisp->progressive_frame == 1;
 
+        //const uint cw = dec_create_info.ulWidth;//PAD_ALIGN(dec_create_info.ulWidth, 0x3F);
+        const uint ch = dec_create_info.ulHeight;//PAD_ALIGN(dec_create_info.ulHeight, 0x0F); //?
         CUdeviceptr devptr;
         unsigned int pitch;
-        cuvidCtxLock(vid_ctx_lock, 0);
-        CUresult cuStatus = cuvidMapVideoFrame(dec, cuviddisp->picture_index, &devptr, &pitch, &proc_params);
-        if (cuStatus != CUDA_SUCCESS) {
-            qWarning("cuvidMapVideoFrame failed on index %d (%#x, %s)", cuviddisp->picture_index, cuStatus, _cudaGetErrorEnum(cuStatus));
-            cuvidUnmapVideoFrame(dec, devptr);
-            cuvidCtxUnlock(vid_ctx_lock, 0);
-            return false;
-        }
-#define PAD_ALIGN(x,mask) ( (x + mask) & ~mask )
-        //uint w = dec_create_info.ulWidth;//PAD_ALIGN(dec_create_info.ulWidth, 0x3F);
-        uint h = dec_create_info.ulHeight;//PAD_ALIGN(dec_create_info.ulHeight, 0x0F); //?
-#undef PAD_ALIGN
-        int size = pitch*h*3/2;
-        if (size > host_data_size && host_data) {
-            cuMemFreeHost(host_data);
-            host_data = 0;
-            host_data_size = 0;
-        }
-        if (!host_data) {
-            cuStatus = cuMemAllocHost((void**)&host_data, size);
-            if (cuStatus != CUDA_SUCCESS) {
-                qWarning("cuMemAllocHost failed (%#x, %s)", cuStatus, _cudaGetErrorEnum(cuStatus));
-                cuvidUnmapVideoFrame(dec, devptr);
-                cuvidCtxUnlock(vid_ctx_lock, 0);
-                return false;
+        {
+        AutoCtxLock lock(this, vid_ctx_lock);
+        Q_UNUSED(lock);
+        //CUDA_ENSURE(cuCtxPushCurrent(cuctx), false);
+        CUDA_ENSURE(cuvidMapVideoFrame(dec, cuviddisp->picture_index, &devptr, &pitch, &proc_params), false);
+        CUVIDAutoUnmapper unmapper(this, dec, devptr);
+        Q_UNUSED(unmapper);
+        if (copy_mode != VideoDecoderCUDA::ZeroCopy) {
+            const int size = pitch*ch*3/2;
+            if (size > host_data_size && host_data) {
+                cuMemFreeHost(host_data);
+                host_data = 0;
+                host_data_size = 0;
             }
-            host_data_size = size;
+            if (!host_data) {
+                CUDA_ENSURE(cuMemAllocHost((void**)&host_data, size), false);
+                host_data_size = size;
+            }
+            // copy to the memory not allocated by cuda is possible but much slower
+            CUDA_ENSURE(cuMemcpyDtoHAsync(host_data, devptr, size, stream), false);
+            CUDA_WARN(cuStreamSynchronize(stream));
         }
-        if (!host_data) {
-            qWarning("No valid staging memory!");
-            cuvidUnmapVideoFrame(dec, devptr);
-            cuvidCtxUnlock(vid_ctx_lock, 0);
-            return false;
-        }
-        cuStatus = cuMemcpyDtoHAsync(host_data, devptr, size, stream);
-        if (cuStatus != CUDA_SUCCESS) {
-            qWarning("cuMemcpyDtoHAsync failed (%#x, %s)", cuStatus, _cudaGetErrorEnum(cuStatus));
-            cuvidUnmapVideoFrame(dec, devptr);
-            cuvidCtxUnlock(vid_ctx_lock, 0);
-            return false;
-        }
-        cuStatus = cuCtxSynchronize();
-        if (cuStatus != CUDA_SUCCESS) {
-            qWarning("cuCtxSynchronize failed (%#x, %s)", cuStatus, _cudaGetErrorEnum(cuStatus));
-        }
-        cuvidUnmapVideoFrame(dec, devptr);
-        cuvidCtxUnlock(vid_ctx_lock, 0);
-        //qDebug("mark not in use pic_index: %d", cuviddisp->picture_index);
+        } // lock end
+        //CUDA_ENSURE(cuCtxPopCurrent(&cuctx), false);
+        //qDebug("cuCtxPopCurrent %p", cuctx);
 
-        uchar *planes[] = {
-            host_data,
-            host_data + pitch * h
-        };
+        VideoFrame frame;
+        if (copy_mode == VideoDecoderCUDA::ZeroCopy && interop_res) {
+            if (OpenGLHelper::isOpenGLES()) {
+                proc_params.Reserved[0] = pitch; // TODO: pass pitch to setSurface()
+                frame = VideoFrame(codec_ctx->width, codec_ctx->height, VideoFormat::Format_RGB32);
+                frame.setBytesPerLine(codec_ctx->width * 4); //used by gl to compute texture size
+            } else {
+                frame = VideoFrame(codec_ctx->width, codec_ctx->height, VideoFormat::Format_NV12);
+            }
+            cuda::SurfaceInteropCUDA *interop = new cuda::SurfaceInteropCUDA(interop_res);
+            interop->setSurface(cuviddisp->picture_index, proc_params, codec_ctx->width, codec_ctx->height, ch); //TODO: both surface size(for copy 2d) and frame size(for map host)
+            frame.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
+        } else {
+            uchar *planes[] = {
+                host_data,
+                host_data + pitch * ch
+            };
+            frame = VideoFrame(codec_ctx->width, codec_ctx->height, VideoFormat::Format_NV12);
+            frame.setBits(planes);
+        }
         int pitches[] = { (int)pitch, (int)pitch };
-        VideoFrame frame(codec_ctx->width, codec_ctx->height, VideoFormat::Format_NV12);
-        frame.setBits(planes);
-        frame.setBytesPerLine(pitches);
+        if (!frame.format().isRGB())
+            frame.setBytesPerLine(pitches);
         frame.setTimestamp((double)cuviddisp->timestamp/1000.0);
-        surface_in_use[cuviddisp->picture_index] = false;
-
-        frame = frame.clone();
+        if (codec_ctx && codec_ctx->sample_aspect_ratio.num > 1) //skip 1/1 because is the default value
+            frame.setDisplayAspectRatio(frame.displayAspectRatio()*av_q2d(codec_ctx->sample_aspect_ratio));
+        if (copy_mode == VideoDecoderCUDA::GenericCopy)
+            frame = frame.clone();
         if (outFrame) {
             *outFrame = frame;
         }
@@ -794,8 +797,24 @@ bool VideoDecoderCUDAPrivate::processDecodedData(CUVIDPARSERDISPINFO *cuviddisp,
         frame_queue.put(frame);
 #endif
         //qDebug("frame queue size: %d", frame_queue.size());
+        surface_in_use[cuviddisp->picture_index] = false; // FIXME: 0-copy still use the index
     }
     return true;
+}
+
+void VideoDecoderCUDAPrivate::setBSF(AVCodecID codec)
+{
+    if (codec == QTAV_CODEC_ID(H264)) {
+        if (!bitstream_filter_ctx) {
+            bitstream_filter_ctx = av_bitstream_filter_init("h264_mp4toannexb");
+            Q_ASSERT(bitstream_filter_ctx && "av_bitstream_filter_init error");
+        }
+    } else {
+        if (bitstream_filter_ctx) {
+            av_bitstream_filter_close(bitstream_filter_ctx);
+            bitstream_filter_ctx = 0;
+        }
+    }
 }
 
 } //namespace QtAV

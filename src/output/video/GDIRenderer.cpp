@@ -25,7 +25,7 @@
 #include <windows.h> //GetDC()
 #include <gdiplus.h>
 #include <QResizeEvent>
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 
 #define USE_GRAPHICS 0
 
@@ -74,13 +74,11 @@ extern VideoRendererId VideoRendererId_GDI;
 #if 0
 FACTORY_REGISTER_ID_AUTO(VideoRenderer, GDI, "GDI")
 #else
-VideoRenderer* __create_VideoRendererGDI() { return new VideoRendererGDI();}
-#endif
-
 void RegisterVideoRendererGDI_Man()
 {
-    FACTORY_REGISTER_ID_MAN(VideoRenderer, GDI, "GDI")
+    VideoRenderer::Register<GDIRenderer>(VideoRendererId_GDI, "GDI");
 }
+#endif
 
 VideoRendererId GDIRenderer::id() const
 {
@@ -93,7 +91,8 @@ public:
     DPTR_DECLARE_PUBLIC(GDIRenderer)
 
     GDIRendererPrivate():
-        support_bitblt(true)
+        VideoRendererPrivate()
+      , support_bitblt(true)
       , gdiplus_token(0)
       , device_context(0)
   #if USE_GRAPHICS
@@ -224,9 +223,11 @@ QPaintEngine* GDIRenderer::paintEngine() const
 bool GDIRenderer::receiveFrame(const VideoFrame& frame)
 {
     DPTR_D(GDIRenderer);
-    d.video_frame = frame;
-
-    update();
+    if (frame.constBits(0))
+        d.video_frame = frame;
+    else
+        d.video_frame = frame.to(frame.pixelFormat());
+    updateUi();
     return true;
 }
 
@@ -254,7 +255,7 @@ void GDIRenderer::drawFrame()
      */
     //steps to use BitBlt: http://bbs.csdn.net/topics/60183502
     Bitmap bitmap(d.video_frame.width(), d.video_frame.height(), d.video_frame.bytesPerLine(0)
-                  , PixelFormat32bppRGB, (BYTE*)d.video_frame.bits(0));
+                  , PixelFormat32bppRGB, (BYTE*)d.video_frame.constBits(0));
 #if USE_GRAPHICS
     if (d.graphics)
         d.graphics->DrawImage(&bitmap, d.out_rect.x(), d.out_rect.y(), d.out_rect.width(), d.out_rect.height());

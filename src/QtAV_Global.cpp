@@ -34,33 +34,35 @@ unsigned QtAV_Version()
 
 QString QtAV_Version_String()
 {
-    return QTAV_VERSION_STR;
+    // vs<2015: C2308: concatenating mismatched strings for QStringLiteral("a" "b")
+    return QString::fromLatin1(QTAV_VERSION_STR);
 }
 
 #define QTAV_VERSION_STR_LONG   QTAV_VERSION_STR "(" __DATE__ ", " __TIME__ ")"
 
 QString QtAV_Version_String_Long()
 {
-    return QTAV_VERSION_STR_LONG;
+    return QString::fromLatin1(QTAV_VERSION_STR_LONG);
 }
 
 namespace QtAV {
 
 namespace Internal {
 // disable logging for release. you can manually enable it.
-#ifdef QT_NO_DEBUG
+#if defined(QT_NO_DEBUG)// && !defined(Q_OS_ANDROID) && !defined(Q_OS_IOS) && !defined(Q_OS_WINRT)
 static QtAV::LogLevel gLogLevel = QtAV::LogOff;
 #else
 static QtAV::LogLevel gLogLevel = QtAV::LogAll;
 #endif
 static bool gLogLevelSet = false;
 bool isLogLevelSet() { return gLogLevelSet;}
+static int gAVLogLevel = AV_LOG_INFO;
 } //namespace Internal
 
 //TODO: auto add new depend libraries information
 QString aboutFFmpeg_PlainText()
 {
-    return aboutFFmpeg_HTML().remove(QRegExp("<[^>]*>"));
+    return aboutFFmpeg_HTML().remove(QRegExp(QStringLiteral("<[^>]*>")));
 }
 
 namespace Internal {
@@ -81,7 +83,8 @@ static unsigned get_qt_version() {
 
 static const depend_component* get_depend_component(const depend_component* info = 0)
 {
-    static const QByteArray qt_license(QLibraryInfo::licensee().prepend("Qt-" QT_VERSION_STR " licensee: ").toUtf8());
+    // DO NOT use QStringLiteral here because the install script use strings to search "Qt-" in the library. QStringLiteral will place it in .ro and strings can not find it
+    static const QByteArray qt_license(QLibraryInfo::licensee().prepend(QLatin1String("Qt-" QT_VERSION_STR " licensee: ")).toUtf8());
 #if QT_VERSION >= QT_VERSION_CHECK(5, 3, 0)
     static const char* qt_build_info = get_qt_version() >= QT_VERSION_CHECK(5, 3, 0) ? QLibraryInfo::build() : "";
 #else
@@ -150,27 +153,26 @@ void print_library_info()
 
 QString aboutFFmpeg_HTML()
 {
-    QString text = "<h3>FFmpeg/Libav</h3>\n";
+    QString text = QStringLiteral("<h3>FFmpeg/Libav</h3>\n");
     const Internal::depend_component* info = Internal::get_depend_component(0);
     while (info) {
-        text += "<h4>" + QObject::tr("Build version")
-                + QString(": %1-%2.%3.%4</h4>\n")
-                .arg(info->lib)
+        text += QStringLiteral("<h4>%1: %2-%3.%4.%5</h4>\n")
+                .arg(QObject::tr("Build version"))
+                .arg(QLatin1String(info->lib))
                 .arg(QTAV_VERSION_MAJOR(info->build_version))
                 .arg(QTAV_VERSION_MINOR(info->build_version))
                 .arg(QTAV_VERSION_PATCH(info->build_version))
                 ;
         unsigned rt_version = info->rt_version;
         if (info->build_version != rt_version) {
-            text += "<h4 style='color:#ff0000;'>" + QString(QObject::tr("Runtime version"))
-                    + QString(": %1.%2.%3</h4>\n")
+            text += QStringLiteral("<h4 style='color:#ff0000;'>%1: %2.%3.%4</h4>\n")
+                    .arg(QObject::tr("Runtime version"))
                     .arg(QTAV_VERSION_MAJOR(rt_version))
                     .arg(QTAV_VERSION_MINOR(rt_version))
                     .arg(QTAV_VERSION_PATCH(rt_version))
                     ;
         }
-        text += "<p>" + QString(info->config) + "</p>\n"
-                "<p>" + QString(info->license) + "</p>\n";
+        text += QStringLiteral("<p>%1</p>\n<p>%2</p>\n").arg(QString::fromUtf8(info->config)).arg(QString::fromUtf8(info->license));
         info = Internal::get_depend_component(info);
     }
     return text;
@@ -178,19 +180,23 @@ QString aboutFFmpeg_HTML()
 
 QString aboutQtAV_PlainText()
 {
-    return aboutQtAV_HTML().remove(QRegExp("<[^>]*>"));
+    return aboutQtAV_HTML().remove(QRegExp(QStringLiteral("<[^>]*>")));
 }
 
 QString aboutQtAV_HTML()
 {
-    static QString about = "<h3>QtAV " QTAV_VERSION_STR_LONG "</h3>\n"
-            "<p>" + QObject::tr("A media playing library base on Qt and FFmpeg.\n") + "</p>"
-            "<p>" + QObject::tr("Distributed under the terms of LGPLv2.1 or later.\n") + "</p>"
+    static QString about = QString::fromLatin1("<h3>QtAV " QTAV_VERSION_STR_LONG "</h3>\n"
+            "<p>%1</p><p>%2</p><p>%3</p>"
             "<p>Copyright (C) 2012-2015 Wang Bin (aka. Lucas Wang) <a href='mailto:wbsecg1@gmail.com'>wbsecg1@gmail.com</a></p>\n"
-            "<p>" + QObject::tr("Shanghai University->S3 Graphics->Deepin, Shanghai, China") + "</p>\n"
-            "<p>" + QObject::tr("Donate") + ": <a href='http://www.qtav.org#donate'>http://www.qtav.org#donate</a></p>\n"
-            "<p>" + QObject::tr("Source") + ": <a href='https://github.com/wang-bin/QtAV'>https://github.com/wang-bin/QtAV</a></p>\n"
-            "<p>" + QObject::tr("Home page") + ": <a href='http://www.qtav.org'>http://www.qtav.org</a></p>";
+            "<p>%4: <a href='http://www.qtav.org/donate.html'>http://www.qtav.org/donate.html</a></p>\n"
+            "<p>%5: <a href='https://github.com/wang-bin/QtAV'>https://github.com/wang-bin/QtAV</a></p>\n"
+            "<p>%6: <a href='http://www.qtav.org'>http://www.qtav.org</a></p>"
+           ).arg(QObject::tr("A media playing library base on Qt and FFmpeg.\n"))
+            .arg(QObject::tr("Distributed under the terms of LGPLv2.1 or later.\n"))
+            .arg(QObject::tr("Shanghai University->S3 Graphics->Deepin, Shanghai, China"))
+            .arg(QObject::tr("Donate"))
+            .arg(QObject::tr("Source"))
+            .arg(QObject::tr("Home page"));
     return about;
 }
 
@@ -213,10 +219,37 @@ void setFFmpegLogHandler(void (*callback)(void *, int, const char *, va_list))
     av_log_set_callback(callback);
 }
 
+void setFFmpegLogLevel(const QByteArray &level)
+{
+    if (level.isEmpty())
+        return;
+    bool ok = false;
+    const int value = level.toInt(&ok);
+    if ((ok && value == 0) || level == "off" || level == "quiet")
+        Internal::gAVLogLevel = AV_LOG_QUIET;
+    else if (level == "panic")
+        Internal::gAVLogLevel = AV_LOG_PANIC;
+    else if (level == "fatal")
+        Internal::gAVLogLevel = AV_LOG_FATAL;
+    else if (level == "error")
+        Internal::gAVLogLevel = AV_LOG_ERROR;
+    else if (level.startsWith("warn"))
+        Internal::gAVLogLevel = AV_LOG_WARNING;
+    else if (level == "info")
+        Internal::gAVLogLevel = AV_LOG_INFO;
+    else if (level == "verbose")
+        Internal::gAVLogLevel = AV_LOG_VERBOSE;
+    else if (level == "debug")
+        Internal::gAVLogLevel = AV_LOG_DEBUG;
+    else
+        Internal::gAVLogLevel = AV_LOG_INFO;
+    av_log_set_level(Internal::gAVLogLevel);
+}
+
 static void qtav_ffmpeg_log_callback(void* ctx, int level,const char* fmt, va_list vl)
 {
     // AV_LOG_DEBUG is used by ffmpeg developers
-    if (level > AV_LOG_VERBOSE)
+    if (level > Internal::gAVLogLevel)
         return;
     AVClass *c = ctx ? *(AVClass**)ctx : 0;
     QString qmsg = QString().sprintf("[FFmpeg:%s] ", c ? c->item_name(ctx) : "?") + QString().vsprintf(fmt, vl);
@@ -237,7 +270,7 @@ const QStringList& supportedInputMimeTypes()
     AVOutputFormat *i = av_oformat_next(NULL);
     QStringList list;
     while (i) {
-        list << QString(i->mime_type).split(QChar(','), QString::SkipEmptyParts);
+        list << QString(i->mime_type).split(QLatin1Char(','), QString::SkipEmptyParts);
         i = av_oformat_next(i);
     }
     foreach (const QString& v, list) {
@@ -294,24 +327,6 @@ const QStringList& supportedSubtitleMimeTypes()
         init_supported_codec_info();
     return s_subtitle_mimes;
 }
-const QStringList& supportedInputExtensions()
-{
-    static QStringList exts;
-    if (!exts.isEmpty())
-        return exts;
-    av_register_all(); // MUST register all input/output formats
-    AVInputFormat *i = av_iformat_next(NULL);
-    QStringList list;
-    while (i) {
-        list << QString(i->extensions).split(QChar(','), QString::SkipEmptyParts);
-        i = av_iformat_next(i);
-    }
-    foreach (const QString& v, list) {
-        exts.append(v.trimmed());
-    }
-    exts.removeDuplicates();
-    return exts;
-}
 #endif
 // TODO: static link. move all into 1
 namespace {
@@ -319,29 +334,7 @@ class InitFFmpegLog {
 public:
     InitFFmpegLog() {
         setFFmpegLogHandler(qtav_ffmpeg_log_callback);
-        const QByteArray env = qgetenv("QTAV_FFMPEG_LOG").toLower();
-        if (env.isEmpty())
-            return;
-        bool ok = false;
-        const int level = env.toInt(&ok);
-        if ((ok && level == 0) || env == "off" || env == "quiet") {
-            av_log_set_level(AV_LOG_QUIET);
-            setFFmpegLogHandler(0);
-        }
-        else if (env == "panic")
-            av_log_set_level(AV_LOG_PANIC);
-        else if (env == "fatal")
-            av_log_set_level(AV_LOG_FATAL);
-        else if (env == "error")
-            av_log_set_level(AV_LOG_ERROR);
-        else if (env.startsWith("warn"))
-            av_log_set_level(AV_LOG_WARNING);
-        else if (env == "info")
-            av_log_set_level(AV_LOG_INFO);
-        else if (env == "verbose")
-            av_log_set_level(AV_LOG_VERBOSE);
-        else if (env == "debug")
-            av_log_set_level(AV_LOG_DEBUG);
+        QtAV::setFFmpegLogLevel(qgetenv("QTAV_FFMPEG_LOG").toLower());
     }
 };
 InitFFmpegLog fflog;
@@ -350,7 +343,6 @@ InitFFmpegLog fflog;
 
 // Initialize Qt Resource System when the library is built
 // statically
-
 static void initResources() {
     Q_INIT_RESOURCE(shaders);
     Q_INIT_RESOURCE(QtAV);
@@ -364,4 +356,3 @@ namespace {
     
     ResourceLoader QtAV_QRCLoader;
 }
-

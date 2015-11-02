@@ -25,6 +25,7 @@
 #include <QUrl>
 
 class QWidgetAction;
+class QToolButton;
 namespace QtAV {
 class AudioOutput;
 class AVError;
@@ -58,9 +59,8 @@ class MainWindow : public QWidget
 public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
-    void enableAudio(bool yes = true);
-    void setAudioOutput(QtAV::AudioOutput* ao);
-    void setRenderer(QtAV::VideoRenderer* renderer);
+    void setAudioBackends(const QStringList& backends);
+    bool setRenderer(QtAV::VideoRenderer* renderer);
     void setVideoDecoderNames(const QStringList& vd);
 
 public slots:
@@ -97,7 +97,6 @@ private slots:
     void onStopPlay();
     void onPaused(bool p);
     void onSpeedChange(qreal speed);
-    void seekToMSec(int msec);
     void seek();
     void showHideVolumeBar();
     void setVolume();
@@ -154,11 +153,11 @@ private:
 
 private:
     bool mIsReady, mHasPendingPlay;
-    bool mNullAO;
     bool mControlOn;
     int mCursorTimer;
     int mShowControl; //0: can hide, 1: show and playing, 2: always show(not playing)
     int mRepeateMax;
+    QStringList mAudioBackends;
     QVBoxLayout *mpPlayerLayout;
 
     QWidget *mpControl;
@@ -166,10 +165,11 @@ private:
     QLabel *mpTitle;
     QLabel *mpSpeed;
     Slider *mpTimeSlider, *mpVolumeSlider;
-    Button *mpVolumeBtn;
-    Button *mpPlayPauseBtn, *mpStopBtn, *mpForwardBtn, *mpBackwardBtn;
-    Button *mpOpenBtn;
-    Button *mpInfoBtn, *mpMenuBtn, *mpSetupBtn, *mpCaptureBtn;
+    QToolButton *mpVolumeBtn;
+    QToolButton *mpPlayPauseBtn;
+    QToolButton *mpStopBtn, *mpForwardBtn, *mpBackwardBtn;
+    QToolButton *mpOpenBtn;
+    QToolButton *mpInfoBtn, *mpMenuBtn, *mpSetupBtn, *mpCaptureBtn;
     QMenu *mpMenu;
     QAction *mpVOAction, *mpARAction; //remove mpVOAction if vo.id() is supported
     QAction *mpRepeatEnableAction;
@@ -184,13 +184,11 @@ private:
 
     QtAV::AVClock *mpClock;
     QtAV::AVPlayer *mpPlayer;
-    QtAV::VideoRenderer *mpRenderer, *mpTempRenderer;
+    QtAV::VideoRenderer *mpRenderer;
     QtAV::LibAVFilterVideo *mpVideoFilter;
     QtAV::LibAVFilterAudio *mpAudioFilter;
     QString mFile;
     QString mTitle;
-    QPixmap mPlayPixmap;
-    QPixmap mPausePixmap;
 
     QLabel *mpPreview;
 

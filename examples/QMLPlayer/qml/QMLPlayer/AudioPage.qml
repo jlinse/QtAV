@@ -10,8 +10,8 @@ Page {
     signal muteChanged(bool value)
     signal externalAudioChanged(string file)
     signal audioTrackChanged(int track)
-    property var internalTracks : "unkown"
-    property var externalTracks : "unkown"
+    property var internalAudioTracks : "unkown"
+    property var externalAudioTracks : "unkown"
     property alias isExternal: externalCheck.checked
     height: titleHeight + channelLabel.height + channels.contentHeight
             + Utils.kItemHeight*2 + trackLabel.height + tracksMenu.contentHeight + Utils.kSpacing*6
@@ -96,26 +96,29 @@ Page {
         }
     }
     Component.onCompleted: {
-        channelModel.append({name: qsTr("Stero"), value: MediaPlayer.Stero })
+        channelModel.append({name: qsTr("Stereo"), value: MediaPlayer.Stereo })
         channelModel.append({name: qsTr("Mono"), value: MediaPlayer.Mono })
         channelModel.append({name: qsTr("Left"), value: MediaPlayer.Left })
         channelModel.append({name: qsTr("Right"), value: MediaPlayer.Right })
     }
-    onInternalTracksChanged: updateTracksMenu()
-    onExternalTracksChanged: updateTracksMenu()
+    onInternalAudioTracksChanged: updateTracksMenu()
+    onExternalAudioTracksChanged: updateTracksMenu()
     function updateTracksMenu() {
         tracksModel.clear()
-        var c = internalTracks
+        var c = internalAudioTracks
         if (isExternal) {
-            c = externalTracks
+            c = externalAudioTracks
         }
         for (var i = 0; i < c.length; ++i) {
-            var label = "#" + c[i].id
-            if (c[i].language)
-                label += " (" + c[i].language + ")"
-            if (c[i].title)
-                label += ": " + c[i].title
-            tracksModel.append({name: label, value: c[i].id})
+            var t = c[i]
+            var label = "#" + t.id
+            if (t.codec)
+                label += " '" + t.codec + "'"
+            if (t.language)
+                label += " (" + t.language + ")"
+            if (t.title)
+                label += ": " + t.title
+            tracksModel.append({name: label, value: t.id})
         }
     }
 

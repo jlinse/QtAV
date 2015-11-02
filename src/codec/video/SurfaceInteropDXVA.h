@@ -75,9 +75,11 @@ public:
      * \param frame_h frame height(visual height)
      */
     void setSurface(IDirect3DSurface9* surface, int frame_w, int frame_h);
+    /// GLTextureSurface only supports rgb32
     void* map(SurfaceType type, const VideoFormat& fmt, void* handle, int plane) Q_DECL_OVERRIDE;
     void unmap(void *handle) Q_DECL_OVERRIDE;
 protected:
+    /// copy from gpu (optimized if possible) and convert to target format if necessary
     void* mapToHost(const VideoFormat &format, void *handle, int plane);
 private:
     IDirect3DSurface9 *m_surface;
@@ -99,6 +101,7 @@ private:
     bool ensureSurface(int w, int h);
 
     EGL* egl;
+    IDirect3DQuery9 *dx_query;
 };
 #endif //QTAV_HAVE(DXVA_EGL)
 

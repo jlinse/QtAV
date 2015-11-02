@@ -1,6 +1,6 @@
 /******************************************************************************
     mkapi dynamic load code generation for capi template
-    Copyright (C) 2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
     https://github.com/wang-bin/mkapi
     https://github.com/wang-bin/capi
 
@@ -23,7 +23,6 @@
 //#define DEBUG_LOAD
 //#define CAPI_IS_LAZY_RESOLVE 0
 #ifndef CAPI_LINK_ASS
-#include <QtCore/QLibrary>
 #include "capi.h"
 #endif
 #include "ass_api.h" //include last to avoid covering types later
@@ -36,6 +35,7 @@ bool api::loaded() const{return true;}
 #else
 static const char* names[] = {
     "ass",
+    "libass",
     NULL
 };
 # if 1
@@ -45,18 +45,18 @@ static const int versions[] = {
 5, 4
     , ::capi::EndVersion
 };
-CAPI_BEGIN_DLL_VER(names, versions, QLibrary)
+CAPI_BEGIN_DLL_VER(names, versions, ::capi::dso)
 # else
-CAPI_BEGIN_DLL(names, QLibrary)
+CAPI_BEGIN_DLL(names, ::capi::dso)
 # endif //1
 // CAPI_DEFINE_RESOLVER(argc, return_type, name, argv_no_name)
 // mkapi code generation BEGIN
 //CAPI_DEFINE_ENTRY(int, ass_library_version, CAPI_ARG0())
 CAPI_DEFINE_ENTRY(ASS_Library *, ass_library_init, CAPI_ARG0())
 CAPI_DEFINE_ENTRY(void, ass_library_done, CAPI_ARG1(ASS_Library *))
-//CAPI_DEFINE_ENTRY(void, ass_set_fonts_dir, CAPI_ARG2(ASS_Library *, const char *))
-//CAPI_DEFINE_ENTRY(void, ass_set_extract_fonts, CAPI_ARG2(ASS_Library *, int))
-//CAPI_DEFINE_ENTRY(void, ass_set_style_overrides, CAPI_ARG2(ASS_Library *, char **))
+CAPI_DEFINE_ENTRY(void, ass_set_fonts_dir, CAPI_ARG2(ASS_Library *, const char *))
+CAPI_DEFINE_ENTRY(void, ass_set_extract_fonts, CAPI_ARG2(ASS_Library *, int))
+CAPI_DEFINE_ENTRY(void, ass_set_style_overrides, CAPI_ARG2(ASS_Library *, char **))
 //CAPI_DEFINE_ENTRY(void, ass_process_force_style, CAPI_ARG1(ASS_Track *))
 CAPI_DEFINE_ENTRY(void, ass_set_message_cb, CAPI_ARG3(ASS_Library *, void (*msg_cb)
                         (int level, const char *fmt, va_list args, void *data), void *))
@@ -65,18 +65,18 @@ CAPI_DEFINE_ENTRY(void, ass_renderer_done, CAPI_ARG1(ASS_Renderer *))
 CAPI_DEFINE_ENTRY(void, ass_set_frame_size, CAPI_ARG3(ASS_Renderer *, int, int))
 //CAPI_DEFINE_ENTRY(void, ass_set_storage_size, CAPI_ARG3(ASS_Renderer *, int, int))
 CAPI_DEFINE_ENTRY(void, ass_set_shaper, CAPI_ARG2(ASS_Renderer *, ASS_ShapingLevel))
-//CAPI_DEFINE_ENTRY(void, ass_set_margins, CAPI_ARG5(ASS_Renderer *, int, int, int, int))
-//CAPI_DEFINE_ENTRY(void, ass_set_use_margins, CAPI_ARG2(ASS_Renderer *, int))
+CAPI_DEFINE_ENTRY(void, ass_set_margins, CAPI_ARG5(ASS_Renderer *, int, int, int, int))
+CAPI_DEFINE_ENTRY(void, ass_set_use_margins, CAPI_ARG2(ASS_Renderer *, int))
 //CAPI_DEFINE_ENTRY(void, ass_set_pixel_aspect, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE_ENTRY(void, ass_set_aspect_ratio, CAPI_ARG3(ASS_Renderer *, double, double))
-//CAPI_DEFINE_ENTRY(void, ass_set_font_scale, CAPI_ARG2(ASS_Renderer *, double))
+CAPI_DEFINE_ENTRY(void, ass_set_font_scale, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE_ENTRY(void, ass_set_hinting, CAPI_ARG2(ASS_Renderer *, ASS_Hinting))
 //CAPI_DEFINE_ENTRY(void, ass_set_line_spacing, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE_ENTRY(void, ass_set_line_position, CAPI_ARG2(ASS_Renderer *, double))
 CAPI_DEFINE_ENTRY(void, ass_set_fonts, CAPI_ARG6(ASS_Renderer *, const char *, const char *, int, const char *, int))
 //CAPI_DEFINE_ENTRY(void, ass_set_selective_style_override_enabled, CAPI_ARG2(ASS_Renderer *, int))
 //CAPI_DEFINE_ENTRY(void, ass_set_selective_style_override, CAPI_ARG2(ASS_Renderer *, ASS_Style *))
-//CAPI_DEFINE_ENTRY(int, ass_fonts_update, CAPI_ARG1(ASS_Renderer *))
+CAPI_DEFINE_ENTRY(int, ass_fonts_update, CAPI_ARG1(ASS_Renderer *))
 //CAPI_DEFINE_ENTRY(void, ass_set_cache_limits, CAPI_ARG3(ASS_Renderer *, int, int))
 CAPI_DEFINE_ENTRY(ASS_Image *, ass_render_frame, CAPI_ARG4(ASS_Renderer *, ASS_Track *, long long, int *))
 CAPI_DEFINE_ENTRY(ASS_Track *, ass_new_track, CAPI_ARG1(ASS_Library *))
@@ -105,9 +105,9 @@ typedef void (*ass_set_message_cb_msg_cb1)
 //CAPI_DEFINE(int, ass_library_version, CAPI_ARG0())
 CAPI_DEFINE(ASS_Library *, ass_library_init, CAPI_ARG0())
 CAPI_DEFINE(void, ass_library_done, CAPI_ARG1(ASS_Library *))
-//CAPI_DEFINE(void, ass_set_fonts_dir, CAPI_ARG2(ASS_Library *, const char *))
-//CAPI_DEFINE(void, ass_set_extract_fonts, CAPI_ARG2(ASS_Library *, int))
-//CAPI_DEFINE(void, ass_set_style_overrides, CAPI_ARG2(ASS_Library *, char **))
+CAPI_DEFINE(void, ass_set_fonts_dir, CAPI_ARG2(ASS_Library *, const char *))
+CAPI_DEFINE(void, ass_set_extract_fonts, CAPI_ARG2(ASS_Library *, int))
+CAPI_DEFINE(void, ass_set_style_overrides, CAPI_ARG2(ASS_Library *, char **))
 //CAPI_DEFINE(void, ass_process_force_style, CAPI_ARG1(ASS_Track *))
 CAPI_DEFINE(void, ass_set_message_cb, CAPI_ARG3(ASS_Library *, ass_set_message_cb_msg_cb1, void *))
 CAPI_DEFINE(ASS_Renderer *, ass_renderer_init, CAPI_ARG1(ASS_Library *))
@@ -115,18 +115,18 @@ CAPI_DEFINE(void, ass_renderer_done, CAPI_ARG1(ASS_Renderer *))
 CAPI_DEFINE(void, ass_set_frame_size, CAPI_ARG3(ASS_Renderer *, int, int))
 //CAPI_DEFINE(void, ass_set_storage_size, CAPI_ARG3(ASS_Renderer *, int, int))
 CAPI_DEFINE(void, ass_set_shaper, CAPI_ARG2(ASS_Renderer *, ASS_ShapingLevel))
-//CAPI_DEFINE(void, ass_set_margins, CAPI_ARG5(ASS_Renderer *, int, int, int, int))
-//CAPI_DEFINE(void, ass_set_use_margins, CAPI_ARG2(ASS_Renderer *, int))
+CAPI_DEFINE(void, ass_set_margins, CAPI_ARG5(ASS_Renderer *, int, int, int, int))
+CAPI_DEFINE(void, ass_set_use_margins, CAPI_ARG2(ASS_Renderer *, int))
 //CAPI_DEFINE(void, ass_set_pixel_aspect, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE(void, ass_set_aspect_ratio, CAPI_ARG3(ASS_Renderer *, double, double))
-//CAPI_DEFINE(void, ass_set_font_scale, CAPI_ARG2(ASS_Renderer *, double))
+CAPI_DEFINE(void, ass_set_font_scale, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE(void, ass_set_hinting, CAPI_ARG2(ASS_Renderer *, ASS_Hinting))
 //CAPI_DEFINE(void, ass_set_line_spacing, CAPI_ARG2(ASS_Renderer *, double))
 //CAPI_DEFINE(void, ass_set_line_position, CAPI_ARG2(ASS_Renderer *, double))
 CAPI_DEFINE(void, ass_set_fonts, CAPI_ARG6(ASS_Renderer *, const char *, const char *, int, const char *, int))
 //CAPI_DEFINE(void, ass_set_selective_style_override_enabled, CAPI_ARG2(ASS_Renderer *, int))
 //CAPI_DEFINE(void, ass_set_selective_style_override, CAPI_ARG2(ASS_Renderer *, ASS_Style *))
-//CAPI_DEFINE(int, ass_fonts_update, CAPI_ARG1(ASS_Renderer *))
+CAPI_DEFINE(int, ass_fonts_update, CAPI_ARG1(ASS_Renderer *))
 //CAPI_DEFINE(void, ass_set_cache_limits, CAPI_ARG3(ASS_Renderer *, int, int))
 CAPI_DEFINE(ASS_Image *, ass_render_frame, CAPI_ARG4(ASS_Renderer *, ASS_Track *, long long, int *))
 CAPI_DEFINE(ASS_Track *, ass_new_track, CAPI_ARG1(ASS_Library *))

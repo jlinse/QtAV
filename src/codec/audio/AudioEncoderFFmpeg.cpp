@@ -23,7 +23,7 @@
 #include "QtAV/private/AVEncoder_p.h"
 #include "QtAV/private/AVCompat.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include "QtAV/version.h"
 #include "utils/Logger.h"
 
@@ -46,12 +46,7 @@ public:
 };
 
 static const AudioEncoderId AudioEncoderId_FFmpeg = mkid::id32base36_6<'F', 'F', 'm', 'p', 'e', 'g'>::value;
-FACTORY_REGISTER_ID_AUTO(AudioEncoder, FFmpeg, "FFmpeg")
-
-void RegisterAudioEncoderFFmpeg_Man()
-{
-    FACTORY_REGISTER_ID_MAN(AudioEncoder, FFmpeg, "FFmpeg")
-}
+FACTORY_REGISTER(AudioEncoder, FFmpeg, "FFmpeg")
 
 class AudioEncoderFFmpegPrivate Q_DECL_FINAL: public AudioEncoderPrivate
 {
@@ -80,6 +75,12 @@ bool AudioEncoderFFmpegPrivate::open()
         return true;
     }
     AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    if (!codec) {
+        const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
+        if (cd) {
+            codec = avcodec_find_encoder(cd->id);
+        }
+    }
     if (!codec) {
         qWarning() << "Can not find encoder for codec " << codec_name;
         return false;
@@ -115,8 +116,8 @@ bool AudioEncoderFFmpegPrivate::open()
             qDebug("use first supported channel layout: %lld", codec->channel_layouts[0]);
             format_used.setChannelLayoutFFmpeg((qint64)codec->channel_layouts[0]);
         } else {
-            qWarning("channel layout and supported channel layout are not set. use stero");
-            format_used.setChannelLayout(AudioFormat::ChannelLayout_Stero);
+            qWarning("channel layout and supported channel layout are not set. use stereo");
+            format_used.setChannelLayout(AudioFormat::ChannelLayout_Stereo);
         }
     }
     avctx->sample_fmt = (AVSampleFormat)format_used.sampleFormatFFmpeg();
@@ -193,7 +194,7 @@ bool AudioEncoderFFmpeg::encode(const AudioFrame &frame)
         const int sample_stride = fmt.isPlanar() ? fmt.bytesPerSample() : fmt.bytesPerSample()*fmt.channels();
         for (int i = 0; i < nb_planes; ++i) {
             f->linesize[i] = f->nb_samples * sample_stride;// frame.bytesPerLine(i); //
-            f->extended_data[i] = (uint8_t*)frame.bits(i);
+            f->extended_data[i] = (uint8_t*)frame.constBits(i);
         }
     }
     AVPacket pkt;

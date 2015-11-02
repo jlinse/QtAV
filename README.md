@@ -20,13 +20,13 @@ QtAV can meet your most demands
 - Real time preview
 - Video capture in rgb and yuv format
 - OSD and custom filters
-- Filters in libavfilter, for example stero3d, blur
+- Filters in libavfilter, for example stereo3d, blur
 - Subtitle supports ass, srt etc. Dynamic change FFmpeg and libass engine
 - Playing frame by frame (currently support forward playing)
 - Playback speed control
 - Variant streams: locale file, http, rtsp etc. and your custom streams
 - Audio channel, tracks and external audio tracks
-- Dynamically change render engine when playing.
+- Dynamically change render engines and decoders when playing.
 - Multiple video outputs for 1 player
 - Video eq(software and OpenGL): brightness, contrast, saturation, hue
 - QML support. Most playback APIs are compatible with QtMultimedia module

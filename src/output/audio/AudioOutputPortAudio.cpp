@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
     
 *   This file is part of QtAV
 
@@ -22,7 +22,7 @@
 
 #include "QtAV/private/AudioOutputBackend.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include <portaudio.h>
 #include "utils/Logger.h"
 
@@ -34,7 +34,7 @@ class AudioOutputPortAudio Q_DECL_FINAL: public AudioOutputBackend
 public:
     AudioOutputPortAudio(QObject *parent = 0);
     ~AudioOutputPortAudio();
-    QString name() const Q_DECL_FINAL { return kName;}
+    QString name() const Q_DECL_FINAL { return QString::fromLatin1(kName);}
     bool open() Q_DECL_FINAL;
     bool close() Q_DECL_FINAL;
     virtual BufferControl bufferControl() const Q_DECL_FINAL;
@@ -49,12 +49,7 @@ private:
 
 typedef AudioOutputPortAudio AudioOutputBackendPortAudio;
 static const AudioOutputBackendId AudioOutputBackendId_PortAudio = mkid::id32base36_5<'P', 'o', 'r', 't', 'A'>::value;
-FACTORY_REGISTER_ID_AUTO(AudioOutputBackend, PortAudio, kName)
-
-void RegisterAudioOutputPortAudio_Man()
-{
-    FACTORY_REGISTER_ID_MAN(AudioOutputBackend, PortAudio, kName)
-}
+FACTORY_REGISTER(AudioOutputBackend, PortAudio, kName)
 
 AudioOutputPortAudio::AudioOutputPortAudio(QObject *parent)
     : AudioOutputBackend(AudioOutput::NoFeature, parent)
@@ -74,7 +69,7 @@ AudioOutputPortAudio::AudioOutputPortAudio(QObject *parent)
         const PaDeviceInfo *deviceInfo = Pa_GetDeviceInfo(i);
         if (deviceInfo) {
             const PaHostApiInfo *hostApiInfo = Pa_GetHostApiInfo(deviceInfo->hostApi);
-            QString name = QString(hostApiInfo->name) + ": " + QString::fromLocal8Bit(deviceInfo->name);
+            QString name = QString::fromUtf8(hostApiInfo->name) + QStringLiteral(": ") + QString::fromLocal8Bit(deviceInfo->name);
             qDebug("audio device %d: %s", i, name.toUtf8().constData());
             qDebug("max in/out channels: %d/%d", deviceInfo->maxInputChannels, deviceInfo->maxOutputChannels);
         }

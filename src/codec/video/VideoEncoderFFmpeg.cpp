@@ -23,7 +23,7 @@
 #include "QtAV/private/AVEncoder_p.h"
 #include "QtAV/private/AVCompat.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include "QtAV/version.h"
 #include "utils/Logger.h"
 
@@ -46,18 +46,14 @@ public:
 };
 
 static const VideoEncoderId VideoEncoderId_FFmpeg = mkid::id32base36_6<'F', 'F', 'm', 'p', 'e', 'g'>::value;
-FACTORY_REGISTER_ID_AUTO(VideoEncoder, FFmpeg, "FFmpeg")
-
-void RegisterVideoEncoderFFmpeg_Man()
-{
-    FACTORY_REGISTER_ID_MAN(VideoEncoder, FFmpeg, "FFmpeg")
-}
+FACTORY_REGISTER(VideoEncoder, FFmpeg, "FFmpeg")
 
 class VideoEncoderFFmpegPrivate Q_DECL_FINAL: public VideoEncoderPrivate
 {
 public:
     VideoEncoderFFmpegPrivate()
         : VideoEncoderPrivate()
+        , nb_encoded(0)
     {
         avcodec_register_all();
         // NULL: codec-specific defaults won't be initialized, which may result in suboptimal default settings (this is important mainly for encoders, e.g. libx264).
@@ -66,11 +62,13 @@ public:
     bool open() Q_DECL_OVERRIDE;
     bool close() Q_DECL_OVERRIDE;
 
+    qint64 nb_encoded;
     QByteArray buffer;
 };
 
 bool VideoEncoderFFmpegPrivate::open()
 {
+    nb_encoded = 0LL;
     if (codec_name.isEmpty()) {
         // copy ctx from muxer by copyAVCodecContext
         AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
@@ -78,6 +76,12 @@ bool VideoEncoderFFmpegPrivate::open()
         return true;
     }
     AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    if (!codec) {
+        const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
+        if (cd) {
+            codec = avcodec_find_encoder(cd->id);
+        }
+    }
     if (!codec) {
         qWarning() << "Can not find encoder for codec " << codec_name;
         return false;
@@ -102,7 +106,10 @@ bool VideoEncoderFFmpegPrivate::open()
     }
     //avctx->sample_aspect_ratio =
     avctx->pix_fmt = (AVPixelFormat)VideoFormat::pixelFormatToFFmpeg(format_used);
-    avctx->time_base = av_d2q(1.0/frame_rate, frame_rate*1001.0+2);
+    if (frame_rate > 0)
+        avctx->time_base = av_d2q(1.0/frame_rate, frame_rate*1001.0+2);
+    else
+        avctx->time_base = av_d2q(1.0/VideoEncoder::defaultFrameRate(), VideoEncoder::defaultFrameRate()*1001.0+2);
     qDebug("size: %dx%d tbc: %f=%d/%d", width, height, av_q2d(avctx->time_base), avctx->time_base.num, avctx->time_base.den);
     avctx->bit_rate = bit_rate;
 #if 1
@@ -114,12 +121,12 @@ bool VideoEncoderFFmpegPrivate::open()
         av_dict_set(&dict, "tune", "zerolatency", 0);
         av_dict_set(&dict, "profile", "main", 0);
     }
-#ifdef AV_CODEC_ID_H265
-    if(avctx->codec_id == AV_CODEC_ID_H265){
+#ifdef FF_PROFILE_HEVC_MAIN
+    if(avctx->codec_id == AV_CODEC_ID_HEVC){
         av_dict_set(&dict, "preset", "ultrafast", 0);
         av_dict_set(&dict, "tune", "zero-latency", 0);
     }
-#endif //AV_CODEC_ID_H265
+#endif //FF_PROFILE_HEVC_MAIN
 #endif
     applyOptionsForContext();
     AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
@@ -156,13 +163,21 @@ bool VideoEncoderFFmpeg::encode(const VideoFrame &frame)
         f->width = frame.width();
         f->height = frame.height();
 //        f->quality = d.avctx->global_quality;
-        // TODO: record last pts
-        f->pts = int64_t(frame.timestamp()*frameRate());
+        switch (timestampMode()) {
+        case TimestampCopy:
+            f->pts = int64_t(frame.timestamp()*frameRate()); // TODO: check monotically increase and fix if not. or another mode?
+            break;
+        case TimestampMonotonic:
+            f->pts = d.nb_encoded+1;
+            break;
+        default:
+            break;
+        }
         // pts is set in muxer
         const int nb_planes = frame.planeCount();
         for (int i = 0; i < nb_planes; ++i) {
             f->linesize[i] = frame.bytesPerLine(i);
-            f->data[i] = (uint8_t*)frame.bits(i);
+            f->data[i] = (uint8_t*)frame.constBits(i);
         }
         if (d.avctx->width <= 0) {
             d.avctx->width = frame.width();
@@ -179,9 +194,10 @@ bool VideoEncoderFFmpeg::encode(const VideoFrame &frame)
     int ret = avcodec_encode_video2(d.avctx, &pkt, f, &got_packet);
     av_frame_free(&f);
     if (ret < 0) {
-        //qWarning("error avcodec_encode_video2: %s" ,av_err2str(ret));
+        qWarning("error avcodec_encode_video2: %s" ,av_err2str(ret));
         return false; //false
     }
+    d.nb_encoded++;
     if (!got_packet) {
         qWarning("no packet got");
         return false; //false

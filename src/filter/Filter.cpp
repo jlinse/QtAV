@@ -38,23 +38,6 @@
  */
 namespace QtAV {
 
-void safeReleaseFilter(Filter **ppFilter)
-{
-    if (!ppFilter || !*ppFilter) {
-        qWarning("filter to release is null!");
-        return;
-    }
-    FilterManager::instance().releaseFilter(*ppFilter);
-    *ppFilter = 0;
-}
-
-Filter::Filter(QObject *parent)
-    : QObject(parent)
-{
-    if (parent)
-        setOwnedByTarget(false);
-}
-
 Filter::Filter(FilterPrivate &d, QObject *parent)
     : QObject(parent)
     , DPTR_INIT(&d)
@@ -95,7 +78,7 @@ bool Filter::isOwnedByTarget() const
 
 bool Filter::uninstall()
 {
-    return FilterManager::instance().uninstallFilter(this);
+    return FilterManager::instance().uninstallFilter(this); // TODO: target
 }
 
 AudioFilter::AudioFilter(QObject *parent)
@@ -109,7 +92,7 @@ AudioFilter::AudioFilter(AudioFilterPrivate& d, QObject *parent)
 /*TODO: move to AVPlayer.cpp to reduce dependency?*/
 bool AudioFilter::installTo(AVPlayer *player)
 {
-    return player->installAudioFilter(this);
+    return player->installFilter(this);
 }
 
 void AudioFilter::apply(Statistics *statistics, AudioFrame *frame)
@@ -141,7 +124,7 @@ VideoFilterContext::Type VideoFilter::contextType() const
 
 bool VideoFilter::installTo(AVPlayer *player)
 {
-    return player->installVideoFilter(this);
+    return player->installFilter(this);
 }
 
 /*TODO: move to AVOutput.cpp to reduce dependency?*/

@@ -70,11 +70,15 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(QStringList videoCodecs READ videoCodecs)
     Q_PROPERTY(QStringList videoCodecPriority READ videoCodecPriority WRITE setVideoCodecPriority NOTIFY videoCodecPriorityChanged)
     Q_PROPERTY(QVariantMap videoCodecOptions READ videoCodecOptions WRITE setVideoCodecOptions NOTIFY videoCodecOptionsChanged)
+    Q_PROPERTY(bool useWallclockAsTimestamps READ useWallclockAsTimestamps WRITE setWallclockAsTimestamps NOTIFY useWallclockAsTimestampsChanged)
     Q_PROPERTY(QtAV::VideoCapture *videoCapture READ videoCapture CONSTANT)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(QUrl externalAudio READ externalAudio WRITE setExternalAudio NOTIFY externalAudioChanged)
     Q_PROPERTY(QVariantList internalAudioTracks READ internalAudioTracks NOTIFY internalAudioTracksChanged)
     Q_PROPERTY(QVariantList externalAudioTracks READ externalAudioTracks NOTIFY externalAudioTracksChanged)
+    Q_PROPERTY(QVariantList internalSubtitleTracks READ internalSubtitleTracks NOTIFY internalSubtitleTracksChanged)
+    // internal subtitle, e.g. mkv embedded subtitles
+    Q_PROPERTY(int internalSubtitleTrack READ internalSubtitleTrack WRITE setInternalSubtitleTrack NOTIFY internalSubtitleTrackChanged)
 public:
     enum Loop { Infinite = -1 };
     enum PlaybackState {
@@ -103,11 +107,11 @@ public:
     };
     // currently supported channels<3.
     enum ChannelLayout {
-        ChannelLayoutAuto, //the same as source if channels<=2. otherwise resamples to stero
+        ChannelLayoutAuto, //the same as source if channels<=2. otherwise resamples to stereo
         Left,
         Right,
         Mono,
-        Stero
+        Stereo
     };
 
     explicit QmlAVPlayer(QObject *parent = 0);
@@ -168,6 +172,9 @@ public:
     QVariantMap videoCodecOptions() const;
     void setVideoCodecOptions(const QVariantMap& value);
 
+    bool useWallclockAsTimestamps() const;
+    void setWallclockAsTimestamps(bool use_wallclock_as_timestamps);
+
     void setAudioChannels(int channels);
     int audioChannels() const;
     void setChannelLayout(ChannelLayout channel);
@@ -196,11 +203,15 @@ public:
     void setExternalAudio(const QUrl& url);
     QVariantList externalAudioTracks() const;
 
+    int internalSubtitleTrack() const;
+    void setInternalSubtitleTrack(int value);
+    QVariantList internalSubtitleTracks() const;
 public Q_SLOTS:
     void play();
     void pause();
     void stop();
-    void nextFrame();
+    void stepForward();
+    void stepBackward();
     void seek(int offset);
     void seekForward();
     void seekBackward();
@@ -229,6 +240,7 @@ Q_SIGNALS:
     void bufferProgressChanged();
     void videoCodecPriorityChanged();
     void videoCodecOptionsChanged();
+    void useWallclockAsTimestampsChanged();
     void channelLayoutChanged();
     void timeoutChanged();
     void abortOnTimeoutChanged();
@@ -236,6 +248,8 @@ Q_SIGNALS:
     void internalAudioTracksChanged();
     void externalAudioChanged();
     void externalAudioTracksChanged();
+    void internalSubtitleTrackChanged();
+    void internalSubtitleTracksChanged();
 
     void errorChanged();
     void error(Error error, const QString &errorString);
@@ -257,12 +271,14 @@ private Q_SLOTS:
 private:
     Q_DISABLE_COPY(QmlAVPlayer)
 
+    bool mUseWallclockAsTimestamps;
     bool m_complete;
     bool m_mute;
     bool mAutoPlay;
     bool mAutoLoad;
     bool mHasAudio, mHasVideo;
     bool m_fastSeek;
+    bool m_loading;
     int mLoopCount;
     qreal mPlaybackRate;
     qreal mVolume;
@@ -275,9 +291,9 @@ private:
     ChannelLayout mChannelLayout;
     int m_timeout;
     bool m_abort_timeout;
-    QVariantList m_audio_streams, m_external_audio_streams;
     int m_audio_track;
     QUrl m_audio;
+    int m_sub_track;
 
     QScopedPointer<MediaMetaData> m_metaData;
     QVariantMap vcodec_opt;

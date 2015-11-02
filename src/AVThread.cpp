@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -75,18 +75,29 @@ bool AVThread::isPaused() const
     return d.paused || d.next_pause;
 }
 
-bool AVThread::installFilter(Filter *filter, bool lock)
+bool AVThread::installFilter(Filter *filter, int index, bool lock)
 {
     DPTR_D(AVThread);
+    int p = index;
+    if (p < 0)
+        p += d.filters.size();
+    if (p < 0)
+        p = 0;
+    if (p > d.filters.size())
+        p = d.filters.size();
+    const int old = d.filters.indexOf(filter);
+    // already installed at desired position
+    if (p == old)
+        return true;
     if (lock) {
         QMutexLocker locker(&d.mutex);
-        if (d.filters.contains(filter))
-            return false;
-        d.filters.push_back(filter);
+        if (p >= 0)
+            d.filters.removeAt(p);
+        d.filters.insert(p, filter);
     } else {
-        if (d.filters.contains(filter))
-            return false;
-        d.filters.push_back(filter);
+        if (p >= 0)
+            d.filters.removeAt(p);
+        d.filters.insert(p, filter);
     }
     return true;
 }
@@ -97,9 +108,8 @@ bool AVThread::uninstallFilter(Filter *filter, bool lock)
     if (lock) {
         QMutexLocker locker(&d.mutex);
         return d.filters.removeOne(filter);
-    } else {
-        return d.filters.removeOne(filter);
     }
+    return d.filters.removeOne(filter);
 }
 
 const QList<Filter*>& AVThread::filters() const
@@ -129,6 +139,39 @@ void AVThread::scheduleFrameDrop(bool value)
         }
     };
     scheduleTask(new FrameDropTask(decoder(), value));
+}
+
+qreal AVThread::previousHistoryPts() const
+{
+    DPTR_D(const AVThread);
+    if (d.pts_history.empty()) {
+        qDebug("pts history is EMPTY");
+        return 0;
+    }
+    if (d.pts_history.size() == 1)
+        return -d.pts_history.back();
+    const qreal current_pts = d.pts_history.back();
+    for (int i = d.pts_history.size() - 2; i > 0; --i) {
+        if (d.pts_history.at(i) < current_pts)
+            return d.pts_history.at(i);
+    }
+    return -d.pts_history.front();
+}
+
+qreal AVThread::decodeFrameRate() const
+{
+    DPTR_D(const AVThread);
+    if (d.pts_history.size() <= 1)
+        return 0;
+    const qreal dt = d.pts_history.back() - d.pts_history.front();
+    if (dt <= 0)
+        return 0;
+    return d.pts_history.size()/dt;
+}
+
+void AVThread::setDropFrameOnSeek(bool value)
+{
+    d_func().drop_frame_seek = value;
 }
 
 // TODO: shall we close decoder here?
@@ -306,7 +349,9 @@ void AVThread::waitAndCheck(ulong value, qreal pts)
             us = 0;
         else
             us -= kWaitSlice;
-        us = qMin(us, ulong((double)(pts - d.clock->value())*1000000.0));
+        if (pts > 0)
+            us = qMin(us, ulong((double)(qMax<qreal>(0, pts - d.clock->value()))*1000000.0));
+        //qDebug("us: %ul, pts: %f, clock: %f", us, pts, d.clock->value());
         processNextTask();
     }
     if (us > 0) {

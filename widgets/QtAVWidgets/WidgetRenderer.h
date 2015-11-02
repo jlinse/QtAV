@@ -41,8 +41,8 @@ public:
     explicit WidgetRenderer(QWidget *parent = 0, Qt::WindowFlags f = 0);
     virtual VideoRendererId id() const;
     virtual QWidget* widget() { return this; }
-signals:
-    void imageReady();
+Q_SIGNALS:
+    QTAVWIDGETS_DEPRECATED void imageReady(); // add frameReady() in the future?
 protected:
     virtual bool receiveFrame(const VideoFrame& frame);
     virtual bool needUpdateBackground() const;

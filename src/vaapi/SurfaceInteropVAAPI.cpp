@@ -18,17 +18,32 @@
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
-
 #include "SurfaceInteropVAAPI.h"
 #include "utils/OpenGLHelper.h"
 #include "QtAV/VideoFrame.h"
 #include "utils/Logger.h"
-#ifndef QT_OPENGL_ES_2
+#if VA_X11_INTEROP
+#ifdef QT_X11EXTRAS_LIB
+#include <QtX11Extras/QX11Info>
+#endif //QT_X11EXTRAS_LIB
 #include <va/va_x11.h>
-#endif
+#if QTAV_HAVE(EGL_CAPI)
+#define EGL_CAPI_NS
+#include "capi/egl_api.h"
+#include <EGL/eglext.h>
+#endif //QTAV_HAVE(EGL_CAPI)
+#if !defined(QT_OPENGL_ES_2)
+#include <GL/glx.h>
+#endif //!defined(QT_OPENGL_ES_2)
+#endif //VA_X11_INTEROP
 
 namespace QtAV {
 namespace vaapi {
+void SurfaceInteropVAAPI::setSurface(const surface_ptr& surface,  int w, int h) {
+    m_surface = surface;
+    frame_width = (w ? w : surface->width());
+    frame_height = (h ? h : surface->height());
+}
 
 void* SurfaceInteropVAAPI::map(SurfaceType type, const VideoFormat &fmt, void *handle, int plane)
 {
@@ -40,7 +55,7 @@ void* SurfaceInteropVAAPI::map(SurfaceType type, const VideoFormat &fmt, void *h
     if (!m_surface)
         return 0;
     if (type == GLTextureSurface) {
-        if (m_resource->map(m_surface, *((GLuint*)handle), plane))
+        if (m_resource->map(m_surface, *((GLuint*)handle), frame_width, frame_height, plane))
             return handle;
         return NULL;
     } else if (type == HostMemorySurface) {
@@ -119,15 +134,9 @@ void* SurfaceInteropVAAPI::mapToHost(const VideoFormat &format, void *handle, in
         src[i] = (uint8_t*)p_base + image.offsets[i];
         pitch[i] = image.pitches[i];
     }
-    if (swap_uv) {
-        std::swap(src[1], src[2]);
-        std::swap(pitch[1], pitch[2]);
-    }
-    VideoFrame frame = VideoFrame(m_surface->width(), m_surface->height(), fmt);
-    frame.setBits(src);
-    frame.setBytesPerLine(pitch);
-    frame = frame.to(format);
-
+    VideoFrame frame = VideoFrame::fromGPU(fmt, frame_width, frame_height, m_surface->height(), src, pitch, true, swap_uv);
+    if (format != fmt)
+        frame = frame.to(format);
     VAWARN(vaUnmapBuffer(m_surface->vadisplay(), image.buf));
     vaDestroyImage(m_surface->vadisplay(), image.image_id);
     image.image_id = VA_INVALID_ID;
@@ -136,7 +145,7 @@ void* SurfaceInteropVAAPI::mapToHost(const VideoFormat &format, void *handle, in
     *f = frame;
     return f;
 }
-
+#ifndef QT_NO_OPENGL
 surface_glx_ptr GLXInteropResource::surfaceGLX(const display_ptr &dpy, GLuint tex)
 {
     surface_glx_ptr glx = glx_surfaces[tex];
@@ -149,8 +158,10 @@ surface_glx_ptr GLXInteropResource::surfaceGLX(const display_ptr &dpy, GLuint te
     return glx;
 }
 
-bool GLXInteropResource::map(const surface_ptr& surface, GLuint tex, int)
+bool GLXInteropResource::map(const surface_ptr& surface, GLuint tex, int w, int h, int)
 {
+    Q_UNUSED(w);
+    Q_UNUSED(h);
     surface_glx_ptr glx = surfaceGLX(surface->display(), tex);
     if (!glx) {
         qWarning("Fail to create vaapi glx surface");
@@ -161,142 +172,264 @@ bool GLXInteropResource::map(const surface_ptr& surface, GLuint tex, int)
     VAWARN(vaSyncSurface(surface->vadisplay(), surface->get()));
     return true;
 }
+#endif //QT_NO_OPENGL
+#if VA_X11_INTEROP
+class X11 {
+protected:
+    Display *display;
+public:
+    X11() : display(NULL), pixmap(0) {}
+    virtual ~X11() {
+        if (pixmap)
+            XFreePixmap((::Display*)display, pixmap);
+        pixmap = 0;
+    }
+    virtual Display* ensureGL() = 0;
+    virtual bool bindPixmap(int w, int h) = 0;
+    virtual void bindTexture() = 0;
+    Pixmap pixmap;
+protected:
+    int createPixmap(int w, int h) {
+        if (pixmap) {
+            qDebug("XFreePixmap");
+            XFreePixmap((::Display*)display, pixmap);
+            pixmap = 0;
+        }
+        XWindowAttributes xwa;
+        XGetWindowAttributes((::Display*)display, DefaultRootWindow((::Display*)display), &xwa);
+        pixmap = XCreatePixmap((::Display*)display, DefaultRootWindow((::Display*)display), w, h, xwa.depth);
+        // mpv always use 24 bpp
+        qDebug("XCreatePixmap %lu: %dx%d, depth: %d", pixmap, w, h, xwa.depth);
+        if (!pixmap) {
+            qWarning("X11InteropResource could not create pixmap");
+            return 0;
+        }
+        return xwa.depth;
+    }
+};
 
-#ifndef QT_OPENGL_ES_2
-X11InteropResource::glXReleaseTexImage_t X11InteropResource::glXReleaseTexImage = 0;
-X11InteropResource::glXBindTexImage_t X11InteropResource::glXBindTexImage = 0;
+#define RESOLVE_FUNC(func, resolver, st) do {\
+    if (!func) { \
+        typedef void (*ft)(void); \
+        ft f = resolver((st)#func); \
+        if (!f) { \
+            qWarning(#func " is not available"); \
+            return 0; \
+        } \
+        ft *fp = (ft*)(&func); \
+        *fp = f; \
+    }} while(0)
+#define RESOLVE_EGL(func) RESOLVE_FUNC(func, eglGetProcAddress, const char*)
+#define RESOLVE_GLX(func) RESOLVE_FUNC(func, glXGetProcAddressARB, const GLubyte*)
+
+#if QTAV_HAVE(EGL_CAPI)
+//static PFNEGLQUERYNATIVEDISPLAYNVPROC eglQueryNativeDisplayNV = NULL;
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR = NULL;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = NULL;
+static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = NULL;
+class EGL Q_DECL_FINAL: public X11 {
+public:
+    EGL() : dpy(EGL_NO_DISPLAY) {
+        for (unsigned i = 0; i < sizeof(image)/sizeof(image[0]); ++i)
+            image[i] = EGL_NO_IMAGE_KHR;
+    }
+    ~EGL() {
+        for (unsigned i = 0; i < sizeof(image)/sizeof(image[0]); ++i) {
+            if (image[i] != EGL_NO_IMAGE_KHR) {
+                EGL_WARN(eglDestroyImageKHR(dpy, image[i]));
+            }
+        }
+    }
+    Display* ensureGL() Q_DECL_OVERRIDE {
+        if (display && eglCreateImageKHR && glEGLImageTargetTexture2DOES)
+            return display;
+        // we must use the native display egl used, otherwise eglCreateImageKHR will fail.
+#ifdef QT_X11EXTRAS_LIB
+        display = (Display*)QX11Info::display();
+#endif //QT_X11EXTRAS_LIB
+        //RESOLVE_EGL(eglQueryNativeDisplayNV);
+        RESOLVE_EGL(glEGLImageTargetTexture2DOES);
+        RESOLVE_EGL(eglCreateImageKHR);
+        RESOLVE_EGL(eglDestroyImageKHR);
+        return display;
+    }
+    bool bindPixmap(int w, int h) Q_DECL_OVERRIDE {
+        if (!createPixmap(w, h))
+            return false;
+        if (dpy == EGL_NO_DISPLAY) {
+            qDebug("eglGetCurrentDisplay");
+            dpy = eglGetCurrentDisplay();
+        }
+        EGL_ENSURE(image[0] =  eglCreateImageKHR(dpy, EGL_NO_CONTEXT, EGL_NATIVE_PIXMAP_KHR, (EGLClientBuffer)pixmap, NULL), false);
+        if (!image[0]) {
+            qWarning("eglCreateImageKHR error %#X, image: %p", eglGetError(), image[0]);
+            return false;
+        }
+        return true;
+    }
+    void bindTexture() Q_DECL_OVERRIDE {
+        glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image[0]);
+    }
+    EGLDisplay dpy;
+    EGLImageKHR image[4];
+};
+#endif //QTAV_HAVE(EGL_CAPI)
+#if !defined(QT_OPENGL_ES_2)
+typedef void (*glXBindTexImageEXT_t)(Display *dpy, GLXDrawable draw, int buffer, int *a);
+typedef void (*glXReleaseTexImageEXT_t)(Display *dpy, GLXDrawable draw, int buffer);
+static glXReleaseTexImageEXT_t glXReleaseTexImageEXT = 0;
+static glXBindTexImageEXT_t glXBindTexImageEXT = 0;
+
+class GLX Q_DECL_FINAL: public X11 {
+public:
+    GLX() : fbc(0), glxpixmap(0) {}
+    ~GLX() {
+        if (glxpixmap) { //TODO: does the thread matters?
+            glXReleaseTexImageEXT(display, glxpixmap, GLX_FRONT_EXT);
+            XSync((::Display*)display, False);
+            glXDestroyPixmap((::Display*)display, glxpixmap);
+        }
+        glxpixmap = 0;
+    }
+    Display* ensureGL() Q_DECL_OVERRIDE {
+        if (fbc && display)
+            return display;
+        if (!display) {
+            qDebug("glXGetCurrentDisplay");
+            display = (Display*)glXGetCurrentDisplay();
+            if (!display)
+                return 0;
+        }
+        int xscr = DefaultScreen(display);
+        const char *glxext = glXQueryExtensionsString((::Display*)display, xscr);
+        if (!glxext || !strstr(glxext, "GLX_EXT_texture_from_pixmap"))
+            return 0;
+        RESOLVE_GLX(glXBindTexImageEXT);
+        RESOLVE_GLX(glXReleaseTexImageEXT);
+        int attribs[] = {
+            GLX_RENDER_TYPE, GLX_RGBA_BIT, //xbmc
+            GLX_X_RENDERABLE, True, //xbmc
+            GLX_BIND_TO_TEXTURE_RGBA_EXT, True,
+            GLX_DRAWABLE_TYPE, GLX_PIXMAP_BIT,
+            GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_TEXTURE_2D_BIT_EXT,
+            GLX_Y_INVERTED_EXT, True,
+            GLX_DOUBLEBUFFER, False,
+            GLX_RED_SIZE, 8,
+            GLX_GREEN_SIZE, 8,
+            GLX_BLUE_SIZE, 8,
+            GLX_ALPHA_SIZE, 8, //0 for 24 bpp(vdpau)? mpv is 0
+            None
+        };
+        int fbcount;
+        GLXFBConfig *fbcs = glXChooseFBConfig((::Display*)display, xscr, attribs, &fbcount);
+        if (!fbcount) {
+            qWarning("No texture-from-pixmap support");
+            return 0;
+        }
+        if (fbcount)
+            fbc = fbcs[0];
+        XFree(fbcs);
+        return display;
+    }
+    bool bindPixmap(int w, int h) Q_DECL_OVERRIDE {
+        const int depth = createPixmap(w, h);
+        if (depth <= 0)
+            return false;
+        const int attribs[] = {
+            GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
+            GLX_TEXTURE_FORMAT_EXT, depth == 32 ? GLX_TEXTURE_FORMAT_RGBA_EXT : GLX_TEXTURE_FORMAT_RGB_EXT,
+            GLX_MIPMAP_TEXTURE_EXT, False,
+            None,
+        };
+        glxpixmap = glXCreatePixmap((::Display*)display, fbc, pixmap, attribs);
+        return true;
+    }
+    void bindTexture() Q_DECL_OVERRIDE {
+        glXBindTexImageEXT(display, glxpixmap, GLX_FRONT_EXT, NULL);
+    }
+    GLXFBConfig fbc;
+    GLXPixmap glxpixmap;
+};
+#endif // !defined(QT_OPENGL_ES_2)
 
 X11InteropResource::X11InteropResource()
     : InteropResource()
     , VAAPI_X11()
-    , xdisplay(0)
-    , fbc(0)
-    , pixmap(0)
-    , glxpixmap(0)
+    , xdisplay(NULL)
     , width(0)
     , height(0)
+    , x11(NULL)
 {}
 
 X11InteropResource::~X11InteropResource()
 {
-    if (glxpixmap) {
-        glXReleaseTexImage(xdisplay, glxpixmap, GLX_FRONT_EXT);
-        XSync((::Display*)xdisplay, False);
-        glXDestroyPixmap((::Display*)xdisplay, glxpixmap);
-    }
-    glxpixmap = 0;
-
-    if (pixmap)
-        XFreePixmap((::Display*)xdisplay, pixmap);
-    pixmap = 0;
-}
-
-bool X11InteropResource::ensureGLX()
-{
-    if (fbc)
-        return true;
-    xdisplay = (Display*)glXGetCurrentDisplay();
-    if (!xdisplay)
-        return false;
-    int xscr = DefaultScreen(xdisplay);
-    const char *glxext = glXQueryExtensionsString((::Display*)xdisplay, xscr);
-    if (!glxext || !strstr(glxext, "GLX_EXT_texture_from_pixmap"))
-        return false;
-    glXBindTexImage = (glXBindTexImage_t)glXGetProcAddressARB((const GLubyte*)"glXBindTexImageEXT");
-    if (!glXBindTexImage) {
-        qWarning("glXBindTexImage not found");
-        return false;
-    }
-    glXReleaseTexImage = (glXReleaseTexImage_t)glXGetProcAddressARB((const GLubyte*)"glXReleaseTexImageEXT");
-    if (!glXReleaseTexImage) {
-        qWarning("glXReleaseTexImage not found");
-        return false;
-    }
-    int attribs[] = {
-        GLX_RENDER_TYPE, GLX_RGBA_BIT, //xbmc
-        GLX_X_RENDERABLE, True, //xbmc
-        GLX_BIND_TO_TEXTURE_RGBA_EXT, True,
-        GLX_DRAWABLE_TYPE, GLX_PIXMAP_BIT,
-        GLX_BIND_TO_TEXTURE_TARGETS_EXT, GLX_TEXTURE_2D_BIT_EXT,
-        GLX_Y_INVERTED_EXT, True,
-        GLX_DOUBLEBUFFER, False,
-        GLX_RED_SIZE, 8,
-        GLX_GREEN_SIZE, 8,
-        GLX_BLUE_SIZE, 8,
-        GLX_ALPHA_SIZE, 8,
-        None
-    };
-
-    int fbcount;
-    GLXFBConfig *fbcs = glXChooseFBConfig((::Display*)xdisplay, xscr, attribs, &fbcount);
-    if (!fbcount) {
-        qWarning("No texture-from-pixmap support");
-        return false;
-    }
-    if (fbcount)
-        fbc = fbcs[0];
-    XFree(fbcs);
-    return true;
+    delete x11;
 }
 
 bool X11InteropResource::ensurePixmaps(int w, int h)
 {
-    if (pixmap && width == w && height == h)
+    if (width == w && height == h)
         return true;
-    if (!ensureGLX()) {
+    if (!x11) {
+#if QTAV_HAVE(EGL_CAPI)
+#if defined(QT_OPENGL_ES_2)
+        static const bool use_egl = true;
+#else
+        // FIXME: may fallback to xcb_glx(default)
+        static const bool use_egl = qgetenv("QT_XCB_GL_INTEGRATION") == "xcb_egl";
+#endif //defined(QT_OPENGL_ES_2)
+        if (use_egl) {
+            x11 = new EGL();
+        } else
+#endif //QTAV_HAVE(EGL_CAPI)
+        {
+#if !defined(QT_OPENGL_ES_2)
+            x11 = new GLX();
+#endif // defined(QT_OPENGL_ES_2)
+        }
+    }
+    if (!x11) {
+        qWarning("no EGL and GLX interop (TFP) support");
         return false;
     }
-
-    XWindowAttributes xwa;
-    XGetWindowAttributes((::Display*)xdisplay, RootWindow((::Display*)xdisplay, DefaultScreen((::Display*)xdisplay)), &xwa);
-    pixmap = XCreatePixmap((::Display*)xdisplay, RootWindow((::Display*)xdisplay, DefaultScreen((::Display*)xdisplay)), w, h, xwa.depth);
-    qDebug("XCreatePixmap: %lu, depth: %d", pixmap, xwa.depth);
-    if (!pixmap) {
-        qWarning("VAAPI_X_GLX_Interop could not create pixmap");
+    xdisplay  = x11->ensureGL();
+    if (!xdisplay)
         return false;
-    }
-
-    int attribs[] = {
-        GLX_TEXTURE_TARGET_EXT, GLX_TEXTURE_2D_EXT,
-        GLX_TEXTURE_FORMAT_EXT, GLX_TEXTURE_FORMAT_RGBA_EXT,
-        GLX_MIPMAP_TEXTURE_EXT, False,
-        None,
-    };
-    glxpixmap = glXCreatePixmap((::Display*)xdisplay, fbc, pixmap, attribs);
+    if (!x11->bindPixmap(w, h))
+        return false;
     width = w;
     height = h;
     return true;
 }
 
-bool X11InteropResource::map(const surface_ptr& surface, GLuint tex, int)
+bool X11InteropResource::map(const surface_ptr& surface, GLuint tex, int w, int h, int)
 {
-    if (!ensurePixmaps(surface->width(), surface->height()))
+    if (surface->width() <= 0 || surface->height() <= 0) {
+        qWarning("invalid surface size");
+        return false;
+    }
+    if (!ensurePixmaps(w, h)) //pixmap with frame size
         return false;
     VAWARN(vaSyncSurface(surface->vadisplay(), surface->get()));
-
-    VA_ENSURE_TRUE(vaPutSurface(surface->vadisplay(), surface->get(), pixmap
-                                , 0, 0, surface->width(), surface->height()
-                                , 0, 0, surface->width(), surface->height()
-                                , NULL, 0, VA_FRAME_PICTURE | VA_SRC_BT709)
-                   , NULL);
-
+    // FIXME: invalid surface at the first time vaPutSurface is called. If return false, vaPutSurface will always fail, why?
+    VAWARN(vaPutSurface(surface->vadisplay(), surface->get(), x11->pixmap
+                                , 0, 0, w, h
+                                , 0, 0, w, h
+                                , NULL, 0, VA_FRAME_PICTURE | surface->colorSpace())
+                   );
     XSync((::Display*)xdisplay, False);
     DYGL(glBindTexture(GL_TEXTURE_2D, tex));
-    glXBindTexImage(xdisplay, glxpixmap, GLX_FRONT_EXT, NULL);
+    x11->bindTexture();
     DYGL(glBindTexture(GL_TEXTURE_2D, 0));
-
     return true;
 }
 
 bool X11InteropResource::unmap(GLuint tex)
 {
-    DYGL(glBindTexture(GL_TEXTURE_2D, tex));
-    glXReleaseTexImage(xdisplay, glxpixmap, GLX_FRONT_EXT);
-    DYGL(glBindTexture(GL_TEXTURE_2D, 0));
+    Q_UNUSED(tex);
+    // can not call glXReleaseTexImageEXT otherwise the texture will containts no image data
     return true;
 }
-
-#endif //QT_OPENGL_ES_2
+#endif //VA_X11_INTEROP
 } //namespace QtAV
 } //namespace vaapi
-

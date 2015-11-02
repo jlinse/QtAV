@@ -24,22 +24,22 @@
 #include <QtAV/AudioOutput.h>
 #include <QtAV/VideoCapture.h>
 
-template<typename ID, typename Factory>
+template<typename ID, typename T>
 static QStringList idsToNames(QVector<ID> ids) {
     QStringList decs;
     foreach (ID id, ids) {
-        decs.append(Factory::name(id).c_str());
+        decs.append(QString::fromLatin1(T::name(id)));
     }
     return decs;
 }
 
-template<typename ID, typename Factory>
+template<typename ID, typename T>
 static QVector<ID> idsFromNames(const QStringList& names) {
     QVector<ID> decs;
     foreach (const QString& name, names) {
         if (name.isEmpty())
             continue;
-        ID id = Factory::id(name.toStdString(), false);
+        ID id = T::id(name.toLatin1().constData());
         if (id == 0)
             continue;
         decs.append(id);
@@ -48,15 +48,16 @@ static QVector<ID> idsFromNames(const QStringList& names) {
 }
 
 static inline QStringList VideoDecodersToNames(QVector<QtAV::VideoDecoderId> ids) {
-    return idsToNames<QtAV::VideoDecoderId, VideoDecoderFactory>(ids);
+    return idsToNames<QtAV::VideoDecoderId, VideoDecoder>(ids);
 }
 
 static inline QVector<VideoDecoderId> VideoDecodersFromNames(const QStringList& names) {
-    return idsFromNames<QtAV::VideoDecoderId, VideoDecoderFactory>(names);
+    return idsFromNames<QtAV::VideoDecoderId, VideoDecoder>(names);
 }
 
 QmlAVPlayer::QmlAVPlayer(QObject *parent) :
     QObject(parent)
+  , mUseWallclockAsTimestamps(false)
   , m_complete(false)
   , m_mute(false)
   , mAutoPlay(false)
@@ -64,6 +65,7 @@ QmlAVPlayer::QmlAVPlayer(QObject *parent) :
   , mHasAudio(false)
   , mHasVideo(false)
   , m_fastSeek(false)
+  , m_loading(false)
   , mLoopCount(1)
   , mPlaybackRate(1.0)
   , mVolume(1.0)
@@ -74,6 +76,7 @@ QmlAVPlayer::QmlAVPlayer(QObject *parent) :
   , m_timeout(30000)
   , m_abort_timeout(true)
   , m_audio_track(0)
+  , m_sub_track(0)
 {
     classBegin();
 }
@@ -83,6 +86,7 @@ void QmlAVPlayer::classBegin()
     if (mpPlayer)
         return;
     mpPlayer = new AVPlayer(this);
+    connect(mpPlayer, SIGNAL(internalSubtitleTracksChanged(QVariantList)), SIGNAL(internalSubtitleTracksChanged()));
     connect(mpPlayer, SIGNAL(internalAudioTracksChanged(QVariantList)), SIGNAL(internalAudioTracksChanged()));
     connect(mpPlayer, SIGNAL(externalAudioTracksChanged(QVariantList)), SIGNAL(externalAudioTracksChanged()));
     connect(mpPlayer, SIGNAL(durationChanged(qint64)), SIGNAL(durationChanged()));
@@ -100,7 +104,7 @@ void QmlAVPlayer::classBegin()
     connect(mpPlayer->audio(), SIGNAL(volumeChanged(qreal)), SLOT(applyVolume()), Qt::DirectConnection);
     connect(mpPlayer->audio(), SIGNAL(muteChanged(bool)), SLOT(applyVolume()), Qt::DirectConnection);
 
-    mVideoCodecs << "FFmpeg";
+    mVideoCodecs << QStringLiteral("FFmpeg");
 
     m_metaData.reset(new MediaMetaData());
 
@@ -222,7 +226,7 @@ VideoCapture *QmlAVPlayer::videoCapture() const
 
 QStringList QmlAVPlayer::videoCodecs() const
 {
-    return VideoDecodersToNames(QtAV::GetRegistedVideoDecoderIds());
+    return VideoDecodersToNames(VideoDecoder::registered());
 }
 
 void QmlAVPlayer::setVideoCodecPriority(const QStringList &p)
@@ -250,6 +254,31 @@ void QmlAVPlayer::setVideoCodecOptions(const QVariantMap &value)
     // player maybe not ready
 }
 
+bool QmlAVPlayer::useWallclockAsTimestamps() const
+{
+    return mUseWallclockAsTimestamps;
+}
+
+void QmlAVPlayer::setWallclockAsTimestamps(bool use_wallclock_as_timestamps)
+{
+    if (mUseWallclockAsTimestamps == use_wallclock_as_timestamps)
+        return;
+
+    mUseWallclockAsTimestamps = use_wallclock_as_timestamps;
+
+    QVariantHash opt = mpPlayer->optionsForFormat();
+
+    if (use_wallclock_as_timestamps) {
+        opt[QStringLiteral("use_wallclock_as_timestamps")] = 1;
+        mpPlayer->setBufferValue(1);
+    } else {
+        opt.remove(QStringLiteral("use_wallclock_as_timestamps"));
+        mpPlayer->setBufferValue(-1);
+    }
+    mpPlayer->setOptionsForFormat(opt);
+    emit useWallclockAsTimestampsChanged();
+}
+
 static AudioFormat::ChannelLayout toAudioFormatChannelLayout(QmlAVPlayer::ChannelLayout ch)
 {
     struct {
@@ -259,7 +288,7 @@ static AudioFormat::ChannelLayout toAudioFormatChannelLayout(QmlAVPlayer::Channe
     { QmlAVPlayer::Left, AudioFormat::ChannelLayout_Left },
     { QmlAVPlayer::Right, AudioFormat::ChannelLayout_Right },
     { QmlAVPlayer::Mono, AudioFormat::ChannelLayout_Mono },
-    { QmlAVPlayer::Stero, AudioFormat::ChannelLayout_Stero },
+    { QmlAVPlayer::Stereo, AudioFormat::ChannelLayout_Stereo },
     };
     for (uint i = 0; i < sizeof(map)/sizeof(map[0]); ++i) {
         if (map[i].ch == ch)
@@ -349,6 +378,26 @@ QVariantList QmlAVPlayer::externalAudioTracks() const
 QVariantList QmlAVPlayer::internalAudioTracks() const
 {
     return mpPlayer ? mpPlayer->internalAudioTracks() : QVariantList();
+}
+
+int QmlAVPlayer::internalSubtitleTrack() const
+{
+    return m_sub_track;
+}
+
+void QmlAVPlayer::setInternalSubtitleTrack(int value)
+{
+    if (m_sub_track == value)
+        return;
+    m_sub_track = value;
+    Q_EMIT internalSubtitleTrackChanged();
+    if (mpPlayer)
+        mpPlayer->setSubtitleStream(value);
+}
+
+QVariantList QmlAVPlayer::internalSubtitleTracks() const
+{
+    return mpPlayer ? mpPlayer->internalSubtitleTracks() : QVariantList();
 }
 
 QStringList QmlAVPlayer::videoCodecPriority() const
@@ -480,6 +529,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
             mpPlayer->setInterruptOnTimeout(m_abort_timeout);
             mpPlayer->setRepeat(mLoopCount - 1);
             mpPlayer->setAudioStream(m_audio_track);
+            mpPlayer->setSubtitleStream(m_sub_track);
             if (!vcodec_opt.isEmpty()) {
                 QVariantHash vcopt;
                 for (QVariantMap::const_iterator cit = vcodec_opt.cbegin(); cit != vcodec_opt.cend(); ++cit) {
@@ -488,6 +538,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
                 if (!vcopt.isEmpty())
                     mpPlayer->setOptionsForVideoCodec(vcopt);
             }
+            m_loading = true;
             mpPlayer->play();
         }
         break;
@@ -498,6 +549,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
     case StoppedState:
         mpPlayer->stop();
         mpPlayer->unload();
+        m_loading = false;
         mPlaybackState = StoppedState;
         break;
     default:
@@ -527,7 +579,7 @@ AVPlayer* QmlAVPlayer::player()
 
 void QmlAVPlayer::play(const QUrl &url)
 {
-    if (mSource == url && playbackState() != StoppedState)
+    if (mSource == url && (playbackState() != StoppedState || m_loading))
         return;
     setSource(url);
     if (!autoPlay())
@@ -536,6 +588,9 @@ void QmlAVPlayer::play(const QUrl &url)
 
 void QmlAVPlayer::play()
 {
+    // if not autoPlay, maybe a different source was set and play() was not called
+    if (isAutoLoad() && (playbackState() != StoppedState || m_loading))
+        return;
     setPlaybackState(PlayingState);
 }
 
@@ -549,11 +604,18 @@ void QmlAVPlayer::stop()
     setPlaybackState(StoppedState);
 }
 
-void QmlAVPlayer::nextFrame()
+void QmlAVPlayer::stepForward()
 {
     if (!mpPlayer)
         return;
-    mpPlayer->playNextFrame();
+    mpPlayer->stepForward();
+}
+
+void QmlAVPlayer::stepBackward()
+{
+    if (!mpPlayer)
+        return;
+    return mpPlayer->stepBackward();
 }
 
 void QmlAVPlayer::seek(int offset)
@@ -597,6 +659,8 @@ void QmlAVPlayer::_q_error(const AVError &e)
         mError = AccessDenied;
     //else
       //  err = ServiceMissing;
+    if (ec != AVError::NoError)
+        m_loading = false;
     emit error(mError, mErrorString);
     emit errorChanged();
 }
@@ -620,6 +684,7 @@ void QmlAVPlayer::_q_paused(bool p)
 
 void QmlAVPlayer::_q_started()
 {
+    m_loading = false;
     mPlaybackState = PlayingState;
     applyChannelLayout();
     // applyChannelLayout() first because it may reopen audio device
@@ -630,7 +695,7 @@ void QmlAVPlayer::_q_started()
     // TODO: in load()?
     m_metaData->setValuesFromStatistics(mpPlayer->statistics());
     if (!mHasAudio) {
-        mHasAudio = mpPlayer->audioStreamCount() > 0;
+        mHasAudio = !mpPlayer->internalAudioTracks().isEmpty();
         if (mHasAudio)
             emit hasAudioChanged();
     }

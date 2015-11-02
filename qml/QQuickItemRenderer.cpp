@@ -25,21 +25,17 @@
 #include <QtQuick/QQuickWindow>
 #include <QtQuick/QSGFlatColorMaterial>
 #include <QtQuick/QSGSimpleTextureNode>
-#include <QtAV/FactoryDefine.h>
 #include <QtAV/AVPlayer.h>
-#include <QtAV/VideoRendererTypes.h> //it declares a factory we need
+#include <QtAV/OpenGLVideo.h>
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include "QtAV/private/VideoRenderer_p.h"
 #include "QmlAV/QmlAVPlayer.h"
 #include "QmlAV/SGVideoNode.h"
 
-namespace QtAV
-{
+namespace QtAV {
 static const VideoRendererId VideoRendererId_QQuickItem = mkid::id32base36_6<'Q','Q','I','t','e','m'>::value;
-
-FACTORY_REGISTER_ID_AUTO(VideoRenderer, QQuickItem, "QQuickItem")
-
+FACTORY_REGISTER(VideoRenderer, QQuickItem, "QQuickItem")
 
 class QQuickItemRendererPrivate : public VideoRendererPrivate
 {
@@ -99,7 +95,8 @@ bool QQuickItemRenderer::isSupported(VideoFormat::PixelFormat pixfmt) const
         return false;
     if (!isOpenGL())
         return VideoFormat::isRGB(pixfmt);
-    return pixfmt != VideoFormat::Format_YUYV && pixfmt != VideoFormat::Format_UYVY;
+    // TODO: rectangle texture is not supported (VDA)
+    return OpenGLVideo::isSupported(pixfmt);
 }
 
 bool QQuickItemRenderer::event(QEvent *e)
@@ -128,7 +125,7 @@ bool QQuickItemRenderer::receiveFrame(const VideoFrame &frame)
     DPTR_D(QQuickItemRenderer);
     d.video_frame = frame;
     if (!isOpenGL()) {
-        d.image = QImage((uchar*)frame.bits(), frame.width(), frame.height(), frame.bytesPerLine(), frame.imageFormat());
+        d.image = QImage((uchar*)frame.constBits(), frame.width(), frame.height(), frame.bytesPerLine(), frame.imageFormat());
         QRect r = realROI();
         if (r != QRect(0, 0, frame.width(), frame.height()))
             d.image = d.image.copy(r);
@@ -151,8 +148,10 @@ void QQuickItemRenderer::setSource(QObject *source)
     if (d.source == source)
         return;
     d.source = source;
+    Q_EMIT sourceChanged();
+    if (!source)
+        return;
     ((QmlAVPlayer*)source)->player()->addVideoRenderer(this);
-    emit sourceChanged();
 }
 
 QQuickItemRenderer::FillMode QQuickItemRenderer::fillMode() const
@@ -266,8 +265,6 @@ QSGNode *QQuickItemRenderer::updatePaintNode(QSGNode *node, QQuickItem::UpdatePa
 
 void QQuickItemRenderer::handleWindowChange(QQuickWindow *win)
 {
-    disconnect(this, SLOT(beforeRendering()));
-    disconnect(this, SLOT(afterRendering()));
     if (!win)
         return;
     connect(win, SIGNAL(beforeRendering()), this, SLOT(beforeRendering()), Qt::DirectConnection);
@@ -301,6 +298,12 @@ bool QQuickItemRenderer::onSetOrientation(int value)
     }
     emit orientationChanged();
     return true;
+}
+
+void QQuickItemRenderer::onFrameSizeChanged(const QSize &size)
+{
+    Q_UNUSED(size);
+    Q_EMIT frameSizeChanged();
 }
 
 } // namespace QtAV

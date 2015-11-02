@@ -48,6 +48,8 @@ public:
     VideoDecoderFFmpegBasePrivate()
         : VideoDecoderPrivate()
         , frame(0)
+        , width(0)
+        , height(0)
     {
         avcodec_register_all();
         frame = av_frame_alloc();
@@ -59,8 +61,10 @@ public:
         }
     }
     void updateColorDetails(VideoFrame* f);
+    qreal getDAR(AVFrame *f);
 
     AVFrame *frame; //set once and not change
+    int width, height; //The current decoded frame size
 };
 
 } //namespace QtAV

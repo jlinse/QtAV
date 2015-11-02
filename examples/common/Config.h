@@ -39,6 +39,8 @@
 class COMMON_EXPORT Config : public QObject
 {
     Q_OBJECT
+    // last file opened by file dialog
+    Q_PROPERTY(QString lastFile READ lastFile WRITE setLastFile NOTIFY lastFileChanged)
     Q_PROPERTY(qreal forceFrameRate READ forceFrameRate WRITE setForceFrameRate NOTIFY forceFrameRateChanged)
     Q_PROPERTY(QStringList decoderPriorityNames READ decoderPriorityNames WRITE setDecoderPriorityNames NOTIFY decoderPriorityNamesChanged)
     Q_PROPERTY(QString captureDir READ captureDir WRITE setCaptureDir NOTIFY captureDirChanged)
@@ -53,15 +55,28 @@ class COMMON_EXPORT Config : public QObject
     Q_PROPERTY(bool subtitleOutline READ subtitleOutline WRITE setSubtitleOutline NOTIFY subtitleOutlineChanged)
     Q_PROPERTY(int subtitleBottomMargin READ subtitleBottomMargin WRITE setSubtitleBottomMargin NOTIFY subtitleBottomMarginChanged)
     Q_PROPERTY(qreal subtitleDelay READ subtitleDelay WRITE setSubtitleDelay NOTIFY subtitleDelayChanged)
+    // font properties for libass engine
+    Q_PROPERTY(QString assFontFile READ assFontFile WRITE setAssFontFile NOTIFY assFontFileChanged)
+    Q_PROPERTY(QString assFontsDir READ assFontsDir WRITE setAssFontsDir NOTIFY assFontsDirChanged)
+    Q_PROPERTY(bool assFontFileForced READ isAssFontFileForced WRITE setAssFontFileForced NOTIFY assFontFileForcedChanged)
+
     Q_PROPERTY(bool previewEnabled READ previewEnabled WRITE setPreviewEnabled NOTIFY previewEnabledChanged)
     Q_PROPERTY(int previewWidth READ previewWidth WRITE setPreviewWidth NOTIFY previewWidthChanged)
     Q_PROPERTY(int previewHeight READ previewHeight WRITE setPreviewHeight NOTIFY previewHeightChanged)
-    Q_PROPERTY(bool ANGLE READ isANGLE WRITE setANGLE NOTIFY ANGLEChanged)
+    Q_PROPERTY(OpenGLType openGLType READ openGLType WRITE setOpenGLType NOTIFY openGLTypeChanged)
     Q_PROPERTY(QString ANGLEPlatform READ getANGLEPlatform WRITE setANGLEPlatform NOTIFY ANGLEPlatformChanged)
     Q_PROPERTY(bool avformatOptionsEnabled READ avformatOptionsEnabled WRITE setAvformatOptionsEnabled NOTIFY avformatOptionsEnabledChanged)
     Q_PROPERTY(qreal timeout READ timeout WRITE setTimeout NOTIFY timeoutChanged)
     Q_PROPERTY(int bufferValue READ bufferValue WRITE setBufferValue NOTIFY bufferValueChanged)
+    Q_ENUMS(OpenGLType)
 public:
+    enum OpenGLType { // currently only for windows
+        Auto,
+        Desktop,
+        OpenGLES,
+        Software
+    };
+
     static Config& instance();
 
     Q_INVOKABLE bool reset();
@@ -72,6 +87,9 @@ public:
      */
     QString defaultDir() const;
     //void loadFromFile(const QString& file);
+
+    QString lastFile() const;
+    Config& setLastFile(const QString& value);
 
     qreal forceFrameRate() const;
     Config& setForceFrameRate(qreal value);
@@ -115,6 +133,13 @@ public:
     qreal subtitleDelay() const;
     Config& setSubtitleDelay(qreal value);
 
+    QString assFontFile() const;
+    Config& setAssFontFile(const QString& value);
+    QString assFontsDir() const;
+    Config& setAssFontsDir(const QString& value);
+    bool isAssFontFileForced() const;
+    Config& setAssFontFileForced(bool value);
+
     bool previewEnabled() const;
     Config& setPreviewEnabled(bool value);
     int previewWidth() const;
@@ -144,8 +169,9 @@ public:
     bool avfilterAudioEnable() const;
     Config& avfilterAudioEnable(bool e);
 
-    bool isANGLE() const; // false: auto
-    Config& setANGLE(bool value);
+    // can be "Desktop", "OpenGLES", "Software"
+    OpenGLType openGLType() const;
+    Config& setOpenGLType(OpenGLType value);
 
     QString getANGLEPlatform() const;
     Config& setANGLEPlatform(const QString &value);
@@ -164,6 +190,8 @@ public:
     Q_INVOKABLE QVariant operator ()(const QString& key) const;
     Q_INVOKABLE Config& operator ()(const QString& key, const QVariant& value);
 public:
+    Q_SIGNAL void changed();
+    Q_SIGNAL void lastFileChanged();
     //keyword 'signals' maybe protected. we need call the signals in other classes. Q_SIGNAL is empty
     Q_SIGNAL void forceFrameRateChanged();
     Q_SIGNAL void decodingThreadsChanged(int n);
@@ -183,10 +211,13 @@ public:
     Q_SIGNAL void subtitleOutlineColorChanged();
     Q_SIGNAL void subtitleBottomMarginChanged();
     Q_SIGNAL void subtitleDelayChanged();
+    Q_SIGNAL void assFontFileChanged();
+    Q_SIGNAL void assFontsDirChanged();
+    Q_SIGNAL void assFontFileForcedChanged();
     Q_SIGNAL void previewEnabledChanged();
     Q_SIGNAL void previewWidthChanged();
     Q_SIGNAL void previewHeightChanged();
-    Q_SIGNAL void ANGLEChanged();
+    Q_SIGNAL void openGLTypeChanged();
     Q_SIGNAL void ANGLEPlatformChanged();
     Q_SIGNAL void avformatOptionsEnabledChanged();
     Q_SIGNAL void bufferValueChanged();

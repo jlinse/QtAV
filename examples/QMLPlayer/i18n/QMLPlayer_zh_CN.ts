@@ -54,6 +54,11 @@
         <translation>快退快进</translation>
     </message>
     <message>
+        <location filename="../qml/QMLPlayer/About.qml" line="30"/>
+        <source>Swipe</source>
+        <translation>挥动</translation>
+    </message>
+    <message>
         <location filename="../qml/QMLPlayer/About.qml" line="31"/>
         <source>Space</source>
         <translation>空格</translation>
@@ -87,37 +92,52 @@
 <context>
     <name>AudioPage</name>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="7"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="8"/>
         <source>Audio</source>
         <translation>音频</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="18"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="24"/>
         <source>Channel layout</source>
         <translation>声道</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="43"/>
-        <source>Stero</source>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="50"/>
+        <source>Audio track</source>
+        <translation>音轨</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="73"/>
+        <source>External</source>
+        <translation>外挂</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="99"/>
+        <source>Stereo</source>
         <translation>立体声</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="44"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="100"/>
         <source>Mono</source>
         <translation>单声道(中央)</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="45"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="101"/>
         <source>Left</source>
         <translation>左声道</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="46"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="102"/>
         <source>Right</source>
         <translation>右声道</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/AudioPage.qml" line="34"/>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="127"/>
+        <source>Open an external audio track</source>
+        <translation>打开外挂音轨</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/AudioPage.qml" line="40"/>
         <source>Mute</source>
         <translation>静音</translation>
     </message>
@@ -147,8 +167,12 @@
     </message>
     <message>
         <location filename="../qml/QMLPlayer/ConfigPanel.qml" line="36"/>
+        <source>Misc</source>
+        <translation>杂项</translation>
+    </message>
+    <message>
         <source>Preview</source>
-        <translation>预览</translation>
+        <translation type="vanished">预览</translation>
     </message>
     <message>
         <location filename="../qml/QMLPlayer/ConfigPanel.qml" line="37"/>
@@ -267,11 +291,37 @@
     </message>
 </context>
 <context>
-    <name>PreviewPage</name>
+    <name>MiscPage</name>
     <message>
-        <location filename="../qml/QMLPlayer/PreviewPage.qml" line="5"/>
+        <location filename="../qml/QMLPlayer/MiscPage.qml" line="5"/>
+        <source>Misc</source>
+        <translation>杂项</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/MiscPage.qml" line="15"/>
         <source>Preview</source>
         <translation>预览</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/MiscPage.qml" line="29"/>
+        <source>Press on the preview item to seek</source>
+        <translation>点击预览框可进行跳转</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/MiscPage.qml" line="40"/>
+        <source>Restart to apply</source>
+        <translation>软件重启后生效</translation>
+    </message>
+</context>
+<context>
+    <name>PreviewPage</name>
+    <message>
+        <source>Preview</source>
+        <translation type="vanished">预览</translation>
+    </message>
+    <message>
+        <source>Press on the preview item to seek</source>
+        <translation type="vanished">点击预览框可进行跳转</translation>
     </message>
     <message>
         <location filename="../qml/QMLPlayer/PreviewPage.qml" line="11"/>
@@ -279,9 +329,8 @@
         <translation></translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/PreviewPage.qml" line="15"/>
         <source>Enable</source>
-        <translation>启用</translation>
+        <translation type="vanished">启用</translation>
     </message>
 </context>
 <context>
@@ -292,52 +341,105 @@
         <translation>字幕</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="18"/>
+        <source>Only for LibAss engine</source>
+        <translation type="vanished">仅对libass引擎有效</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="184"/>
+        <source>Font file</source>
+        <translation>字体文件</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="192"/>
+        <source>Force</source>
+        <translation>强制</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="202"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="232"/>
+        <source>Clear</source>
+        <translation>清除</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="224"/>
+        <source>Fonts dir</source>
+        <translation>字体目录</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="250"/>
+        <source>Embedded Subtitles</source>
+        <translation>内嵌字幕</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="280"/>
+        <source>External Subtitle</source>
+        <translation>外挂字幕</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="293"/>
         <source>Enabled</source>
         <translation>启用</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="27"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="302"/>
         <source>Auto load</source>
         <translation>自动加载</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="137"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="24"/>
+        <source>Delay</source>
+        <translation>延时</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="24"/>
+        <source>ms</source>
+        <translation>毫秒</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="144"/>
         <source>Preview</source>
         <translation>预览</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="162"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="351"/>
+        <source>Choose a font file</source>
+        <translation>选择一个字体文件</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="358"/>
+        <source>Choose a fonts dir</source>
+        <translation>选择一个字体目录</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="366"/>
         <source>Open a subtitle file</source>
         <translation>打开一个字幕文件</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="73"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="76"/>
         <source>Supported formats</source>
         <translation>支持格式</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="86"/>
         <source>Style</source>
-        <translation>样式</translation>
+        <translation type="vanished">样式</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="86"/>
         <source>Only for FFmpeg engine</source>
-        <translation>只对FFmpeg引擎有效</translation>
+        <translation type="vanished">只对FFmpeg引擎有效</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="105"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="112"/>
         <source>Font</source>
         <translation>字体</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="120"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="127"/>
         <source>Outline</source>
         <translation>轮廓</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="92"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="99"/>
         <source>Bottom margin</source>
         <translation>底部距离</translation>
     </message>
@@ -346,12 +448,12 @@
         <translation type="vanished">打开字幕文件</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="47"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="323"/>
         <source>Open</source>
         <translation>打开</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="56"/>
+        <location filename="../qml/QMLPlayer/SubtitlePage.qml" line="48"/>
         <source>Engine</source>
         <translation>引擎</translation>
     </message>
@@ -364,18 +466,27 @@
         <translation>视频解码</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="73"/>
+        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="75"/>
         <source>hardware decoding</source>
         <translation>硬解</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="73"/>
+        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="75"/>
         <source>software decoding</source>
         <translation>软解</translation>
     </message>
     <message>
-        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="12"/>
-        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="73"/>
+        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="76"/>
+        <source>Zero Copy support</source>
+        <translation>0 拷贝支持</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="83"/>
+        <source>Zero copy</source>
+        <translation>0 拷贝</translation>
+    </message>
+    <message>
+        <location filename="../qml/QMLPlayer/VideoCodec.qml" line="13"/>
         <source>Takes effect on the next play</source>
         <translation>下次播放生效</translation>
     </message>
@@ -383,7 +494,7 @@
 <context>
     <name>main</name>
     <message>
-        <location filename="../qml/QMLPlayer/main.qml" line="132"/>
+        <location filename="../qml/QMLPlayer/main.qml" line="164"/>
         <source>Subtitle</source>
         <translation>字幕</translation>
     </message>

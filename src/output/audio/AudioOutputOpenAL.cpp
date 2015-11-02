@@ -2,24 +2,27 @@
     QtAV:  Media play library based on Qt and FFmpeg
     Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
     
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-    
-    This program is distributed in the hope that it will be useful,
+*   This file is part of QtAV
+
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
+
+    This library is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-    
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with this library; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 
 
 #include "QtAV/private/AudioOutputBackend.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include <QtCore/QMutex>
 #include <QtCore/QWaitCondition>
 #include <QtCore/QVector>
@@ -42,7 +45,7 @@ class AudioOutputOpenAL Q_DECL_FINAL: public AudioOutputBackend
 {
 public:
     AudioOutputOpenAL(QObject* parent = 0);
-    QString name() const Q_DECL_FINAL { return kName;}
+    QString name() const Q_DECL_FINAL { return QLatin1String(kName);}
     QString deviceName() const;
     bool open() Q_DECL_FINAL;
     bool close() Q_DECL_FINAL;
@@ -91,12 +94,7 @@ protected:
 
 typedef AudioOutputOpenAL AudioOutputBackendOpenAL;
 static const AudioOutputBackendId AudioOutputBackendId_OpenAL = mkid::id32base36_6<'O', 'p', 'e', 'n', 'A', 'L'>::value;
-FACTORY_REGISTER_ID_AUTO(AudioOutputBackend, OpenAL, kName)
-
-void RegisterAudioOutputOpenAL_Man()
-{
-    FACTORY_REGISTER_ID_MAN(AudioOutputBackend, OpenAL, kName)
-}
+FACTORY_REGISTER(AudioOutputBackend, OpenAL, kName)
 
 #define AL_ENSURE_OK(expr, ...) \
     do { \
@@ -235,7 +233,7 @@ AudioOutputOpenAL::AudioOutputOpenAL(QObject *parent)
         p += _devices.last().size() + 1;
     }
     qDebug() << _devices;
-    openDevice(); //ensure isSupported(AudioFormat) works correctly
+    available = openDevice(); //ensure isSupported(AudioFormat) works correctly
 }
 
 bool AudioOutputOpenAL::open()
@@ -346,13 +344,13 @@ bool AudioOutputOpenAL::isSupported(AudioFormat::SampleFormat sampleFormat) cons
         return alIsExtensionPresent("AL_EXT_float32");
     if (sampleFormat == AudioFormat::SampleFormat_Double)
         return alIsExtensionPresent("AL_EXT_double");
-    // because preferredChannelLayout() is stero while s32 only supports >3 channels, so always false
+    // because preferredChannelLayout() is stereo while s32 only supports >3 channels, so always false
     return false;
 }
 
 bool AudioOutputOpenAL::isSupported(AudioFormat::ChannelLayout channelLayout) const
 {
-    return channelLayout == AudioFormat::ChannelLayout_Mono || channelLayout == AudioFormat::ChannelLayout_Stero;
+    return channelLayout == AudioFormat::ChannelLayout_Mono || channelLayout == AudioFormat::ChannelLayout_Stereo;
 }
 
 AudioFormat::SampleFormat AudioOutputOpenAL::preferredSampleFormat() const
@@ -362,7 +360,7 @@ AudioFormat::SampleFormat AudioOutputOpenAL::preferredSampleFormat() const
 
 AudioFormat::ChannelLayout AudioOutputOpenAL::preferredChannelLayout() const
 {
-    return AudioFormat::ChannelLayout_Stero;
+    return AudioFormat::ChannelLayout_Stereo;
 }
 
 QString AudioOutputOpenAL::deviceName() const
@@ -370,7 +368,7 @@ QString AudioOutputOpenAL::deviceName() const
     if (!device)
         return QString();
     const ALCchar *name = alcGetString(device, ALC_DEVICE_SPECIFIER);
-    return name;
+    return QString::fromUtf8(name);
 }
 
 AudioOutputBackend::BufferControl AudioOutputOpenAL::bufferControl() const

@@ -24,6 +24,7 @@
 #define QTAV_GLOBAL_H
 
 #include <stdarg.h>
+#include <QtCore/QByteArray> //QByteArrayLiteral check
 #include <QtCore/qglobal.h>
 #include "dptr.h"
 
@@ -67,12 +68,20 @@ Q_AV_EXPORT void setLogLevel(LogLevel value);
 Q_AV_EXPORT LogLevel logLevel();
 /// Default handler is qt message logger. Set environment QTAV_FFMPEG_LOG=0 or setFFmpegLogHandler(0) to disable.
 Q_AV_EXPORT void setFFmpegLogHandler(void(*)(void *, int, const char *, va_list));
+/*!
+ * \brief setFFmpegLogLevel
+ * \param level can be: quiet, panic, fatal, error, warn, info, verbose, debug
+ */
+Q_AV_EXPORT void setFFmpegLogLevel(const QByteArray& level);
 } //namespace QtAV
 
 // TODO: internal use. move to a private header
 #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
 #define QStringLiteral(X) QString::fromUtf8(X)
 #endif //QT_VERSION
+#ifndef QByteArrayLiteral
+#define QByteArrayLiteral(str) QByteArray(str, sizeof(str) - 1)
+#endif
 /*
  * msvc sucks! can not deal with (defined QTAV_HAVE_##FEATURE && QTAV_HAVE_##FEATURE)
  */

@@ -22,24 +22,39 @@
 #include "QmlAV/QuickFBORenderer.h"
 #include "QmlAV/QmlAVPlayer.h"
 #include "QtAV/AVPlayer.h"
-#include "QtAV/FactoryDefine.h"
 #include "QtAV/OpenGLVideo.h"
 #include "QtAV/private/VideoRenderer_p.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include <QtCore/QCoreApplication>
 #include <QtGui/QOpenGLFramebufferObject>
 #include <QtQuick/QQuickWindow>
+// for dynamicgl. qglfunctions before qt5.3 does not have portable gl functions
+#ifdef QT_OPENGL_DYNAMIC
+#include <QtGui/QOpenGLFunctions>
+#define DYGL(glFunc) QOpenGLContext::currentContext()->functions()->glFunc
+#else
+#define DYGL(glFunc) glFunc
+#endif
 
 namespace QtAV {
 static const VideoRendererId VideoRendererId_QuickFBO = mkid::id32base36_4<'Q','F','B','O'>::value;
-FACTORY_REGISTER_ID_AUTO(VideoRenderer, QuickFBO, "QuickFBO")
+FACTORY_REGISTER(VideoRenderer, QuickFBO, "QuickFBO")
 
 class FBORenderer : public QQuickFramebufferObject::Renderer
 {
 public:
     FBORenderer(QuickFBORenderer* item) : m_item(item) {}
     QOpenGLFramebufferObject* createFramebufferObject(const QSize &size) {
+        static bool sInfo = true;
+        if (sInfo) {
+            sInfo = false;
+            qDebug("GL_VERSION: %s", DYGL(glGetString(GL_VERSION)));
+            qDebug("GL_VENDOR: %s", DYGL(glGetString(GL_VENDOR)));
+            qDebug("GL_RENDERER: %s", DYGL(glGetString(GL_RENDERER)));
+            qDebug("GL_SHADING_LANGUAGE_VERSION: %s", DYGL(glGetString(GL_SHADING_LANGUAGE_VERSION)));
+        }
+
         m_item->fboSizeChanged(size);
         return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
     }
@@ -133,8 +148,10 @@ void QuickFBORenderer::setSource(QObject *source)
     if (d.source == source)
         return;
     d.source = source;
+    Q_EMIT sourceChanged();
+    if (!source)
+        return;
     ((QmlAVPlayer*)source)->player()->addVideoRenderer(this);
-    emit sourceChanged();
 }
 
 QuickFBORenderer::FillMode QuickFBORenderer::fillMode() const
@@ -249,6 +266,12 @@ void QuickFBORenderer::onSetOutAspectRatioMode(OutAspectRatioMode mode)
     Q_UNUSED(mode);
     DPTR_D(QuickFBORenderer);
     d.setupAspectRatio();
+}
+
+void QuickFBORenderer::onFrameSizeChanged(const QSize &size)
+{
+    Q_UNUSED(size);
+    Q_EMIT frameSizeChanged();
 }
 
 void QuickFBORenderer::updateRenderRect()

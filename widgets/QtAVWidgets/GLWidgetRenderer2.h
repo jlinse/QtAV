@@ -22,6 +22,7 @@
 #ifndef QTAV_GLWIDGETRENDERER2_H
 #define QTAV_GLWIDGETRENDERER2_H
 
+#ifndef QT_NO_OPENGL
 #include <QtAVWidgets/global.h>
 #include <QtOpenGL/QGLWidget>
 #include <QtAV/OpenGLRendererBase.h>
@@ -40,19 +41,17 @@ class Q_AVWIDGETS_EXPORT GLWidgetRenderer2 : public QGLWidget, public OpenGLRend
     DPTR_DECLARE_PRIVATE(GLWidgetRenderer2)
 public:
     GLWidgetRenderer2(QWidget* parent = 0, const QGLWidget* shareWidget = 0, Qt::WindowFlags f = 0);
-    virtual void onUpdate();
-
     virtual VideoRendererId id() const;
     virtual QWidget* widget() { return this; }
 protected:
     virtual void initializeGL();
     virtual void paintGL();
     virtual void resizeGL(int w, int h);
-    virtual void resizeEvent(QResizeEvent *);
+    virtual void resizeEvent(QResizeEvent *);  //FIXME: not virtual in QGLWidget (Qt<5.5)
     virtual void showEvent(QShowEvent *);
 };
 typedef GLWidgetRenderer2 VideoRendererGLWidget2;
 
 } //namespace QtAV
-
+#endif //QT_NO_OPENGL
 #endif // QTAV_GLWIDGETRENDERER2_H

@@ -27,7 +27,7 @@
 #include <QtAV/Frame.h>
 #include <QtAV/VideoFormat.h>
 #include <QtCore/QSize>
-
+/// TODO: fromAVFrame(const AVFrame* f);
 namespace QtAV {
 
 class VideoFramePrivate;
@@ -35,13 +35,28 @@ class Q_AV_EXPORT VideoFrame : public Frame
 {
     Q_DECLARE_PRIVATE(VideoFrame)
 public:
+    /*!
+     * \brief fromGPU
+     * Make a VideoFrame with data on host memory from GPU resource
+     * \param fmt video format of GPU resource
+     * \param width frame width
+     * \param height frame height
+     * \param surface_h surface height. Can be greater than visual frame height because of alignment
+     * \param src CPU accessible address of frame planes on GPU. src[0] must be valid. src[i>0] will be filled depending on pixel format, pitch and surface_h if it's NULL.
+     * \param pitch plane pitch on GPU. pitch[0] must be valid. pitch[i>0] will be filled depending on pixel format, pitch[0] and surface_h if it's NULL.
+     * \param optimized try to use SIMD to copy from GPU. otherwise use memcpy
+     * \param swapUV it's required if u/v src are null
+     */
+    static VideoFrame fromGPU(const VideoFormat& fmt, int width, int height, int surface_h, quint8 *src[], int pitch[], bool optimized = true, bool swapUV = false);
+    static void copyPlane(quint8 *dst, size_t dst_stride, const quint8 *src, size_t src_stride, unsigned byteWidth, unsigned height);
+
     VideoFrame();
-    //must set planes and linesize manually
-    VideoFrame(int width, int height, const VideoFormat& format);
+    //must set planes and linesize manually if data is empty
+    VideoFrame(int width, int height, const VideoFormat& format, const QByteArray& data = QByteArray());
     //set planes and linesize manually or call init
-    VideoFrame(const QByteArray& data, int width, int height, const VideoFormat& format);
+    QTAV_DEPRECATED VideoFrame(const QByteArray& data, int width, int height, const VideoFormat& format);
     VideoFrame(const QVector<int>& textures, int width, int height, const VideoFormat& format);
-    VideoFrame(const QImage& image);
+    VideoFrame(const QImage& image); // does not copy the image data
     VideoFrame(const VideoFrame &other);
     virtual ~VideoFrame();
 
@@ -52,11 +67,6 @@ public:
      * Deep copy. Given the format, width and height, plane addresses and line sizes.
      */
     VideoFrame clone() const;
-    /*!
-     * Allocate memory with given format, width and height. planes and bytesPerLine will be set internally.
-     * The memory can be initialized by user
-     */
-    virtual int allocate();
     VideoFormat format() const;
     VideoFormat::PixelFormat pixelFormat() const;
     QImage::Format imageFormat() const;
@@ -90,8 +100,17 @@ public:
      * \param roi NOT implemented!
      */
     QImage toImage(QImage::Format fmt = QImage::Format_ARGB32, const QSize& dstSize = QSize(), const QRectF& roi = QRect()) const;
+    /*!
+     * \brief to
+     * The result frame data is always on host memory.
+     * \param pixfmt target pixel format
+     * \param dstSize target frame size
+     * \param roi interested region of source frame
+     */
     VideoFrame to(VideoFormat::PixelFormat pixfmt, const QSize& dstSize = QSize(), const QRectF& roi = QRect()) const;
     VideoFrame to(const VideoFormat& fmt, const QSize& dstSize = QSize(), const QRectF& roi = QRect()) const;
+    bool to(VideoFormat::PixelFormat pixfmt, quint8 *const dst[], const int dstStride[], const QSize& dstSize = QSize(), const QRectF& roi = QRect()) const;
+    bool to(const VideoFormat& fmt, quint8 *const dst[], const int dstStride[], const QSize& dstSize = QSize(), const QRectF& roi = QRect()) const;
     /*!
      * map a gpu frame to opengl texture or d3d texture or other handle.
      * handle: given handle. can be gl texture (& GLuint), d3d texture, or 0 if create a new handle
@@ -112,11 +131,6 @@ public:
        return -1 if no texture, not uploaded
      */
     int texture(int plane = 0) const; //TODO: remove
-private:
-    /*
-     * call this only when setBytesPerLine() and setBits() will not be called
-     */
-    void init();
 };
 
 class ImageConverter;
@@ -129,7 +143,7 @@ public:
     void setEq(int brightness, int contrast, int saturation);
     /*!
      * \brief convert
-     * return a frame with a given format from a given source frame
+     * return a frame with a given format from a given source frame. The result frame data is always on host memory.
      */
     VideoFrame convert(const VideoFrame& frame, const VideoFormat& fmt) const;
     VideoFrame convert(const VideoFrame& frame, VideoFormat::PixelFormat fmt) const;

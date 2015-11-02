@@ -24,34 +24,44 @@
 #include "QtAV/private/MediaIO_p.h"
 #include "QtAV/private/factory.h"
 #include <QtCore/QStringList>
+#include "utils/Logger.h"
 
 namespace QtAV {
 
 FACTORY_DEFINE(MediaIO)
+
+extern bool RegisterMediaIOQIODevice_Man();
+extern bool RegisterMediaIOQFile_Man();
+void MediaIO::registerAll()
+{
+    static bool done = false;
+    if (done)
+        return;
+    done = true;
+    RegisterMediaIOQIODevice_Man();
+    RegisterMediaIOQFile_Man();
+}
 
 QStringList MediaIO::builtInNames()
 {
     static QStringList names;
     if (!names.isEmpty())
         return names;
-    std::vector<std::string> stdnames(MediaIOFactory::registeredNames());
-    foreach (const std::string stdname, stdnames) {
-        names.append(stdname.c_str());
+    std::vector<const char*> ns(MediaIOFactory::Instance().registeredNames());
+    foreach (const char* n, ns) {
+        names.append(QLatin1String(n));
     }
     return names;
 }
 
 // TODO: plugin
-MediaIO* MediaIO::create(const QString &name)
-{
-    return MediaIOFactory::create(MediaIOFactory::id(name.toStdString()));
-}
+
 // TODO: plugin use metadata(Qt plugin system) to avoid loading
 MediaIO* MediaIO::createForProtocol(const QString &protocol)
 {
-    std::vector<MediaIOId> ids(MediaIOFactory::registeredIds());
+    std::vector<MediaIOId> ids(MediaIOFactory::Instance().registeredIds());
     foreach (MediaIOId id, ids) {
-        MediaIO *in = MediaIOFactory::create(id);
+        MediaIO *in = MediaIO::create(id);
         if (in->protocols().contains(protocol))
             return in;
         delete in;
@@ -61,7 +71,7 @@ MediaIO* MediaIO::createForProtocol(const QString &protocol)
 
 MediaIO* MediaIO::createForUrl(const QString &url)
 {
-    const int p = url.indexOf(":");
+    const int p = url.indexOf(QLatin1String(":"));
     if (p < 0)
         return 0;
     MediaIO *io = MediaIO::createForProtocol(url.left(p));

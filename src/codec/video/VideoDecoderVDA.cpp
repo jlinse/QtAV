@@ -24,7 +24,7 @@
 #include "utils/GPUMemCopy.h"
 #include "QtAV/SurfaceInterop.h"
 #include "QtAV/private/AVCompat.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include "utils/OpenGLHelper.h"
 #include <assert.h>
 #ifdef __cplusplus
@@ -37,11 +37,6 @@ extern "C" {
 #include <VideoDecodeAcceleration/VDADecoder.h>
 #include "utils/Logger.h"
 
-// TODO: add to QtAV_Compat.h?
-// FF_API_PIX_FMT
-#ifdef PixelFormat
-#undef PixelFormat
-#endif
 #ifdef MAC_OS_X_VERSION_MIN_REQUIRED
 #if MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 //MAC_OS_X_VERSION_10_7
 #define OSX_TARGET_MIN_LION
@@ -80,15 +75,8 @@ public:
 Q_SIGNALS:
     void formatChanged();
 };
-
 extern VideoDecoderId VideoDecoderId_VDA;
-FACTORY_REGISTER_ID_AUTO(VideoDecoder, VDA, "VDA")
-
-void RegisterVideoDecoderVDA_Man()
-{
-    FACTORY_REGISTER_ID_MAN(VideoDecoder, VDA, "VDA")
-}
-
+FACTORY_REGISTER(VideoDecoder, VDA, "VDA")
 
 class VideoDecoderVDAPrivate Q_DECL_FINAL: public VideoDecoderFFmpegHWPrivate
 {
@@ -100,7 +88,7 @@ public:
         if (kCFCoreFoundationVersionNumber < kCFCoreFoundationVersionNumber10_7)
             out_fmt = VideoDecoderVDA::UYVY;
         copy_mode = VideoDecoderFFmpegHW::ZeroCopy;
-        description = "VDA";
+        description = QStringLiteral("VDA");
         memset(&hw_ctx, 0, sizeof(hw_ctx));
     }
     ~VideoDecoderVDAPrivate() {qDebug("~VideoDecoderVDAPrivate");}
@@ -198,7 +186,7 @@ VideoDecoderId VideoDecoderVDA::id() const
 
 QString VideoDecoderVDA::description() const
 {
-    return "Video Decode Acceleration";
+    return QStringLiteral("Video Decode Acceleration");
 }
 
 VideoFrame VideoDecoderVDA::frame()
@@ -213,9 +201,9 @@ VideoFrame VideoDecoderVDA::frame()
         qDebug("Empty frame buffer");
         return VideoFrame();
     }
-    VideoFormat::PixelFormat pixfmt = format_from_cv(d.hw_ctx.cv_pix_fmt_type);
+    VideoFormat::PixelFormat pixfmt = format_from_cv(CVPixelBufferGetPixelFormatType(cv_buffer));
     if (pixfmt == VideoFormat::Format_Invalid) {
-        qWarning("unsupported vda pixel format: %#x", d.hw_ctx.cv_pix_fmt_type);
+        qWarning("unsupported vda pixel format: %#x", CVPixelBufferGetPixelFormatType(cv_buffer));
         return VideoFrame();
     }
     // we can map the cv buffer addresses to video frame in SurfaceInteropCVBuffer. (may need VideoSurfaceInterop::mapToTexture()
@@ -223,14 +211,14 @@ VideoFrame VideoDecoderVDA::frame()
         bool glinterop;
         CVPixelBufferRef cvbuf; // keep ref until video frame is destroyed
     public:
-        SurfaceInteropCVBuffer(CVPixelBufferRef cv, bool gl) : glinterop(gl), cvbuf(cv) {}
+        SurfaceInteropCVBuffer(CVPixelBufferRef cv, bool gl) : glinterop(gl), cvbuf(cv) {
+            //CVPixelBufferRetain(cvbuf);
+        }
         ~SurfaceInteropCVBuffer() {
             CVPixelBufferRelease(cvbuf);
         }
         void* mapToHost(const VideoFormat &format, void *handle, int plane) {
             Q_UNUSED(plane);
-            if (!format.isRGB())
-                return NULL;
             CVPixelBufferLockBaseAddress(cvbuf, 0);
             const VideoFormat fmt(format_from_cv(CVPixelBufferGetPixelFormatType(cvbuf)));
             if (!fmt.isValid()) {
@@ -248,12 +236,12 @@ VideoFrame VideoDecoderVDA::frame()
             }
             CVPixelBufferUnlockBaseAddress(cvbuf, 0);
             //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
-            VideoFrame frame = VideoFrame(w, h, fmt);
-            frame.setBits(src);
-            frame.setBytesPerLine(pitch);
-            frame = frame.to(format);
+            VideoFrame frame(VideoFrame::fromGPU(fmt, w, h, h, src, pitch));
+            if (fmt != format)
+                frame = frame.to(format);
             VideoFrame *f = reinterpret_cast<VideoFrame*>(handle);
             frame.setTimestamp(f->timestamp());
+            frame.setDisplayAspectRatio(f->displayAspectRatio());
             *f = frame;
             return f;
         }
@@ -321,19 +309,19 @@ VideoFrame VideoDecoderVDA::frame()
         // make sure VideoMaterial can correctly setup parameters
         switch (format()) {
         case UYVY:
-            pitch[0] = 2*width(); //
+            pitch[0] = 2*d.width; //
             pixfmt = VideoFormat::Format_VYUY; //FIXME: VideoShader assume uyvy is uploaded as rgba, but apple limits the result to bgra
             break;
         case NV12:
-            pitch[0] = width();
-            pitch[1] = width();
+            pitch[0] = d.width;
+            pitch[1] = d.width;
             break;
         case YUV420P:
-            pitch[0] = width();
-            pitch[1] = pitch[2] = width()/2;
+            pitch[0] = d.width;
+            pitch[1] = pitch[2] = d.width/2;
             break;
         case YUYV:
-            pitch[0] = 2*width(); //
+            pitch[0] = 2*d.width; //
             //pixfmt = VideoFormat::Format_YVYU; //
             break;
         default:
@@ -353,18 +341,19 @@ VideoFrame VideoDecoderVDA::frame()
     }
     VideoFrame f;
     if (zero_copy || copyMode() == VideoDecoderFFmpegHW::LazyCopy) {
-        f = VideoFrame(width(), height(), fmt);
+        f = VideoFrame(d.width, d.height, fmt);
         f.setBytesPerLine(pitch);
         f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+        f.setDisplayAspectRatio(d.getDAR(d.frame));
         if (zero_copy) {
-            f.setMetaData("target", "rect");
+            f.setMetaData(QStringLiteral("target"), QByteArrayLiteral("rect"));
         } else {
             f.setBits(src); // only set for copy back mode
         }
     } else {
         f = copyToFrame(fmt, d.height, src, pitch, false);
     }
-    f.setMetaData("surface_interop", QVariant::fromValue(VideoSurfaceInteropPtr(new SurfaceInteropCVBuffer(cv_buffer, zero_copy))));
+    f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(new SurfaceInteropCVBuffer(cv_buffer, zero_copy))));
     return f;
 }
 
@@ -422,10 +411,7 @@ bool VideoDecoderVDAPrivate::setup(AVCodecContext *avctx)
 
 bool VideoDecoderVDAPrivate::getBuffer(void **opaque, uint8_t **data)
 {
-    Q_UNUSED(data);
-    //qDebug("%s @%d data=%p", __PRETTY_FUNCTION__, __LINE__, *data);
-    // FIXME: why *data == 0?
-    //*data = (uint8_t *)1; // dummy
+    *data = (uint8_t *)1; // dummy. it's AVFrame.data[0], must be non null required by ffmpeg
     Q_UNUSED(opaque);
     return true;
 }
@@ -445,10 +431,24 @@ void VideoDecoderVDAPrivate::releaseBuffer(void *opaque, uint8_t *data)
 
 bool VideoDecoderVDAPrivate::open()
 {
+    if (!prepare())
+        return false;
     qDebug("opening VDA module");
     if (codec_ctx->codec_id != AV_CODEC_ID_H264) {
         qWarning("input codec (%s) isn't H264, canceling VDA decoding", avcodec_get_name(codec_ctx->codec_id));
         return false;
+    }
+    switch (codec_ctx->profile) { //profile check code is from xbmc
+    case FF_PROFILE_H264_HIGH_10:
+    case FF_PROFILE_H264_HIGH_10_INTRA:
+    case FF_PROFILE_H264_HIGH_422:
+    case FF_PROFILE_H264_HIGH_422_INTRA:
+    case FF_PROFILE_H264_HIGH_444_PREDICTIVE:
+    case FF_PROFILE_H264_HIGH_444_INTRA:
+    case FF_PROFILE_H264_CAVLC_444:
+        return false;
+    default:
+        break;
     }
 #if 0
     if (!codec_ctx->extradata || codec_ctx->extradata_size < 7) {
@@ -456,7 +456,7 @@ bool VideoDecoderVDAPrivate::open()
         return false;
     }
 #endif
-    return true;
+    return setup(codec_ctx);
 }
 
 void VideoDecoderVDAPrivate::close()

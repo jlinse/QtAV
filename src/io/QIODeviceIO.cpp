@@ -22,7 +22,7 @@
 #include "QtAV/MediaIO.h"
 #include "QtAV/private/MediaIO_p.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include <QtCore/QFile>
 #include <QtCore/QMetaType>
 #ifndef TEST_QTAV_QIODeviceIO
@@ -61,10 +61,10 @@ Q_SIGNALS:
 protected:
     QIODeviceIO(QIODeviceIOPrivate &d);
 };
-
+typedef QIODeviceIO MediaIOQIODevice;
 static const MediaIOId MediaIOId_QIODevice = mkid::id32base36_6<'Q','I','O','D','e','v'>::value;
 static const char kQIODevName[] = "QIODevice";
-FACTORY_REGISTER_ID_TYPE(MediaIO, MediaIOId_QIODevice, QIODeviceIO, kQIODevName)
+FACTORY_REGISTER(MediaIO, QIODevice, kQIODevName)
 
 class QIODeviceIOPrivate : public MediaIOPrivate
 {
@@ -78,7 +78,7 @@ public:
 
 QIODeviceIO::QIODeviceIO() : MediaIO(*new QIODeviceIOPrivate()) {}
 QIODeviceIO::QIODeviceIO(QIODeviceIOPrivate &d) : MediaIO(d) {}
-QString QIODeviceIO::name() const { return kQIODevName;}
+QString QIODeviceIO::name() const { return QLatin1String(kQIODevName);}
 
 void QIODeviceIO::setDevice(QIODevice *dev)
 {
@@ -158,10 +158,10 @@ class QFileIO Q_DECL_FINAL: public QIODeviceIO
     DPTR_DECLARE_PRIVATE(QFileIO)
 public:
     QFileIO();
-    QString name() const Q_DECL_OVERRIDE { return kQFileName;}
+    QString name() const Q_DECL_OVERRIDE { return QLatin1String(kQFileName);}
     const QStringList& protocols() const Q_DECL_OVERRIDE
     {
-        static QStringList p = QStringList() << "" << "qrc";
+        static QStringList p = QStringList() << QStringLiteral("") << QStringLiteral("qrc");
         return p;
     }
 protected:
@@ -169,9 +169,9 @@ protected:
 private:
     using QIODeviceIO::setDevice;
 };
-
+typedef QFileIO MediaIOQFile;
 static const MediaIOId MediaIOId_QFile = mkid::id32base36_5<'Q','F','i','l','e'>::value;
-FACTORY_REGISTER_ID_TYPE(MediaIO, MediaIOId_QFile, QFileIO, kQFileName)
+FACTORY_REGISTER(MediaIO, QFile, kQFileName)
 
 class QFileIOPrivate Q_DECL_FINAL: public QIODeviceIOPrivate
 {
@@ -196,7 +196,7 @@ void QFileIO::onUrlChanged()
     if (d.file.isOpen())
         d.file.close();
     QString path(url());
-    if (path.startsWith("qrc:"))
+    if (path.startsWith(QLatin1String("qrc:")))
         path = path.mid(3);
     d.file.setFileName(path);
     if (path.isEmpty())

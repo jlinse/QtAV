@@ -19,17 +19,23 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 
-#include <QtAV/VideoRenderer.h>
-#include <QtAV/private/VideoRenderer_p.h>
-#include <QtAV/Filter.h>
+#include "QtAV/VideoRenderer.h"
+#include "QtAV/private/VideoRenderer_p.h"
+#include "QtAV/Filter.h"
 #include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
+#include "QtAV/private/factory.h"
+#include "QtAV/private/mkid.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
+FACTORY_DEFINE(VideoRenderer)
+VideoRendererId VideoRendererId_OpenGLWindow = mkid::id32base36_6<'Q', 'O', 'G', 'L', 'W', 'w'>::value;
 
 VideoRenderer::VideoRenderer()
     :AVOutput(*new VideoRendererPrivate)
 {
+    // can not do 'if (widget()) connect to update()' because widget() is virtual
 }
 
 VideoRenderer::VideoRenderer(VideoRendererPrivate &d)
@@ -44,10 +50,13 @@ VideoRenderer::~VideoRenderer()
 bool VideoRenderer::receive(const VideoFrame &frame)
 {
     DPTR_D(VideoRenderer);
+    const qreal dar_old = d.source_aspect_ratio;
     d.source_aspect_ratio = frame.displayAspectRatio();
+    if (dar_old != d.source_aspect_ratio)
+        sourceAspectRatioChanged(d.source_aspect_ratio);
     setInSize(frame.width(), frame.height());
     QMutexLocker locker(&d.img_mutex);
-    Q_UNUSED(locker);
+    Q_UNUSED(locker); //TODO: double buffer for display/dec frame to avoid mutex
     return receiveFrame(frame);
 }
 
@@ -105,6 +114,16 @@ bool VideoRenderer::isPreferredPixelFormatForced() const
     return d_func().force_preferred;
 }
 
+qreal VideoRenderer::sourceAspectRatio() const
+{
+    return d_func().source_aspect_ratio;
+}
+
+void VideoRenderer::sourceAspectRatioChanged(qreal value)
+{
+    Q_UNUSED(value);
+}
+
 void VideoRenderer::setOutAspectRatioMode(OutAspectRatioMode mode)
 {
     DPTR_D(VideoRenderer);
@@ -149,9 +168,8 @@ void VideoRenderer::setOutAspectRatio(qreal ratio)
     //compute the out out_rect
     d.computeOutParameters(ratio);
     if (ratio_changed) {
-        resizeFrame(d.out_rect.width(), d.out_rect.height());
+        onSetOutAspectRatio(ratio);
     }
-    onSetOutAspectRatio(ratio);
 }
 
 void VideoRenderer::onSetOutAspectRatio(qreal ratio)
@@ -197,11 +215,12 @@ void VideoRenderer::setInSize(int width, int height)
     DPTR_D(VideoRenderer);
     if (d.src_width != width || d.src_height != height) {
         d.aspect_ratio_changed = true; //?? for VideoAspectRatio mode
+        d.src_width = width;
+        d.src_height = height;
+        onFrameSizeChanged(QSize(width, height));
     }
     if (!d.aspect_ratio_changed)// && (d.src_width == width && d.src_height == height))
         return;
-    d.src_width = width;
-    d.src_height = height;
     //d.source_aspect_ratio = qreal(d.src_width)/qreal(d.src_height);
     qDebug("%s => calculating aspect ratio from converted input data(%f)", __FUNCTION__, d.source_aspect_ratio);
     //see setOutAspectRatioMode
@@ -220,13 +239,11 @@ void VideoRenderer::resizeRenderer(const QSize &size)
 void VideoRenderer::resizeRenderer(int width, int height)
 {
     DPTR_D(VideoRenderer);
-    if (width == 0 || height == 0)
+    if (width == 0 || height == 0 || (d.renderer_width == width && d.renderer_height == height))
         return;
-
     d.renderer_width = width;
     d.renderer_height = height;
     d.computeOutParameters(d.out_aspect_ratio);
-    resizeFrame(d.out_rect.width(), d.out_rect.height());
     onResizeRenderer(width, height);
 }
 
@@ -268,7 +285,6 @@ void VideoRenderer::setOrientation(int value)
     } else {
         d.computeOutParameters(d.out_aspect_ratio);
         onSetOutAspectRatio(outAspectRatio());
-        resizeFrame(d.out_rect.width(), d.out_rect.height());
     }
 }
 
@@ -424,12 +440,6 @@ bool VideoRenderer::needDrawFrame() const
     return d_func().video_frame.isValid();
 }
 
-void VideoRenderer::resizeFrame(int width, int height)
-{
-    Q_UNUSED(width);
-    Q_UNUSED(height);
-}
-
 void VideoRenderer::handlePaintEvent()
 {
     DPTR_D(VideoRenderer);
@@ -484,16 +494,6 @@ void VideoRenderer::handlePaintEvent()
         //warn once
     }
     //end paint. how about QPainter::endNativePainting()?
-}
-
-void VideoRenderer::enableDefaultEventFilter(bool e)
-{
-    d_func().default_event_filter = e;
-}
-
-bool VideoRenderer::isDefaultEventFilterEnabled() const
-{
-    return d_func().default_event_filter;
 }
 
 qreal VideoRenderer::brightness() const
@@ -604,14 +604,33 @@ bool VideoRenderer::onSetSaturation(qreal s)
     return false;
 }
 
-void VideoRenderer::updateUi()
+void VideoRenderer::onFrameSizeChanged(const QSize &size)
 {
-    QObject *obj = (QObject*)qwindow();
-    if (!obj)
-        obj = (QObject*)widget();
-    if (obj) {
-        QCoreApplication::instance()->postEvent(obj, new QEvent(QEvent::UpdateRequest));
-    }
+    Q_UNUSED(size);
 }
 
+void VideoRenderer::updateUi()
+{
+    QObject *obj = (QObject*)widget();
+    if (obj) {
+        // UpdateRequest only sync backing store but do not shedule repainting. UpdateLater does
+        // Copy from qwidget_p.h. QWidget::event() will convert UpdateLater to QUpdateLaterEvent and get it's region()
+        class QUpdateLaterEvent : public QEvent
+        {
+        public:
+            explicit QUpdateLaterEvent(const QRegion& paintRegion)
+                : QEvent(UpdateLater), m_region(paintRegion)
+            {}
+            ~QUpdateLaterEvent() {}
+            inline const QRegion &region() const { return m_region; }
+        protected:
+            QRegion m_region;
+        };
+        QCoreApplication::instance()->postEvent(obj, new QUpdateLaterEvent(QRegion(0, 0, rendererWidth(), rendererHeight())));
+    } else {
+        obj = (QObject*)qwindow();
+        if (obj)
+            QCoreApplication::instance()->postEvent(obj, new QEvent(QEvent::UpdateRequest));
+    }
+}
 } //namespace QtAV

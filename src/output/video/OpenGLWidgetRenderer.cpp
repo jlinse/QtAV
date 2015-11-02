@@ -42,16 +42,12 @@ OpenGLWidgetRenderer::OpenGLWidgetRenderer(QWidget *parent, Qt::WindowFlags f):
     QOpenGLWidget(parent, f)
   , OpenGLRendererBase(*new OpenGLWidgetRendererPrivate(this))
 {
-}
-
-void OpenGLWidgetRenderer::onUpdate()
-{
-    update();
+    setAcceptDrops(true);
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 void OpenGLWidgetRenderer::initializeGL()
 {
-    makeCurrent();
     onInitializeGL();
 }
 

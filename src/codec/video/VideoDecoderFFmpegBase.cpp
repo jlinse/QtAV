@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -20,6 +20,7 @@
 ******************************************************************************/
 
 #include "VideoDecoderFFmpegBase.h"
+#include "QtAV/Packet.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
@@ -32,6 +33,20 @@ void VideoDecoderFFmpegBasePrivate::updateColorDetails(VideoFrame *f)
     if (cs != ColorSpace_Unknow)
         cs = colorSpaceFromFFmpeg(codec_ctx->colorspace);
     f->setColorSpace(cs);
+}
+
+qreal VideoDecoderFFmpegBasePrivate::getDAR(AVFrame *f)
+{
+    // lavf 54.5.100 av_guess_sample_aspect_ratio: stream.sar > frame.sar
+    qreal dar = 0;
+    if (f->height > 0)
+        dar = (qreal)f->width/(qreal)f->height;
+    // prefer sar from AVFrame if sar != 1/1
+    if (f->sample_aspect_ratio.num > 1)
+        dar *= av_q2d(f->sample_aspect_ratio);
+    else if (codec_ctx && codec_ctx->sample_aspect_ratio.num > 1) // skip 1/1
+        dar *= av_q2d(codec_ctx->sample_aspect_ratio);
+    return dar;
 }
 
 VideoDecoderFFmpegBase::VideoDecoderFFmpegBase(VideoDecoderFFmpegBasePrivate &d):
@@ -91,7 +106,16 @@ bool VideoDecoderFFmpegBase::decode(const Packet &packet)
     // some decoders might in addition need other fields like flags&AV_PKT_FLAG_KEY
     // const AVPacket*: ffmpeg >= 1.0. no libav
     int got_frame_ptr = 0;
-    int ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
+    int ret = 0;
+    if (packet.isEOF()) {
+        AVPacket eofpkt;
+        av_init_packet(&eofpkt);
+        eofpkt.data = NULL;
+        eofpkt.size = 0;
+        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, &eofpkt);
+    } else {
+        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
+    }
     //qDebug("pic_type=%c", av_get_picture_type_char(d.frame->pict_type));
     d.undecoded_size = qMin(packet.data.size() - ret, packet.data.size());
     if (ret < 0) {
@@ -100,7 +124,7 @@ bool VideoDecoderFFmpegBase::decode(const Packet &packet)
     }
     if (!got_frame_ptr) {
         qWarning("no frame could be decompressed: %s %d/%d", av_err2str(ret), d.undecoded_size, packet.data.size());
-        return true;
+        return !packet.isEOF();
     }
     if (!d.codec_ctx->width || !d.codec_ctx->height)
         return false;

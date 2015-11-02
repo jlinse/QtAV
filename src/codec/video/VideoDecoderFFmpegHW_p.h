@@ -26,10 +26,9 @@
 #include "utils/GPUMemCopy.h"
 
 /*!
-   QTAV_VA_REF: use AVCodecContext.get_buffer2 instead of old callbacks. In order to avoid compile warnings, now disable old
+   QTAV_HAVE(AVBUFREF): use AVCodecContext.get_buffer2 instead of old callbacks. In order to avoid compile warnings, now disable old
    callbacks if possible. maybe we can also do a runtime check and enable old callbacks
  */
-#define QTAV_VA_REF (LIBAVCODEC_VERSION_MAJOR >= 55)
 
 namespace QtAV {
 
@@ -38,26 +37,28 @@ class VideoDecoderFFmpegHWPrivate : public VideoDecoderFFmpegBasePrivate
 public:
     VideoDecoderFFmpegHWPrivate()
         : VideoDecoderFFmpegBasePrivate()
+        , get_format(NULL)
+        , get_buffer(NULL)
+        , release_buffer(NULL)
+        , reget_buffer(NULL)
+        , get_buffer2(NULL)
+        , threads(0)
         , copy_mode(VideoDecoderFFmpegHW::OptimizedCopy)
-    {
-        get_format = 0;
-        get_buffer = 0;
-        release_buffer = 0;
-        reget_buffer = 0;
-        get_buffer2 = 0;
-    }
+    {}
     virtual ~VideoDecoderFFmpegHWPrivate() {} //ctx is 0 now
+    bool enableFrameRef() const Q_DECL_OVERRIDE { return false;} //because of ffmpeg_get_va_buffer2?
+    bool prepare();
     void restore() {
         codec_ctx->pix_fmt = pixfmt;
         codec_ctx->opaque = 0;
         codec_ctx->get_format = get_format;
-#if QTAV_VA_REF
+#if QTAV_HAVE(AVBUFREF)
         codec_ctx->get_buffer2 = get_buffer2;
 #else
         codec_ctx->get_buffer = get_buffer;
         codec_ctx->release_buffer = release_buffer;
         codec_ctx->reget_buffer = reget_buffer;
-#endif //QTAV_VA_REF
+#endif //QTAV_HAVE(AVBUFREF)
     }
 
     virtual bool setup(AVCodecContext* avctx) = 0;
@@ -82,6 +83,7 @@ public:
     int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
 
     QString description;
+    int threads;
     // false for not intel gpu. my test result is intel gpu is supper fast and lower cpu usage if use optimized uswc copy. but nv is worse.
     // TODO: flag enable, disable, auto
     VideoDecoderFFmpegHW::CopyMode copy_mode;

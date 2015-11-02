@@ -27,6 +27,7 @@
 #include <QtCore/QVariant>
 #include <QtCore/QWaitCondition>
 #include "PacketBuffer.h"
+#include "utils/ring.h"
 
 class QRunnable;
 namespace QtAV {
@@ -53,14 +54,16 @@ public:
       , statistics(0)
       , ready(false)
       , render_pts0(-1)
+      , drop_frame_seek(true)
+      , pts_history(30, -1)
     {
         tasks.blockFull(false);
 
         QVariantHash opt;
-        opt["skip_frame"] = 8; // 8 for "avcodec", "NoRef" for "FFmpeg". see AVDiscard
-        dec_opt_framedrop["avcodec"] = opt;
-        opt["skip_frame"] = 0; // 0 for "avcodec", "Default" for "FFmpeg". see AVDiscard
-        dec_opt_normal["avcodec"] = opt; // avcodec need correct string or value in libavcodec
+        opt[QString::fromLatin1("skip_frame")] = 8; // 8 for "avcodec", "NoRef" for "FFmpeg". see AVDiscard
+        dec_opt_framedrop[QString::fromLatin1("avcodec")] = opt;
+        opt[QString::fromLatin1("skip_frame")] = 0; // 0 for "avcodec", "Default" for "FFmpeg". see AVDiscard
+        dec_opt_normal[QString::fromLatin1("avcodec")] = opt; // avcodec need correct string or value in libavcodec
     }
     virtual ~AVThreadPrivate();
 
@@ -83,6 +86,8 @@ public:
     qreal render_pts0;
 
     static QVariantHash dec_opt_framedrop, dec_opt_normal;
+    bool drop_frame_seek;
+    ring<qreal> pts_history;
 };
 
 } //namespace QtAV

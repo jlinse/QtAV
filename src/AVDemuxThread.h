@@ -22,7 +22,6 @@
 #ifndef QAV_DEMUXTHREAD_H
 #define QAV_DEMUXTHREAD_H
 
-#include <QtCore/QAtomicInt>
 #include <QtCore/QMutex>
 #include <QtCore/QThread>
 #include <QtCore/QRunnable>
@@ -45,6 +44,7 @@ public:
     AVThread* audioThread();
     void setVideoThread(AVThread *thread);
     AVThread* videoThread();
+    void stepBackward();
     void seek(qint64 pos, SeekType type); //ms
     //AVDemuxer* demuxer
     bool isPaused() const;
@@ -61,7 +61,7 @@ Q_SIGNALS:
     void mediaStatusChanged(QtAV::MediaStatus);
     void bufferProgressChanged(qreal);
     void seekFinished(qint64 timestamp);
-
+    void internalSubtitlePacketRead(int index, const QtAV::Packet& packet);
 private slots:
     void seekOnPauseFinished();
     void frameDeliveredNextFrame();
@@ -95,10 +95,10 @@ private:
     QWaitCondition cond;
     BlockingQueue<QRunnable*> seek_tasks;
 
-    QAtomicInt nb_next_frame;
     QMutex next_frame_mutex;
     int clock_type; // change happens in different threads(direct connection)
     friend class SeekTask;
+    friend class stepBackwardTask;
 };
 
 } //namespace QtAV

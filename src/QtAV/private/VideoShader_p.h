@@ -53,7 +53,7 @@ public:
         , program(0)
         , u_MVP_matrix(-1)
         , u_colorMatrix(-1)
-        , u_bpp(-1)
+        , u_to8(-1)
         , u_opacity(-1)
         , u_c(-1)
         , texture_target(GL_TEXTURE_2D)
@@ -71,10 +71,9 @@ public:
 
     bool owns_program; // shader program is not created by this. e.g. scene graph create it's own program and we store it here
     QOpenGLShaderProgram *program;
-    // TODO: compare with texture width uniform used in qtmm
     int u_MVP_matrix;
     int u_colorMatrix;
-    int u_bpp;
+    int u_to8;
     int u_opacity;
     int u_c;
     QVector<int> u_Texture;
@@ -100,6 +99,14 @@ public:
         , target(GL_TEXTURE_2D)
         , try_pbo(true)
     {
+        textures.reserve(4);
+        texture_size.reserve(4);
+        texture_upload_size.reserve(4);
+        effective_tex_width.reserve(4);
+        internal_format.reserve(4);
+        data_format.reserve(4);
+        data_type.reserve(4);
+        texture_coords.reserve(4);
         static bool enable_pbo = qgetenv("QTAV_PBO").toInt() > 0;
         if (try_pbo)
             try_pbo = enable_pbo;
@@ -114,7 +121,6 @@ public:
     bool initPBO(int plane, int size);
     bool initTexture(GLuint tex, GLint internal_format, GLenum format, GLenum dataType, int width, int height);
     bool updateTextureParameters(const VideoFormat& fmt);
-    void updateChannelMap(const VideoFormat& fmt);
     bool ensureResources();
     bool ensureTextures();
     void setupQuality();
@@ -160,6 +166,7 @@ public:
     QMatrix4x4 matrix;
     bool try_pbo;
     QVector<QOpenGLBuffer> pbo;
+    QVector2D vec_to8; //TODO: vec3 to support both RG and LA (.rga, vec_to8)
     QMatrix4x4 channel_map;
 };
 

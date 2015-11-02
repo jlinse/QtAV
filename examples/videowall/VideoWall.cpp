@@ -38,8 +38,9 @@ const int kSyncInterval = 2000;
 
 VideoWall::VideoWall(QObject *parent) :
     QObject(parent),r(3),c(3),view(0),menu(0)
-  , vid("qpainter")
+  , vid(QString::fromLatin1("qpainter"))
 {
+    QtAV::Widgets::registerRenderers();
     clock = new AVClock(this);
     clock->setClockType(AVClock::ExternalClock);
     view = new QWidget;
@@ -127,23 +128,21 @@ void VideoWall::show()
     }
 
     VideoRendererId v = VideoRendererId_Widget;
-    if (vid == "gl")
-        v = VideoRendererId_GLWidget;
-    else if (vid == "d2d")
+    if (vid == QLatin1String("gl"))
+        v = VideoRendererId_GLWidget2;
+    else if (vid == QLatin1String("d2d"))
         v = VideoRendererId_Direct2D;
-    else if (vid == "gdi")
+    else if (vid == QLatin1String("gdi"))
         v = VideoRendererId_GDI;
-    else if (vid == "xv")
+    else if (vid == QLatin1String("xv"))
         v = VideoRendererId_XV;
     for (int i = 0; i < r; ++i) {
         for (int j = 0; j < c; ++j) {
-            VideoRenderer* renderer = VideoRendererFactory::create(v);
-            //renderer->widget()->setParent(view);
-            renderer->widget()->setWindowFlags(Qt::FramelessWindowHint);
+            VideoRenderer* renderer = VideoRenderer::create(v);
+            renderer->widget()->setWindowFlags(renderer->widget()->windowFlags()| Qt::FramelessWindowHint);
             renderer->widget()->setAttribute(Qt::WA_DeleteOnClose);
             renderer->widget()->resize(w, h);
             renderer->widget()->move(j*w, i*h);
-            renderer->widget()->show();
             AVPlayer *player = new AVPlayer;
             player->setRenderer(renderer);
             player->masterClock()->setClockAuto(false);
@@ -182,13 +181,11 @@ void VideoWall::openLocalFile()
     if (file.isEmpty())
         return;
     stop();
-    foreach (AVPlayer* player, players) {
-        player->load(file);
-    }
     clock->reset();
     clock->start();
     timer_id = startTimer(kSyncInterval);
     foreach (AVPlayer* player, players) {
+        player->setFile(file); //TODO: load all players before play
         player->play();
     }
 }
@@ -199,22 +196,20 @@ void VideoWall::openUrl()
     if (url.isEmpty())
         return;
     stop();
-    foreach (AVPlayer* player, players) {
-        player->load(url);
-    }
     clock->reset();
     clock->start();
     timer_id = startTimer(kSyncInterval);
     foreach (AVPlayer* player, players) {
-        player->play();
+        player->setFile(url);
+        player->play(); //TODO: load all players before play
     }
 }
 
 void VideoWall::about()
 {
-    QMessageBox::about(0, tr("About QtAV"), "<h3>" + tr("This is a demo for playing and synchronising multiple players") + "</h3>"
-                       + "\n\n"
-                       + aboutQtAV_HTML());
+    QMessageBox::about(0, tr("About QtAV"), QString::fromLatin1("<h3>%1</h3>\n\n%2")
+                       .arg(tr("This is a demo for playing and synchronising multiple players"))
+                       .arg(aboutQtAV_HTML()));
 }
 
 void VideoWall::help()
@@ -261,7 +256,7 @@ bool VideoWall::eventFilter(QObject *watched, QEvent *event)
             break;
         case Qt::Key_N: //check playing?
             foreach (AVPlayer* player, players) {
-                player->playNextFrame();
+                player->stepForward();
             }
             break;
 

@@ -21,7 +21,7 @@
 
 #ifndef QTAV_OPENGLVIDEO_H
 #define QTAV_OPENGLVIDEO_H
-
+#ifndef QT_NO_OPENGL
 #include <QtAV/QtAV_Global.h>
 #include <QtAV/VideoFormat.h>
 #include <QtCore/QHash>
@@ -30,10 +30,8 @@
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 #include <QtGui/QOpenGLContext>
 #else
-#if !defined(QT_NO_OPENGL)
 #include <QtOpenGL/QGLContext>
 #define QOpenGLContext QGLContext
-#endif //!defined(QT_NO_OPENGL)
 #endif
 class QColor;
 
@@ -58,9 +56,9 @@ public:
      * \brief setOpenGLContext
      * a context must be set before renderering.
      * \param ctx
-     * 0: current context in OpenGL is done. shaders all will be released.
+     * 0: current context in OpenGL is done. shaders will be released.
      * QOpenGLContext is QObject in Qt5, and gl resources here will be released automatically if context is destroyed.
-     * But you have to call setOpenGLContext(0) for Qt4 explicitly.
+     * But you have to call setOpenGLContext(0) for Qt4 explicitly in the old context.
      */
     void setOpenGLContext(QOpenGLContext *ctx);
     QOpenGLContext* openGLContext();
@@ -94,5 +92,5 @@ private slots:
 
 
 } //namespace QtAV
-
+#endif //QT_NO_OPENGL
 #endif // QTAV_OPENGLVIDEO_H

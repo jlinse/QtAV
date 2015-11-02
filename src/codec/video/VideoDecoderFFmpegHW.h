@@ -32,6 +32,7 @@ class VideoDecoderFFmpegHW : public VideoDecoderFFmpegBase
     Q_OBJECT
     Q_DISABLE_COPY(VideoDecoderFFmpegHW)
     DPTR_DECLARE_PRIVATE(VideoDecoderFFmpegHW)
+    Q_PROPERTY(int threads READ threads WRITE setThreads NOTIFY threadsChanged) // <=0 is auto
     Q_PROPERTY(CopyMode copyMode READ copyMode WRITE setCopyMode NOTIFY copyModeChanged)
     Q_ENUMS(CopyMode)
 public:
@@ -41,13 +42,15 @@ public:
         OptimizedCopy,
         GenericCopy
     };
-    virtual bool prepare() Q_DECL_OVERRIDE;
     VideoFrame copyToFrame(const VideoFormat& fmt, int surface_h, quint8* src[], int pitch[], bool swapUV);
     // properties
+    int threads() const;
+    void setThreads(int value);
     void setCopyMode(CopyMode value);
     CopyMode copyMode() const;
 Q_SIGNALS:
     void copyModeChanged();
+    void threadsChanged();
 protected:
     VideoDecoderFFmpegHW(VideoDecoderFFmpegHWPrivate &d);
 private:

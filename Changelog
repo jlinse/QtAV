@@ -1,3 +1,49 @@
+version 1.8.0 2015-09-01
+
+Changelog:
+- XAudio2 support
+- VideoToolbox hardware decoder(OSX) support. It can decode h264, h263, mpeg1, mpeg2, mpeg4. Better than VDA
+- CUDA 0-copy support
+- Dynamic video decoder switch when playing (try it in QMLPlayer)
+- Embedded ass subtitles support
+- ass subtitle font setup
+- No OpenGL build fix for linux
+- Fix qpainter rendering if vbo is used
+- Fix OpenGL rendering for some rgb formats
+- DXVA 0-copy improvement, intel clearvideo workaround etc.
+- AO: add null backend
+- HW: fix profile check
+- Ref counted frames from ff decoders. This fix opengl crash when uploading textures
+- Fix audio resampler parameters not set correctly
+- VS2015 support
+
+
+version 1.7.0 2015-07-09
+
+Changelog:
+- DXVA GPU zero-copy support
+- DXVA copy back improvement
+- VAAPI zero-copy improvement
+- Fix opengl wrong display if switch decoder between VDA and FFmpeg
+- Video encoding support. Try examples/simpletranscode. Audio is not supported now
+- External audio track support
+- Pulseaudio improvement, fix crashes and hang
+- OpenGL: disable VBO for ANGLE to workaround qpainter filters have no effect. Less GL calls. Fix OpenGLWindowRenderer can not update correctly
+- Fix capture video when a zero-copy HW decoder is used.
+- Fix wrong audio data is played at the beginning of playback
+- Enable XV shm
+- Improve a/v sync
+- Build android on windows
+- Fix msvc debug build
+- Use OpenSL ES as for android. It works correctly now. No OpenAL required any more. Add volume control for OpenSL ES.
+- Fix crashes
+- Add ubuntu PPA
+- CI: appveyor for windows
+- AVInput=>MediaIO. You can use it to support custom output when encoding video
+- Add seekFinished, durationChanged, QML MediaPlayer.videoCapture, Subtitle delay etc
+- QMLPlayer: swipe to seek
+
+
 version 1.6.0 2015-04-23
 
 Changlog:
@@ -187,7 +233,7 @@ version 1.2.4    2013-09-08
 
 - QML support(thanks theoribeiro <theo@fictix.com.br>). Can replace some of qtmultimedia qml apps, e.g. qmlvideofx
 - Fix build for FFmpeg >= 0.9, libav >= 0.8
-- Channel can be choosed by user: original, stero, left, right, centre(mono)
+- Channel can be choosed by user: original, stereo, left, right, centre(mono)
 - OSD for GL ES2 renderer
 - player: statistics viewer, disable screensaver on widows when playing, more online tv channels
 

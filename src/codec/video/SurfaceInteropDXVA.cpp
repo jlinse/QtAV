@@ -21,33 +21,13 @@
 #include "SurfaceInteropDXVA.h"
 #include "QtAV/VideoFrame.h"
 #include "utils/Logger.h"
+#define DX_LOG_COMPONENT "DXVA2"
+#include "utils/DirectXHelper.h"
 
 namespace QtAV {
 extern VideoFormat::PixelFormat pixelFormatFromD3D(D3DFORMAT format);
 
 namespace dxva {
-
-template <class T> void SafeRelease(T **ppT)
-{
-  if (*ppT) {
-    (*ppT)->Release();
-    *ppT = NULL;
-  }
-}
-
-#define DX_LOG_COMPONENT "DXVA2"
-
-#ifndef DX_LOG_COMPONENT
-#define DX_LOG_COMPONENT "DirectX"
-#endif //DX_LOG_COMPONENT
-#define DX_ENSURE_OK(f, ...) \
-    do { \
-        HRESULT hr = f; \
-        if (FAILED(hr)) { \
-            qWarning() << DX_LOG_COMPONENT " error@" << __LINE__ << ". " #f ": " << QString("(0x%1) ").arg(hr, 0, 16) << qt_error_string(hr); \
-            return __VA_ARGS__; \
-        } \
-    } while (0)
 
 InteropResource::InteropResource(IDirect3DDevice9 *d3device)
     : d3ddev(d3device)
@@ -88,15 +68,14 @@ void* SurfaceInteropDXVA::map(SurfaceType type, const VideoFormat &fmt, void *ha
 {
     if (!handle)
         return NULL;
-    if (!fmt.isRGB())
-        return 0;
 
     if (!m_surface)
         return 0;
     if (type == GLTextureSurface) {
+        if (!fmt.isRGB())
+            return NULL;
         if (m_resource->map(m_surface, *((GLuint*)handle), frame_width, frame_height, plane))
             return handle;
-        return NULL;
     } else if (type == HostMemorySurface) {
         return mapToHost(fmt, handle, plane);
     }
@@ -146,28 +125,11 @@ void* SurfaceInteropDXVA::mapToHost(const VideoFormat &format, void *handle, int
     int pitch[3] = { lock.Pitch, 0, 0}; //compute chroma later
     quint8 *src[] = { (quint8*)lock.pBits, 0, 0}; //compute chroma later
     Q_ASSERT(src[0] && pitch[0] > 0);
-    const int nb_planes = fmt.planeCount();
-    const int chroma_pitch = nb_planes > 1 ? fmt.bytesPerLine(pitch[0], 1) : 0;
-    const int chroma_h = fmt.chromaHeight(desc.Height);
-    int h[] = { (int)desc.Height, 0, 0};
-    for (int i = 1; i < nb_planes; ++i) {
-        h[i] = chroma_h;
-        // set chroma address and pitch if not set
-        if (pitch[i] <= 0)
-            pitch[i] = chroma_pitch;
-        if (!src[i])
-            src[i] = src[i-1] + pitch[i-1]*h[i-1];
-    }
     const bool swap_uv = desc.Format ==  MAKEFOURCC('I','M','C','3');
-    if (swap_uv) {
-        std::swap(src[1], src[2]);
-        std::swap(pitch[1], pitch[2]);
-    }
-    VideoFrame frame = VideoFrame(frame_width, frame_height, fmt);
-    frame.setBits(src);
-    frame.setBytesPerLine(pitch);
-    frame = frame.to(format);
-
+    // try to use SSE. fallback to normal copy if SSE is not supported
+    VideoFrame frame(VideoFrame::fromGPU(fmt, frame_width, frame_height, desc.Height, src, pitch, true, swap_uv));
+    if (format != fmt)
+        frame = frame.to(format);
     VideoFrame *f = reinterpret_cast<VideoFrame*>(handle);
     frame.setTimestamp(f->timestamp());
     *f = frame;
@@ -177,15 +139,6 @@ void* SurfaceInteropDXVA::mapToHost(const VideoFormat &format, void *handle, int
 } //namespace QtAV
 
 #if QTAV_HAVE(DXVA_EGL)
-#define EGL_ENSURE(x, ...) \
-    do { \
-        if (!(x)) { \
-            EGLint err = eglGetError(); \
-            qWarning("EGL error@%d<<%s. " #x ": %#x %s", __LINE__, __FILE__, err, eglQueryString(eglGetCurrentDisplay(), err)); \
-            return __VA_ARGS__; \
-        } \
-    } while(0)
-
 #if QTAV_HAVE(GUI_PRIVATE)
 #include <qpa/qplatformnativeinterface.h>
 #include <QtGui/QGuiApplication>
@@ -210,7 +163,10 @@ public:
 EGLInteropResource::EGLInteropResource(IDirect3DDevice9 * d3device)
     : InteropResource(d3device)
     , egl(new EGL())
+    , dx_query(NULL)
 {
+    DX_ENSURE_OK(d3device->CreateQuery(D3DQUERYTYPE_EVENT, &dx_query));
+    dx_query->Issue(D3DISSUE_END);
 }
 
 EGLInteropResource::~EGLInteropResource()
@@ -220,6 +176,7 @@ EGLInteropResource::~EGLInteropResource()
         delete egl;
         egl = NULL;
     }
+    SafeRelease(&dx_query);
 }
 
 void EGLInteropResource::releaseEGL() {
@@ -249,6 +206,8 @@ bool EGLInteropResource::ensureSurface(int w, int h) {
 #endif //Q_OS_WIN
     // eglQueryContext() added (Feb 2015): https://github.com/google/angle/commit/8310797003c44005da4143774293ea69671b0e2a
     egl->dpy = eglGetCurrentDisplay();
+    qDebug("EGL version: %s, client api: %s", eglQueryString(egl->dpy, EGL_VERSION), eglQueryString(egl->dpy, EGL_CLIENT_APIS));
+    // TODO: check runtime egl>=1.4 for eglGetCurrentContext()
     EGLint cfg_id = 0;
     EGL_ENSURE(eglQueryContext(egl->dpy, eglGetCurrentContext(), EGL_CONFIG_ID , &cfg_id) == EGL_TRUE, false);
     qDebug("egl config id: %d", cfg_id);
@@ -268,7 +227,16 @@ bool EGLInteropResource::ensureSurface(int w, int h) {
     }
 #endif
     qDebug("egl display:%p config: %p", egl->dpy, egl_cfg);
-
+    // check extensions
+    QList<QByteArray> extensions = QByteArray(eglQueryString(egl->dpy, EGL_EXTENSIONS)).split(' ');
+    // ANGLE_d3d_share_handle_client_buffer will be used if possible
+    // TODO: strstr is enough
+    const bool kEGL_ANGLE_d3d_share_handle_client_buffer = extensions.contains("EGL_ANGLE_d3d_share_handle_client_buffer");
+    const bool kEGL_ANGLE_query_surface_pointer = extensions.contains("EGL_ANGLE_query_surface_pointer");
+    if (!kEGL_ANGLE_d3d_share_handle_client_buffer && !kEGL_ANGLE_query_surface_pointer) {
+        qWarning("EGL extension 'kEGL_ANGLE_query_surface_pointer' or 'ANGLE_d3d_share_handle_client_buffer' is required!");
+        return false;
+    }
     GLint has_alpha = 1; //QOpenGLContext::currentContext()->format().hasAlpha()
     eglGetConfigAttrib(egl->dpy, egl_cfg, EGL_BIND_TO_TEXTURE_RGBA, &has_alpha); //EGL_ALPHA_SIZE
     EGLint attribs[] = {
@@ -278,20 +246,27 @@ bool EGLInteropResource::ensureSurface(int w, int h) {
         EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
         EGL_NONE
     };
-    EGL_ENSURE((egl->surface = eglCreatePbufferSurface(egl->dpy, egl_cfg, attribs)) != EGL_NO_SURFACE, false);
-    qDebug("pbuffer surface: %p", egl->surface);
 
-    // create dx resources
-    PFNEGLQUERYSURFACEPOINTERANGLEPROC eglQuerySurfacePointerANGLE = reinterpret_cast<PFNEGLQUERYSURFACEPOINTERANGLEPROC>(eglGetProcAddress("eglQuerySurfacePointerANGLE"));
-    if (!eglQuerySurfacePointerANGLE) {
-        qWarning("EGL_ANGLE_query_surface_pointer is not supported");
-        return false;
-    }
     HANDLE share_handle = NULL;
-    EGL_ENSURE(eglQuerySurfacePointerANGLE(egl->dpy, egl->surface, EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE, &share_handle), false);
+    if (!kEGL_ANGLE_d3d_share_handle_client_buffer && kEGL_ANGLE_query_surface_pointer) {
+        EGL_ENSURE((egl->surface = eglCreatePbufferSurface(egl->dpy, egl_cfg, attribs)) != EGL_NO_SURFACE, false);
+        qDebug("pbuffer surface: %p", egl->surface);
+        PFNEGLQUERYSURFACEPOINTERANGLEPROC eglQuerySurfacePointerANGLE = reinterpret_cast<PFNEGLQUERYSURFACEPOINTERANGLEPROC>(eglGetProcAddress("eglQuerySurfacePointerANGLE"));
+        if (!eglQuerySurfacePointerANGLE) {
+            qWarning("EGL_ANGLE_query_surface_pointer is not supported");
+            return false;
+        }
+        EGL_ENSURE(eglQuerySurfacePointerANGLE(egl->dpy, egl->surface, EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE, &share_handle), false);
+    }
 
     releaseDX();
     // _A8 for a yuv plane
+    /*
+     * d3d resource share requires windows >= vista: https://msdn.microsoft.com/en-us/library/windows/desktop/bb219800(v=vs.85).aspx
+     * from extension files:
+     * d3d9: level must be 1, dimensions must match EGL surface's
+     * d3d9ex or d3d10:
+     */
     DX_ENSURE_OK(d3ddev->CreateTexture(w, h, 1,
                                         D3DUSAGE_RENDERTARGET,
                                         has_alpha ? D3DFMT_A8R8G8B8 : D3DFMT_X8R8G8B8,
@@ -299,6 +274,14 @@ bool EGLInteropResource::ensureSurface(int w, int h) {
                                         &dx_texture,
                                         &share_handle) , false);
     DX_ENSURE_OK(dx_texture->GetSurfaceLevel(0, &dx_surface), false);
+
+    if (kEGL_ANGLE_d3d_share_handle_client_buffer) {
+        // requires extension EGL_ANGLE_d3d_share_handle_client_buffer
+        // egl surface size must match d3d texture's
+        // d3d9ex or d3d10 is required
+        EGL_ENSURE((egl->surface = eglCreatePbufferFromClientBuffer(egl->dpy, EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE, share_handle, egl_cfg, attribs)), false);
+        qDebug("pbuffer surface from client buffer: %p", egl->surface);
+    }
     width = w;
     height = h;
     return true;
@@ -315,14 +298,25 @@ bool EGLInteropResource::map(IDirect3DSurface9* surface, GLuint tex, int w, int 
     }
     DYGL(glBindTexture(GL_TEXTURE_2D, tex));
     const RECT src = { 0, 0, w, h};
-    if (SUCCEEDED(d3ddev->StretchRect(surface, &src, dx_surface, NULL, D3DTEXF_NONE)))
+    if (SUCCEEDED(d3ddev->StretchRect(surface, &src, dx_surface, NULL, D3DTEXF_NONE))) {
+        if (dx_query) {
+            // Flush the draw command now. Ideally, this should be done immediately before the draw call that uses the texture. Flush it once here though.
+            dx_query->Issue(D3DISSUE_END);
+            // ensure data is copied to egl surface. Solution and comment is from chromium
+            // The DXVA decoder has its own device which it uses for decoding. ANGLE has its own device which we don't have access to.
+            // The above code attempts to copy the decoded picture into a surface which is owned by ANGLE.
+            // As there are multiple devices involved in this, the StretchRect call above is not synchronous.
+            // We attempt to flush the batched operations to ensure that the picture is copied to the surface owned by ANGLE.
+            // We need to do this in a loop and call flush multiple times.
+            // We have seen the GetData call for flushing the command buffer fail to return success occassionally on multi core machines, leading to an infinite loop.
+            // Workaround is to have an upper limit of 10 on the number of iterations to wait for the Flush to finish.
+            int k = 0;
+            while ((dx_query->GetData(NULL, 0, D3DGETDATA_FLUSH) == FALSE) && ++k < 10) {
+                Sleep(1);
+            }
+        }
         eglBindTexImage(egl->dpy, egl->surface, EGL_BACK_BUFFER);
-    // Flush the draw command now, so that by the time we come to draw this
-    // image, we're less likely to need to wait for the draw operation to
-    // complete.
-    //IDirect3DQuery9 *query = NULL;
-    //DX_ENSURE_OK(d3ddev->CreateQuery(D3DQUERYTYPE_EVENT, &query), false);
-    //DX_ENSURE_OK(query->Issue(D3DISSUE_END), false);
+    }
     DYGL(glBindTexture(GL_TEXTURE_2D, 0));
     return true;
 }
@@ -427,6 +421,7 @@ bool GLInteropResource::unmap(GLuint tex)
     return true;
 }
 
+// IDirect3DDevice9 can not be used on WDDM OSes(>=vista)
 bool GLInteropResource::ensureWGL()
 {
     if (wgl)
@@ -442,15 +437,21 @@ bool GLInteropResource::ensureWGL()
     wgl = new WGL();
     memset(wgl, 0, sizeof(*wgl));
     const QOpenGLContext *ctx = QOpenGLContext::currentContext(); //const for qt4
-    wgl->DXSetResourceShareHandleNV = (PFNWGLDXSETRESOURCESHAREHANDLENVPROC)ctx->getProcAddress("wglDXSetResourceShareHandleNV");
-    wgl->DXOpenDeviceNV = (PFNWGLDXOPENDEVICENVPROC)ctx->getProcAddress("wglDXOpenDeviceNV");
-    wgl->DXCloseDeviceNV = (PFNWGLDXCLOSEDEVICENVPROC)ctx->getProcAddress("wglDXCloseDeviceNV");
-    wgl->DXRegisterObjectNV = (PFNWGLDXREGISTEROBJECTNVPROC)ctx->getProcAddress("wglDXRegisterObjectNV");
-    wgl->DXUnregisterObjectNV = (PFNWGLDXUNREGISTEROBJECTNVPROC)ctx->getProcAddress("wglDXUnregisterObjectNV");
-    wgl->DXObjectAccessNV = (PFNWGLDXOBJECTACCESSNVPROC)ctx->getProcAddress("wglDXObjectAccessNV");
-    wgl->DXLockObjectsNV = (PFNWGLDXLOCKOBJECTSNVPROC)ctx->getProcAddress("wglDXLockObjectsNV");
-    wgl->DXUnlockObjectsNV = (PFNWGLDXUNLOCKOBJECTSNVPROC)ctx->getProcAddress("wglDXUnlockObjectsNV");
-
+    // QGLContext::getProcAddress(const QByteArray&), QOpenGLContext::getProcAddress(const QString&). So to work with QT_NO_CAST_FROM_ASCII we need a wrapper
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#define QB(x) x
+#else
+#define QB(x) QString::fromLatin1(x)
+#endif
+    wgl->DXSetResourceShareHandleNV = (PFNWGLDXSETRESOURCESHAREHANDLENVPROC)ctx->getProcAddress(QB("wglDXSetResourceShareHandleNV"));
+    wgl->DXOpenDeviceNV = (PFNWGLDXOPENDEVICENVPROC)ctx->getProcAddress(QB("wglDXOpenDeviceNV"));
+    wgl->DXCloseDeviceNV = (PFNWGLDXCLOSEDEVICENVPROC)ctx->getProcAddress(QB("wglDXCloseDeviceNV"));
+    wgl->DXRegisterObjectNV = (PFNWGLDXREGISTEROBJECTNVPROC)ctx->getProcAddress(QB("wglDXRegisterObjectNV"));
+    wgl->DXUnregisterObjectNV = (PFNWGLDXUNREGISTEROBJECTNVPROC)ctx->getProcAddress(QB("wglDXUnregisterObjectNV"));
+    wgl->DXObjectAccessNV = (PFNWGLDXOBJECTACCESSNVPROC)ctx->getProcAddress(QB("wglDXObjectAccessNV"));
+    wgl->DXLockObjectsNV = (PFNWGLDXLOCKOBJECTSNVPROC)ctx->getProcAddress(QB("wglDXLockObjectsNV"));
+    wgl->DXUnlockObjectsNV = (PFNWGLDXUNLOCKOBJECTSNVPROC)ctx->getProcAddress(QB("wglDXUnlockObjectsNV"));
+#undef QB
     Q_ASSERT(wgl->DXRegisterObjectNV);
     return true;
 }

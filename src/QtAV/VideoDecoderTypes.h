@@ -1,6 +1,6 @@
 /******************************************************************************
     VideoRendererTypes: type id and manually id register function
-    Copyright (C) 2013 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -26,13 +26,6 @@
 
 namespace QtAV {
 
-/*!
- * \brief GetRegisted
- * \return count of available id
- *  if pass a null ids, only return the count. otherwise regitered ids will be stored in ids
- */
-Q_AV_EXPORT QVector<VideoDecoderId> GetRegistedVideoDecoderIds();
-
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_FFmpeg;
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_CUDA;
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_DXVA;
@@ -40,6 +33,7 @@ extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_VAAPI;
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_Cedarv;
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_FFmpeg_VDPAU;
 extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_VDA;
+extern Q_AV_EXPORT VideoDecoderId VideoDecoderId_VideoToolbox;
 
 
 Q_AV_EXPORT void VideoDecoder_RegisterAll();

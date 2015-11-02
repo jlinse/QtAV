@@ -103,12 +103,16 @@ Rectangle {
         }
 
         onInternalAudioTracksChanged: {
-            if (typeof(pageLoader.item.internalTracks) != "undefined")
-                pageLoader.item.internalTracks = player.internalAudioTracks
+            if (typeof(pageLoader.item.internalAudioTracks) != "undefined")
+                pageLoader.item.internalAudioTracks = player.internalAudioTracks
         }
         onExternalAudioTracksChanged: {
-            if (typeof(pageLoader.item.externalTracks) != "undefined")
-                pageLoader.item.externalTracks = player.externalAudioTracks
+            if (typeof(pageLoader.item.externalAudioTracks) != "undefined")
+                pageLoader.item.externalAudioTracks = player.externalAudioTracks
+        }
+        onInternalSubtitleTracksChanged: {
+            if (typeof(pageLoader.item.internalSubtitleTracks) != "undefined")
+                pageLoader.item.internalSubtitleTracks = player.internalSubtitleTracks
         }
 
         onStopped: control.setStopState()
@@ -148,6 +152,9 @@ Rectangle {
         autoLoad: PlayerConfig.subtitleAutoLoad
         engines: PlayerConfig.subtitleEngines
         delay: PlayerConfig.subtitleDelay
+        fontFile: PlayerConfig.assFontFile
+        fontFileForced: PlayerConfig.assFontFileForced
+        fontsDir: PlayerConfig.assFontsDir
 
         onContentChanged: { //already enabled
             if (!canRender || !subtitleItem.visible)
@@ -173,20 +180,55 @@ Rectangle {
         }
     }
 
-    MouseArea {
+    MultiPointTouchArea {
+        //mouseEnabled: true //not available on qt5.2(ubuntu14.04)
         anchors.fill: parent
-        onClicked: {
-            control.toggleVisible()
-            if (root.width - mouseX < Utils.scaled(60)) {
-                configPanel.state = "show"
+        onGestureStarted: {
+            if (player.playbackState == MediaPlayer.StoppedState)
+                return
+            var p = gesture.touchPoints[0]
+            var dx = p.x - p.previousX
+            var dy = p.y - p.previousY
+            var t = dy/dx
+            var ml = Math.abs(dx) + Math.abs(dy)
+            var ML = Math.abs(p.x - p.startX) + Math.abs(p.y - p.startY)
+            //console.log("dx: " + dx + " dy: " + dy + " ml: " + ml + " ML: " + ML)
+            if (ml < 2.0 || 5*ml < ML)
+                return
+            if (t > -1 && t < 1) {
+                if (dx > 0) {
+                    player.seekForward()
+                } else {
+                    player.seekBackward()
+                }
             } else {
-                configPanel.state = "hide"
+                if (dy > 0) {// left hand coord
+//                    player.volume = Math.max(0, player.volume-0.05)
+                } else {
+//                    player.volume = Math.min(2, player.volume+0.05)
+                }
             }
+
         }
-        onMouseXChanged: {
-            if (player.playbackState == MediaPlayer.StoppedState || !player.hasVideo)
-                return;
-            control.showPreview(mouseX/parent.width)
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {
+                control.toggleVisible()
+                if (root.width - mouseX < Utils.scaled(60)) {
+                    configPanel.state = "show"
+                } else {
+                    configPanel.state = "hide"
+                }
+            }
+            onDoubleClicked: {
+                player.muted = !player.muted
+            }
+
+            onMouseXChanged: {
+                if (player.playbackState == MediaPlayer.StoppedState || !player.hasVideo)
+                    return;
+                control.showPreview(mouseX/parent.width)
+            }
         }
     }
     Text {
@@ -316,8 +358,15 @@ Rectangle {
             case Qt.Key_O:
                 fileDialog.open()
                 break;
+            case Qt.Key_N:
+                player.stepForward()
+                break
+            case Qt.Key_B:
+                player.stepBackward()
+                break;
             case Qt.Key_Q:
                 Qt.quit()
+                break
             }
         }
     }
@@ -354,11 +403,12 @@ Rectangle {
                         metaData: player.metaData
                     }
                 }
-                console.log("onXXXternalAudioTracksChanged...")
-                if (typeof(item.internalTracks) != "undefined")
-                    item.internalTracks = player.internalAudioTracks
-                if (typeof(item.externalTracks) != "undefined")
-                    item.externalTracks = player.externalAudioTracks
+                if (item.hasOwnProperty("internalAudioTracks"))
+                    item.internalAudioTracks = player.internalAudioTracks
+                if (typeof(item.externalAudioTracks) != "undefined")
+                    item.externalAudioTracks = player.externalAudioTracks
+                if ("internalSubtitleTracks" in item)
+                    item.internalSubtitleTracks = player.internalSubtitleTracks
             }
         }
         Connections {
@@ -372,6 +422,7 @@ Rectangle {
             onMuteChanged: player.muted = value
             onExternalAudioChanged: player.externalAudio = file
             onAudioTrackChanged: player.audioTrack = track
+            onSubtitleTrackChanged: player.internalSubtitleTrack = track
             onZeroCopyChanged: {
                 var opt = player.videoCodecOptions
                 if (value) {
@@ -432,7 +483,9 @@ Rectangle {
     FileDialog {
         id: fileDialog
         title: "Please choose a media file"
+        folder: PlayerConfig.lastFile
         onAccepted: {
+            PlayerConfig.lastFile = fileUrl.toString()
             player.source = fileDialog.fileUrl
             //player.stop() //remove this if autoLoad works
             //player.play()

@@ -20,18 +20,19 @@
 ******************************************************************************/
 
 #include "QtAV/AudioDecoder.h"
+#include "QtAV/Packet.h"
 #include "QtAV/private/AVDecoder_p.h"
 #include "QtAV/private/AVCompat.h"
 #include "QtAV/AudioResamplerTypes.h"
 #include "QtAV/private/mkid.h"
-#include "QtAV/private/prepost.h"
+#include "QtAV/private/factory.h"
 #include "QtAV/version.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
 
 class AudioDecoderFFmpegPrivate;
-class Q_AV_EXPORT AudioDecoderFFmpeg : public AudioDecoder
+class AudioDecoderFFmpeg : public AudioDecoder
 {
     Q_OBJECT
     Q_DISABLE_COPY(AudioDecoderFFmpeg)
@@ -42,9 +43,10 @@ public:
     AudioDecoderId id() const Q_DECL_FINAL;
     virtual QString description() const Q_DECL_FINAL {
         const int patch = QTAV_VERSION_PATCH(avcodec_version());
-        return QString("%1 avcodec %2.%3.%4").arg(patch>=100?"FFmpeg":"Libav").arg(QTAV_VERSION_MAJOR(avcodec_version())).arg(QTAV_VERSION_MINOR(avcodec_version())).arg(patch);
+        return QStringLiteral("%1 avcodec %2.%3.%4")
+                .arg(patch>=100?QStringLiteral("FFmpeg"):QStringLiteral("Libav"))
+                .arg(QTAV_VERSION_MAJOR(avcodec_version())).arg(QTAV_VERSION_MINOR(avcodec_version())).arg(patch);
     }
-    bool prepare() Q_DECL_FINAL;
     bool decode(const QByteArray &encoded) Q_DECL_FINAL;
     bool decode(const Packet& packet) Q_DECL_FINAL;
     AudioFrame frame() Q_DECL_FINAL;
@@ -53,14 +55,9 @@ Q_SIGNALS:
 };
 
 AudioDecoderId AudioDecoderId_FFmpeg = mkid::id32base36_6<'F','F','m','p','e','g'>::value;
-FACTORY_REGISTER_ID_AUTO(AudioDecoder, FFmpeg, "FFmpeg")
+FACTORY_REGISTER(AudioDecoder, FFmpeg, "FFmpeg")
 
-void RegisterAudioDecoderFFmpeg_Man()
-{
-    FACTORY_REGISTER_ID_MAN(AudioDecoder, FFmpeg, "FFmpeg")
-}
-
-class AudioDecoderFFmpegPrivate : public AudioDecoderPrivate
+class AudioDecoderFFmpegPrivate Q_DECL_FINAL: public AudioDecoderPrivate
 {
 public:
     AudioDecoderFFmpegPrivate()
@@ -84,21 +81,6 @@ AudioDecoderId AudioDecoderFFmpeg::id() const
     return AudioDecoderId_FFmpeg;
 }
 
-bool AudioDecoderFFmpeg::prepare()
-{
-    DPTR_D(AudioDecoder);
-    if (!d.codec_ctx)
-        return false;
-    if (!d.resampler)
-        return true;
-    d.resampler->setInChannelLayout(d.codec_ctx->channel_layout);
-    d.resampler->setInChannels(d.codec_ctx->channels);
-    d.resampler->setInSampleFormat(d.codec_ctx->sample_fmt);
-    d.resampler->setInSampleRate(d.codec_ctx->sample_rate);
-    d.resampler->prepare();
-    return true;
-}
-
 AudioDecoderFFmpeg::AudioDecoderFFmpeg()
     : AudioDecoder(*new AudioDecoderFFmpegPrivate())
 {
@@ -111,8 +93,17 @@ bool AudioDecoderFFmpeg::decode(const Packet &packet)
     DPTR_D(AudioDecoderFFmpeg);
     d.decoded.clear();
     int got_frame_ptr = 0;
+    int ret = 0;
+    if (packet.isEOF()) {
+        AVPacket eofpkt;
+        av_init_packet(&eofpkt);
+        eofpkt.data = NULL;
+        eofpkt.size = 0;
+        ret = avcodec_decode_audio4(d.codec_ctx, d.frame, &got_frame_ptr, &eofpkt);
+    } else {
     // const AVPacket*: ffmpeg >= 1.0. no libav
-    int ret = avcodec_decode_audio4(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
+        ret = avcodec_decode_audio4(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
+    }
     d.undecoded_size = qMin(packet.data.size() - ret, packet.data.size());
     if (ret == AVERROR(EAGAIN)) {
         return false;
@@ -123,7 +114,7 @@ bool AudioDecoderFFmpeg::decode(const Packet &packet)
     }
     if (!got_frame_ptr) {
         qWarning("[AudioDecoder] got_frame_ptr=false. decoded: %d, un: %d", ret, d.undecoded_size);
-        return true;
+        return !packet.isEOF();
     }
 #if USE_AUDIO_FRAME
     return true;
@@ -199,6 +190,7 @@ AudioFrame AudioDecoderFFmpeg::frame()
     f.setBits(d.frame->extended_data); // TODO: ref
     f.setBytesPerLine(d.frame->linesize[0], 0); // for correct alignment
     f.setSamplesPerChannel(d.frame->nb_samples);
+    // TODO: ffplay check AVFrame.pts, pkt_pts, last_pts+nb_samples. move to AudioFrame::from(AVFrame*)
     f.setTimestamp((double)d.frame->pkt_pts/1000.0);
     f.setAudioResampler(d.resampler); // TODO: remove. it's not safe if frame is shared. use a pool or detach if ref >1
     return f;

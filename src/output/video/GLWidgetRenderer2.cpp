@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -50,21 +50,15 @@ GLWidgetRenderer2::GLWidgetRenderer2(QWidget *parent, const QGLWidget* shareWidg
      * widget's background
      */
     setAttribute(Qt::WA_OpaquePaintEvent);
-    setAttribute(Qt::WA_PaintOnScreen);
     setAttribute(Qt::WA_NoSystemBackground);
     //default: swap in qpainter dtor. we should swap before QPainter.endNativePainting()
     setAutoBufferSwap(false);
     setAutoFillBackground(false);
 }
 
-void GLWidgetRenderer2::onUpdate()
-{
-    update();
-}
-
 void GLWidgetRenderer2::initializeGL()
 {
-    makeCurrent();
+    // already current
     onInitializeGL();
 }
 
