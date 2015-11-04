@@ -125,6 +125,9 @@ public:
     //geometry size of current video frame
     QSize frameSize() const;
 
+    void setBackgroundColor(const QColor &color);
+    QColor backgroundColor() const;
+
     /*!
      * \brief orientation
      * 0, 90, 180, 270. other values are ignored
@@ -236,6 +239,7 @@ private: //used by VideoOutput class
     virtual bool onSetHue(qreal hue);
     virtual bool onSetSaturation(qreal saturation);
     virtual void onFrameSizeChanged(const QSize& size);
+    virtual void onSetBackgroundColor(const QColor &color);
 private:
     template<class C>
     static VideoRenderer* create() {

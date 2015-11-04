@@ -306,6 +306,21 @@ QSize VideoRenderer::frameSize() const
     return QSize(d.src_width, d.src_height);
 }
 
+void VideoRenderer::setBackgroundColor(const QColor &color)
+{
+    DPTR_D(VideoRenderer);
+    if(d.background_color != color) {
+       d.background_color = color;
+       onSetBackgroundColor(color);
+    }
+    return;
+}
+
+QColor VideoRenderer::backgroundColor() const
+{
+    return d_func().background_color;
+}
+
 QRect VideoRenderer::videoRect() const
 {
     return d_func().out_rect;
@@ -607,6 +622,11 @@ bool VideoRenderer::onSetSaturation(qreal s)
 void VideoRenderer::onFrameSizeChanged(const QSize &size)
 {
     Q_UNUSED(size);
+}
+
+void VideoRenderer::onSetBackgroundColor(const QColor &color)
+{
+    Q_UNUSED(color);
 }
 
 void VideoRenderer::updateUi()
