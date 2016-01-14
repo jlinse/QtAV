@@ -28,7 +28,7 @@ QTAVSRC=$$PROJECTROOT/src
 !rc_file {
     RC_ICONS = $$PROJECTROOT/src/QtAV.ico
     QMAKE_TARGET_COMPANY = "Shanghai University->S3 Graphics->Deepin | wbsecg1@gmail.com"
-    QMAKE_TARGET_DESCRIPTION = "QtAVWidgets module. QtAV Multimedia playback framework. http://www.qtav.org"
+    QMAKE_TARGET_DESCRIPTION = "QtAVWidgets module. QtAV Multimedia framework. http://qtav.org"
     QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2012-2015 WangBin, wbsecg1@gmail.com"
     QMAKE_TARGET_PRODUCT = "QtAV Widgets"
 } else:win32 {
@@ -50,7 +50,7 @@ OTHER_FILES += $$RC_FILE $$QTAVSRC/QtAV.svg
 
 win32 {
 #dynamicgl: __impl__GetDC __impl_ReleaseDC
-    LIBS *= -luser32
+  !winrt:LIBS *= -luser32
 }
 
 SDK_HEADERS *= \
@@ -130,7 +130,7 @@ mac_framework { # from common.pri
         FRAMEWORK_HEADERS.path = Headers
 # 5.4(beta) workaround for wrong include path
 # TODO: why <QtCore/qglobal.h> can be found?
-        greaterThan(QT_MAJOR_VERSION, 4):greaterThan(QT_MINOR_VERSION, 3): FRAMEWORK_HEADERS.path = Headers/$$MODULE_INCNAME
+        isEqual(QT_MAJOR_VERSION, 4):greaterThan(QT_MINOR_VERSION, 3)|greaterThan(QT_MAJOR_VERSION, 5): FRAMEWORK_HEADERS.path = Headers/$$MODULE_INCNAME
         FRAMEWORK_PRIVATE_HEADERS.version = Versions
         FRAMEWORK_PRIVATE_HEADERS.files = $$SDK_PRIVATE_HEADERS
         FRAMEWORK_PRIVATE_HEADERS.path = Headers/$$VERSION/$$MODULE_INCNAME/private
@@ -162,12 +162,12 @@ qtavwidgets_dev.commands = echo \"$$join(DEB_INSTALL_LIST, \\n)\" >>$$PROJECTROO
 QMAKE_EXTRA_TARGETS += qtavwidgets_dev
 target.depends *= $${qtavwidgets_dev.target}
 
-greaterThan(QT_MAJOR_VERSION, 4):lessThan(QT_MINOR_VERSION, 4) {
+greaterThan(QT_MAJOR_VERSION, 4) {
   qtavwidgets_dev_links.target = qtav-dev.links #like qtmultimedia5-dev, contains widgets .so
   qtavwidgets_dev_links.commands = echo \"$$[QT_INSTALL_LIBS]/libQtAVWidgets.so $$[QT_INSTALL_LIBS]/libQt$${QT_MAJOR_VERSION}AVWidgets.so\" >>$$PROJECTROOT/debian/$${qtavwidgets_dev_links.target}
   QMAKE_EXTRA_TARGETS *= qtavwidgets_dev_links
   target.depends *= $${qtavwidgets_dev_links.target}
-} #Qt<5.4
+} #Qt>=5
 } #debian
 
 MODULE_INCNAME = QtAVWidgets
@@ -175,8 +175,8 @@ MODULE_VERSION = $$VERSION
 #use Qt version. limited by qmake
 # windows: Qt5AV.dll, not Qt1AV.dll
 !mac_framework: MODULE_VERSION = $${QT_MAJOR_VERSION}.$${QT_MINOR_VERSION}.$${QT_PATCH_VERSION}
-include($$PROJECTROOT/deploy.pri)
+!contains(QMAKE_HOST.os, Windows):include($$PROJECTROOT/deploy.pri)
 
 icon.files = $$PWD/$${TARGET}.svg
 icon.path = /usr/share/icons/hicolor/64x64/apps
-INSTALLS += icon
+!contains(QMAKE_HOST.os, Windows):INSTALLS += icon

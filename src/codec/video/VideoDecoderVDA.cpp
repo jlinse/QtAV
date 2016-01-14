@@ -269,15 +269,17 @@ VideoFrame VideoDecoderVDA::frame()
             if (pixfmt == NV12) {
                 dtype = GL_UNSIGNED_BYTE;
                 if (plane == 0) {
-                    iformat = format = GL_LUMINANCE;
+                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
                 } else {
-                    iformat = format = GL_LUMINANCE_ALPHA;
+                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE_ALPHA : GL_RG;
                 }
             } else if (pixfmt == UYVY || pixfmt == YUYV) {
                 w /= 2; //rgba texture
             } else if (pixfmt == YUV420P) {
                 dtype = GL_UNSIGNED_BYTE;
-                iformat = format = GL_LUMINANCE;
+                iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
+                if (plane > 1 && format == GL_LUMINANCE)
+                    iformat = format = GL_ALPHA;
             }
             DYGL(glBindTexture(target, *((GLuint*)handle)));
             CGLError err = CGLTexImageIOSurface2D(CGLGetCurrentContext(), target, iformat, w, h, format, dtype, surface, plane);

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -407,6 +407,45 @@ void AVPlayer::setPriority(const QVector<VideoDecoderId> &ids)
 #endif
 }
 
+template<typename ID, typename T>
+static QVector<ID> idsFromNames(const QStringList& names) {
+    QVector<ID> decs;
+    if (!names.isEmpty()) {
+        decs.reserve(names.size());
+        foreach (const QString& name, names) {
+            if (name.isEmpty())
+                continue;
+            ID id = T::id(name.toLatin1().constData());
+            if (id == 0)
+                continue;
+            decs.append(id);
+        }
+    }
+    return decs;
+}
+
+void AVPlayer::setVideoDecoderPriority(const QStringList &names)
+{
+    setPriority(idsFromNames<VideoDecoderId, VideoDecoder>(names));
+}
+
+template<typename ID, typename T>
+static QStringList idsToNames(QVector<ID> ids) {
+    QStringList decs;
+    if (!ids.isEmpty()) {
+        decs.reserve(ids.size());
+        foreach (ID id, ids) {
+            decs.append(QString::fromLatin1(T::name(id)));
+        }
+    }
+    return decs;
+}
+
+QStringList AVPlayer::videoDecoderPriority() const
+{
+    return idsToNames<VideoDecoderId, VideoDecoder>(d->vc_ids);
+}
+
 void AVPlayer::setOptionsForFormat(const QVariantHash &dict)
 {
     d->demuxer.setOptions(dict);
@@ -430,6 +469,11 @@ QVariantHash AVPlayer::optionsForAudioCodec() const
 void AVPlayer::setOptionsForVideoCodec(const QVariantHash &dict)
 {
     d->vc_opt = dict;
+    const QVariant p(dict.contains(QStringLiteral("priority")));
+    if (p.type() == QVariant::StringList) {
+        setVideoDecoderPriority(p.toStringList());
+        d->vc_opt.remove(QStringLiteral("priority"));
+    }
 }
 
 QVariantHash AVPlayer::optionsForVideoCodec() const
@@ -552,6 +596,10 @@ void AVPlayer::togglePause()
 
 void AVPlayer::pause(bool p)
 {
+    if (!isPlaying())
+        return;
+    if (isPaused() == p)
+        return;
     //pause thread. check pause state?
     d->read_thread->pause(p);
     if (d->athread)
@@ -559,7 +607,10 @@ void AVPlayer::pause(bool p)
     if (d->vthread)
         d->vthread->pause(p);
     d->clock->pause(p);
-    emit paused(p);
+
+    d->state = p ? PausedState : PlayingState;
+    Q_EMIT stateChanged(d->state);
+    Q_EMIT paused(p);
 }
 
 bool AVPlayer::isPaused() const
@@ -938,8 +989,6 @@ const QVariantList &AVPlayer::internalAudioTracks() const
 
 bool AVPlayer::setAudioStream(const QString &file, int n)
 {
-    if (n < 0) // TODO: disable audio
-        return false;
     QString path(file);
     // QFile does not support "file:"
     if (path.startsWith(QLatin1String("file:")))
@@ -1007,9 +1056,6 @@ update_demuxer:
             d->external_audio_tracks = d->getTracksInfo(&d->audio_demuxer, AVDemuxer::AudioStream);
             Q_EMIT externalAudioTracksChanged(d->external_audio_tracks);
             d->read_thread->setAudioDemuxer(&d->audio_demuxer);
-        }
-        if (d->audio_track < 0) {
-            d->audio_track = d->audio_demuxer.audioStream();
         }
     }
     if (!isPlaying()) {
@@ -1114,6 +1160,35 @@ int AVPlayer::subtitleStreamCount() const
     return d->demuxer.subtitleStreams().size();
 }
 
+AVPlayer::State AVPlayer::state() const
+{
+    return d->state;
+}
+
+void AVPlayer::setState(State value)
+{
+    if (d->state == value)
+        return;
+    if (value == StoppedState) {
+        stop();
+        return;
+    }
+    if (value == PausedState) {
+        pause(true);
+        return;
+    }
+    // value == PlayingState
+    if (d->state == StoppedState) {
+        play();
+        return;
+    }
+    if (d->state == PausedState) {
+        pause(false);
+        return;
+    }
+
+}
+
 //FIXME: why no d->demuxer will not get an eof if replaying by seek(0)?
 void AVPlayer::play()
 {
@@ -1194,7 +1269,8 @@ void AVPlayer::playInternal()
     // TODO: add isVideo() or hasVideo()?
     qreal vfps = d->force_fps;
     bool force_fps = vfps > 0;
-    if (d->athread) {
+    const bool ao_null = d->ao && d->ao->backend().toLower() == QLatin1String("null");
+    if (d->athread && !ao_null) {
         force_fps = vfps > 0 && !!d->vthread;
     } else if (!force_fps) {
         force_fps = !!d->vthread;
@@ -1221,9 +1297,8 @@ void AVPlayer::playInternal()
             qDebug("Using AudioClock");
             masterClock()->setClockType(AVClock::AudioClock);
         }
-        masterClock()->setInitialValue((double)absoluteMediaStartPosition()/1000.0);
-        qDebug("Clock initial value: %f", masterClock()->value());
     }
+    masterClock()->setInitialValue((double)absoluteMediaStartPosition()/1000.0);
     // from previous play()
     if (d->demuxer.audioCodecContext() && d->athread) {
         qDebug("Starting audio thread...");
@@ -1253,22 +1328,26 @@ void AVPlayer::playInternal()
     if (d->last_position > 0)
         setPosition(d->last_position); //just use d->demuxer.startTime()/duration()?
 
-    emit started(); //we called stop(), so must emit started()
+    d->state = PlayingState;
+    Q_EMIT stateChanged(d->state);
+    Q_EMIT started(); //we called stop(), so must emit started()
 }
 
 void AVPlayer::stopFromDemuxerThread()
 {
     qDebug("demuxer thread emit finished.");
+    d->seeking = false;
     if (currentRepeat() >= repeat() && repeat() >= 0) {
         masterClock()->reset();
         stopNotifyTimer();
-        d->seeking = false;
         d->start_position = 0;
         d->stop_position = kInvalidPosition; // already stopped. so not 0 but invalid. 0 can stop the playback in timerEvent
         d->media_end = kInvalidPosition;
         d->repeat_current = d->repeat_max = 0;
         qDebug("avplayer emit stopped()");
-        emit stopped();
+        d->state = StoppedState;
+        Q_EMIT stateChanged(d->state);
+        Q_EMIT stopped();
     } else {
         qDebug("stopPosition() == mediaStopPosition() or !seekable. repeate: %d/%d", currentRepeat(), repeat());
         d->repeat_current++;
@@ -1341,7 +1420,7 @@ void AVPlayer::updateMediaStatus(QtAV::MediaStatus status)
     if (status == d->status)
         return;
     d->status = status;
-    emit mediaStatusChanged(d->status);
+    Q_EMIT mediaStatusChanged(d->status);
 }
 
 void AVPlayer::onSeekFinished()
@@ -1384,9 +1463,13 @@ void AVPlayer::stop()
     d->last_position = mediaStopPosition() != kInvalidPosition ? startPosition() : 0;
     if (!isPlaying()) {
         qDebug("Not playing~");
+        if (mediaStatus() == LoadingMedia || mediaStatus() == LoadedMedia) {
+            qDebug("loading media: %d", mediaStatus() == LoadingMedia);
+            //unload();
+            d->demuxer.setInterruptStatus(-1);
+        }
         return;
     }
-
     while (d->read_thread->isRunning()) {
         qDebug("stopping demuxer thread...");
         d->read_thread->stop();
@@ -1426,7 +1509,7 @@ void AVPlayer::timerEvent(QTimerEvent *te)
             return;
         }
         // atEnd() supports dynamic changed duration. but we can not break A-B repeat mode, so check stoppos and mediastoppos
-        if (!d->demuxer.atEnd() && stopPosition() >= mediaStopPosition()) {
+        if ((!d->demuxer.atEnd() || d->read_thread->isRunning()) && stopPosition() >= mediaStopPosition()) {
             if (!d->seeking) {
                 Q_EMIT positionChanged(t);
             }
@@ -1475,6 +1558,8 @@ void AVPlayer::stepForward()
 void AVPlayer::stepBackward()
 {
     d->clock->pause(true);
+    d->state = PausedState;
+    Q_EMIT stateChanged(d->state);
     Q_EMIT paused(true);
     d->read_thread->stepBackward();
 }
@@ -1513,6 +1598,12 @@ qreal AVPlayer::bufferProgress() const
 {
     const PacketBuffer* buf = d->read_thread->buffer();
     return buf ? buf->bufferProgress() : 0;
+}
+
+qreal AVPlayer::bufferSpeed() const
+{
+    const PacketBuffer* buf = d->read_thread->buffer();
+    return buf ? buf->bufferSpeedInBytes() : 0;
 }
 
 qint64 AVPlayer::buffered() const

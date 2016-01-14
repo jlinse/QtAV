@@ -19,6 +19,7 @@
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
 #include "SurfaceInteropVAAPI.h"
+#ifndef QT_NO_OPENGL
 #include "utils/OpenGLHelper.h"
 #include "QtAV/VideoFrame.h"
 #include "utils/Logger.h"
@@ -48,6 +49,27 @@
 namespace QtAV {
 VideoFormat::PixelFormat pixelFormatFromVA(uint32_t fourcc);
 namespace vaapi {
+
+//2013 https://www.khronos.org/registry/egl/extensions/EXT/EGL_EXT_image_dma_buf_import.txt
+bool checkEGL_DMA()
+{
+#ifndef QT_NO_OPENGL
+    static const char* eglexts[] = { "EGL_EXT_image_dma_buf_import", NULL};
+    return OpenGLHelper::hasExtensionEGL(eglexts);
+#endif
+    return false;
+}
+
+//https://www.khronos.org/registry/egl/extensions/KHR/EGL_KHR_image_pixmap.txt
+bool checkEGL_Pixmap()
+{
+#ifndef QT_NO_OPENGL
+    static const char* eglexts[] = { "EGL_KHR_image_pixmap", NULL};
+    return OpenGLHelper::hasExtensionEGL(eglexts);
+#endif
+    return false;
+}
+
 void SurfaceInteropVAAPI::setSurface(const surface_ptr& surface,  int w, int h) {
     m_surface = surface;
     frame_width = (w ? w : surface->width());
@@ -75,54 +97,25 @@ void* SurfaceInteropVAAPI::map(SurfaceType type, const VideoFormat &fmt, void *h
 
 void SurfaceInteropVAAPI::unmap(void *handle)
 {
-    m_resource->unmap(*((GLuint*)handle));
+    m_resource->unmap(m_surface, *((GLuint*)handle));
 }
 
 void* SurfaceInteropVAAPI::mapToHost(const VideoFormat &format, void *handle, int plane)
 {
     Q_UNUSED(plane);
-    int nb_fmts = vaMaxNumImageFormats(m_surface->vadisplay());
-    //av_mallocz_array
-    VAImageFormat *p_fmt = (VAImageFormat*)calloc(nb_fmts, sizeof(*p_fmt));
-    if (!p_fmt) {
-        return NULL;
-    }
-    if (vaQueryImageFormats(m_surface->vadisplay(), p_fmt, &nb_fmts)) {
-        free(p_fmt);
-        return NULL;
-    }
     VAImage image;
-    for (int i = 0; i < nb_fmts; i++) {
-        if (p_fmt[i].fourcc == VA_FOURCC_YV12 ||
-            p_fmt[i].fourcc == VA_FOURCC_IYUV ||
-            p_fmt[i].fourcc == VA_FOURCC_NV12) {
-            qDebug("vaCreateImage: %c%c%c%c", p_fmt[i].fourcc<<24>>24, p_fmt[i].fourcc<<16>>24, p_fmt[i].fourcc<<8>>24, p_fmt[i].fourcc>>24);
-            if (vaCreateImage(m_surface->vadisplay(), &p_fmt[i], m_surface->width(), m_surface->height(), &image) != VA_STATUS_SUCCESS) {
-                image.image_id = VA_INVALID_ID;
-                qDebug("vaCreateImage error: %c%c%c%c", p_fmt[i].fourcc<<24>>24, p_fmt[i].fourcc<<16>>24, p_fmt[i].fourcc<<8>>24, p_fmt[i].fourcc>>24);
-                continue;
-            }
-            /* Validate that vaGetImage works with this format */
-            if (vaGetImage(m_surface->vadisplay(), m_surface->get(), 0, 0, m_surface->width(), m_surface->height(), image.image_id) != VA_STATUS_SUCCESS) {
-                vaDestroyImage(m_surface->vadisplay(), image.image_id);
-                qDebug("vaGetImage error: %c%c%c%c", p_fmt[i].fourcc<<24>>24, p_fmt[i].fourcc<<16>>24, p_fmt[i].fourcc<<8>>24, p_fmt[i].fourcc>>24);
-                image.image_id = VA_INVALID_ID;
-                continue;
-            }
-            break;
-        }
-    }
-    free(p_fmt);
+    static const unsigned int fcc[] = { VA_FOURCC_NV12, VA_FOURCC_YV12, VA_FOURCC_IYUV, 0};
+    va_new_image(m_surface->vadisplay(), fcc, &image, m_surface->width(), m_surface->height());
     if (image.image_id == VA_INVALID_ID)
         return NULL;
     void *p_base;
-    VA_ENSURE_TRUE(vaMapBuffer(m_surface->vadisplay(), image.buf, &p_base), NULL);
-
+    VA_ENSURE(vaGetImage(m_surface->vadisplay(), m_surface->get(), 0, 0, m_surface->width(), m_surface->height(), image.image_id), NULL);
+    VA_ENSURE(vaMapBuffer(m_surface->vadisplay(), image.buf, &p_base), NULL); //TODO: destroy image before return
     VideoFormat::PixelFormat pixfmt = pixelFormatFromVA(image.format.fourcc);
     bool swap_uv = image.format.fourcc != VA_FOURCC_NV12;
     if (pixfmt == VideoFormat::Format_Invalid) {
         qWarning("unsupported vaapi pixel format: %#x", image.format.fourcc);
-        vaDestroyImage(m_surface->vadisplay(), image.image_id);
+        VA_ENSURE(vaDestroyImage(m_surface->vadisplay(), image.image_id), NULL);
         return NULL;
     }
     const VideoFormat fmt(pixfmt);
@@ -136,7 +129,7 @@ void* SurfaceInteropVAAPI::mapToHost(const VideoFormat &format, void *handle, in
     if (format != fmt)
         frame = frame.to(format);
     VAWARN(vaUnmapBuffer(m_surface->vadisplay(), image.buf));
-    vaDestroyImage(m_surface->vadisplay(), image.image_id);
+    VAWARN(vaDestroyImage(m_surface->vadisplay(), image.image_id));
     image.image_id = VA_INVALID_ID;
     VideoFrame *f = reinterpret_cast<VideoFrame*>(handle);
     frame.setTimestamp(f->timestamp());
@@ -224,6 +217,10 @@ protected:
 //static PFNEGLQUERYNATIVEDISPLAYNVPROC eglQueryNativeDisplayNV = NULL;
 static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR = NULL;
 static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = NULL;
+#ifndef GL_OES_EGL_image
+typedef void *GLeglImageOES;
+typedef void (EGLAPIENTRYP PFNGLEGLIMAGETARGETTEXTURE2DOESPROC) (GLenum target, GLeglImageOES image);
+#endif
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = NULL;
 class X11_EGL Q_DECL_FINAL: public X11 {
 public:
@@ -290,7 +287,7 @@ public:
             return display;
         if (!display) {
             qDebug("glXGetCurrentDisplay");
-            display = (Display*)glXGetCurrentDisplay();
+            display = (Display*)glXGetCurrentDisplay(); // use for all and not x11info
             if (!display)
                 return 0;
         }
@@ -368,14 +365,7 @@ bool X11InteropResource::ensurePixmaps(int w, int h)
         return true;
     if (!x11) {
 #if QTAV_HAVE(EGL_CAPI)
-#if defined(QT_OPENGL_ES_2)
-        static const bool use_egl = true;
-#else
-        // FIXME: may fallback to xcb_glx(default)
-        static const bool use_egl = qgetenv("QT_XCB_GL_INTEGRATION") == "xcb_egl";
-#endif //defined(QT_OPENGL_ES_2)
-        if (use_egl) {
-            // TODO: check EGL_NOK_texture_from_pixmap
+        if (OpenGLHelper::isEGL()) {
             x11 = new X11_EGL();
         } else
 #endif //QTAV_HAVE(EGL_CAPI)
@@ -422,8 +412,9 @@ bool X11InteropResource::map(const surface_ptr& surface, GLuint tex, int w, int 
     return true;
 }
 
-bool X11InteropResource::unmap(GLuint tex)
+bool X11InteropResource::unmap(const surface_ptr &surface, GLuint tex)
 {
+    Q_UNUSED(surface);
     Q_UNUSED(tex);
     // can not call glXReleaseTexImageEXT otherwise the texture will containts no image data
     return true;
@@ -431,7 +422,6 @@ bool X11InteropResource::unmap(GLuint tex)
 #endif //VA_X11_INTEROP
 
 #if QTAV_HAVE(EGL_CAPI)
-#if VA_CHECK_VERSION(0, 38, 0)
 #ifndef EGL_LINUX_DMA_BUF_EXT
 #define EGL_LINUX_DMA_BUF_EXT 0x3270
 #define EGL_LINUX_DRM_FOURCC_EXT          0x3271
@@ -439,6 +429,7 @@ bool X11InteropResource::unmap(GLuint tex)
 #define EGL_DMA_BUF_PLANE0_OFFSET_EXT     0x3273
 #define EGL_DMA_BUF_PLANE0_PITCH_EXT      0x3274
 #endif
+//2010 https://www.khronos.org/registry/egl/extensions/MESA/EGL_MESA_drm_image.txt: only support EGL_DRM_BUFFER_FORMAT_ARGB32_MESA
 class EGL {
 public:
     EGL() : dpy(EGL_NO_DISPLAY) {
@@ -451,7 +442,7 @@ public:
         }
     }
     void destroyImages(int plane) {
-        qDebug("destroyImage %d image:%p, this: %p", plane, image,this);
+        //qDebug("destroyImage %d image:%p, this: %p", plane, image,this);
         if (image[plane] != EGL_NO_IMAGE_KHR) {
             EGL_WARN(eglDestroyImageKHR(dpy, image[plane]));
             image[plane] = EGL_NO_IMAGE_KHR;
@@ -482,7 +473,6 @@ public:
 EGLInteropResource::EGLInteropResource()
     : InteropResource()
     , vabuf_handle(0)
-    , va_dpy(0)
     , egl(0)
 {
     va_image.buf = va_image.image_id = VA_INVALID_ID;
@@ -490,56 +480,44 @@ EGLInteropResource::EGLInteropResource()
 
 EGLInteropResource::~EGLInteropResource()
 {
-    destroy();
     delete egl; // TODO: thread
-}
-
-// return the new entry
-static EGLint* add_egl_attribute(EGLint* a, EGLint key, EGLint value)
-{
-    a[0] = key;
-    a[1] = value;
-    a[2] = EGL_NONE;
-    printf("%d:%d ", key, value);
-    return a+3;
 }
 
 bool EGLInteropResource::map(const surface_ptr &surface, GLuint tex, int w, int h, int plane)
 {
     if (!ensure())
         return false;
-    qDebug("EGLInteropResource.map %d", plane);
-    va_dpy = surface->display();
     if (va_image.image_id == VA_INVALID_ID) {
-        VA_ENSURE(vaDeriveImage(va_dpy->get(), surface->get(), &va_image), false);
+        // TODO: try vaGetImage. it's yuv420p. RG texture is not supported by gles2, so let's use yuv420p, or change the shader
+        VA_ENSURE(vaDeriveImage(surface->vadisplay(), surface->get(), &va_image), false);
     }
     if (!vabuf_handle) {
-        VABufferInfo vabuf;
+        va_0_38::VABufferInfo vabuf;
         memset(&vabuf, 0, sizeof(vabuf));
         vabuf.mem_type = VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
-        VA_ENSURE(vaAcquireBufferHandle(va_dpy->get(), va_image.buf, &vabuf), false);
+        VA_ENSURE(va_0_38::vaAcquireBufferHandle(surface->vadisplay(), va_image.buf, &vabuf), false);
         vabuf_handle = vabuf.handle;
     }
     // (it would be nice if we could use EGL_IMAGE_INTERNAL_FORMAT_EXT)
 #define FOURCC(a,b,c,d) ((a) | ((b)<<8) | ((c)<<16) | ((unsigned)(d)<<24))
     static const int drm_fmts[] = {
         FOURCC('R', '8', ' ', ' '),   // DRM_FORMAT_R8
-        FOURCC('G', 'R', '8', '8'),   // DRM_FORMAT_GR88
+        FOURCC('G', 'R', '8', '8'),   // DRM_FORMAT_GR88. RG88 does not work
         FOURCC('R', 'G', '2', '4'),   // DRM_FORMAT_RGB888
         FOURCC('R', 'A', '2', '4')  // DRM_FORMAT_RGBA8888
     };
 #undef FOURCC
-    EGLint attribs[20] = {EGL_NONE};
-    EGLint *a = attribs;
     // TODO: yv12 swap uv
     const VideoFormat fmt(pixelFormatFromVA(va_image.format.fourcc));
-    a = add_egl_attribute(a, EGL_LINUX_DRM_FOURCC_EXT, drm_fmts[fmt.bytesPerPixel(plane) - 1]);
-    a = add_egl_attribute(a, EGL_WIDTH, fmt.width(surface->width(), plane));
-    a = add_egl_attribute(a, EGL_HEIGHT, fmt.height(surface->height(), plane));
-    a = add_egl_attribute(a, EGL_DMA_BUF_PLANE0_FD_EXT, vabuf_handle);
-    a = add_egl_attribute(a, EGL_DMA_BUF_PLANE0_OFFSET_EXT, va_image.offsets[plane]);
-    a = add_egl_attribute(a, EGL_DMA_BUF_PLANE0_PITCH_EXT, va_image.pitches[plane]);
-    printf("---\n");
+    const EGLint attribs[] = {
+        EGL_LINUX_DRM_FOURCC_EXT, drm_fmts[fmt.bytesPerPixel(plane) - 1],
+        EGL_WIDTH, fmt.width(w, plane),
+        EGL_HEIGHT, fmt.height(h, plane),
+        EGL_DMA_BUF_PLANE0_FD_EXT, (EGLint)vabuf_handle,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT, (EGLint)va_image.offsets[plane],
+        EGL_DMA_BUF_PLANE0_PITCH_EXT, (EGLint)va_image.pitches[plane],
+        EGL_NONE
+    };
     if (!egl->bindImage(plane, attribs))
         return false;
     DYGL(glBindTexture(GL_TEXTURE_2D, tex));
@@ -549,36 +527,37 @@ bool EGLInteropResource::map(const surface_ptr &surface, GLuint tex, int w, int 
     return true;
 }
 
-bool EGLInteropResource::unmap(GLuint tex)
+bool EGLInteropResource::unmap(const surface_ptr &surface, GLuint tex)
 {
     if (!egl)
         return false;
     if (!mapped.contains(tex)) {
         if (mapped.isEmpty()) {
-            destroy();
+            destroy(surface->vadisplay());
         }
         return false;
     }
     const int plane = mapped.value(tex);
     egl->destroyImages(plane);
     mapped.remove(tex);
-    qDebug("unmap plane %d", plane);
     if (mapped.isEmpty()) {
-        destroy();
+        destroy(surface->vadisplay());
     }
     return true;
 }
 
-void EGLInteropResource::destroy()
+void EGLInteropResource::destroy(VADisplay va_dpy)
 {
+    if (!va_dpy)
+        return;
     if (va_image.buf != VA_INVALID_ID) {
-        VAWARN(vaReleaseBufferHandle(va_dpy->get(), va_image.buf));
+        VAWARN(va_0_38::vaReleaseBufferHandle(va_dpy, va_image.buf));
         va_image.buf = VA_INVALID_ID;
         vabuf_handle = 0;
-        qDebug("vabuf_handle: %#x", vabuf_handle);
+        //qDebug("vabuf_handle: %#x", vabuf_handle);
     }
     if (va_image.image_id != VA_INVALID_ID) {
-        VAWARN(vaDestroyImage(va_dpy->get(), va_image.image_id));
+        VAWARN(vaDestroyImage(va_dpy, va_image.image_id));
         va_image.image_id = VA_INVALID_ID;
     }
 }
@@ -587,32 +566,19 @@ bool EGLInteropResource::ensure()
 {
     if (egl)
         return true;
-    qDebug("EGLInteropResource.ensure");
 #if QTAV_HAVE(EGL_CAPI)
-#if !defined(QT_OPENGL_ES_2)
-    // FIXME: may fallback to xcb_glx(default)
-    static const bool use_egl = qgetenv("QT_XCB_GL_INTEGRATION") == "xcb_egl";
-    if (!use_egl) {
+    if (!OpenGLHelper::isEGL()) {
         qWarning("Not using EGL");
         return false;
     }
-#endif //defined(QT_OPENGL_ES_2)
 #else
     qWarning("build QtAV with capi is required");
     return false;
 #endif //QTAV_HAVE(EGL_CAPI)
     static bool has_ext = false;
     if (!has_ext) {
-        QList<QByteArray> eglexts = QByteArray(eglQueryString(eglGetCurrentDisplay(), EGL_EXTENSIONS)).split(' ');
-        static QVector<QByteArray> eglexts_required= QVector<QByteArray>() << QByteArrayLiteral("EGL_EXT_image_dma_buf_import")
-                                                           << QByteArrayLiteral("EGL_EXT_image_dma_buf_import");
-        qDebug() << eglexts;
-        foreach (const QByteArray& ext, eglexts_required) {
-            if (!eglexts.contains(ext)) {
-                qWarning("missing extension: %s", ext.constData());
-                return false;
-            }
-        }
+        if (!vaapi::checkEGL_DMA())
+            return false;
         static const char* glexts[] = { "GL_OES_EGL_image", 0 };
         if (!OpenGLHelper::hasExtension(glexts)) {
             qWarning("missing extension: GL_OES_EGL_image");
@@ -626,7 +592,7 @@ bool EGLInteropResource::ensure()
         return false;
     return true;
 }
-#endif //VA_CHECK_VERSION(0, 38, 0)
 #endif //QTAV_HAVE(EGL_CAPI)
 } //namespace QtAV
 } //namespace vaapi
+#endif //QT_NO_OPENGL

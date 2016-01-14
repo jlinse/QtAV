@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2013-2016 Wang Bin <wbsecg1@gmail.com>
     theoribeiro <theo@fictix.com.br>
 
 *   This file is part of QtAV
@@ -58,6 +58,8 @@ public:
     }
     virtual void setupQuality() {
         if (!node)
+            return;
+        if (opengl)
             return;
         if (quality == VideoRenderer::QualityFastest) {
             ((QSGSimpleTextureNode*)node)->setFiltering(QSGTexture::Nearest);
@@ -172,7 +174,17 @@ void QQuickItemRenderer::setFillMode(FillMode mode)
     }
     //m_geometryDirty = true;
     //update();
-    emit fillModeChanged(mode);
+    Q_EMIT fillModeChanged(mode);
+}
+
+QRectF QQuickItemRenderer::contentRect() const
+{
+    return videoRect();
+}
+
+QRectF QQuickItemRenderer::sourceRect() const
+{
+    return QRectF(QPointF(), videoFrameSize());
 }
 
 bool QQuickItemRenderer::isOpenGL() const
@@ -189,17 +201,6 @@ void QQuickItemRenderer::setOpenGL(bool o)
     emit openGLChanged();
 }
 
-bool QQuickItemRenderer::needUpdateBackground() const
-{
-    DPTR_D(const QQuickItemRenderer);
-    return d.out_rect != boundingRect().toRect();
-}
-
-bool QQuickItemRenderer::needDrawFrame() const
-{
-    return true; //always call updatePaintNode, node must be set
-}
-
 void QQuickItemRenderer::drawFrame()
 {
     DPTR_D(QQuickItemRenderer);
@@ -211,7 +212,6 @@ void QQuickItemRenderer::drawFrame()
         if (d.frame_changed)
             sgvn->setCurrentFrame(d.video_frame);
         d.frame_changed = false;
-        d.video_frame = VideoFrame();
         sgvn->setTexturedRectGeometry(d.out_rect, normalizedROI(), d.orientation);
         return;
     }
@@ -237,7 +237,6 @@ void QQuickItemRenderer::drawFrame()
     static_cast<QSGSimpleTextureNode*>(d.node)->setTexture(d.texture);
     d.node->markDirty(QSGNode::DirtyGeometry);
     d.frame_changed = false;
-    d.video_frame = VideoFrame();
 }
 
 QSGNode *QQuickItemRenderer::updatePaintNode(QSGNode *node, QQuickItem::UpdatePaintNodeData *data)
@@ -282,13 +281,6 @@ void QQuickItemRenderer::afterRendering()
     d_func().img_mutex.unlock();
 }
 
-bool QQuickItemRenderer::onSetRegionOfInterest(const QRectF &roi)
-{
-    Q_UNUSED(roi);
-    emit regionOfInterestChanged();
-    return true;
-}
-
 bool QQuickItemRenderer::onSetOrientation(int value)
 {
     Q_UNUSED(value);
@@ -296,14 +288,6 @@ bool QQuickItemRenderer::onSetOrientation(int value)
         if (value == 90 || value == 270)
             return false;
     }
-    emit orientationChanged();
     return true;
 }
-
-void QQuickItemRenderer::onFrameSizeChanged(const QSize &size)
-{
-    Q_UNUSED(size);
-    Q_EMIT frameSizeChanged();
-}
-
 } // namespace QtAV

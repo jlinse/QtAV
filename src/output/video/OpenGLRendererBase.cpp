@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2014-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -79,14 +79,12 @@ bool OpenGLRendererBase::receiveFrame(const VideoFrame& frame)
     return true;
 }
 
-bool OpenGLRendererBase::needUpdateBackground() const
-{
-    return true;
-}
-
 void OpenGLRendererBase::drawBackground()
 {
-    d_func().glv.fill(QColor(Qt::black));
+    const QRegion bgRegion(backgroundRegion());
+    if (bgRegion.isEmpty())
+        return;
+    d_func().glv.fill(backgroundColor());
 }
 
 void OpenGLRendererBase::drawFrame()

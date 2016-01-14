@@ -22,14 +22,20 @@
 #ifndef QTAV_SURFACEINTEROPVAAPI_H
 #define QTAV_SURFACEINTEROPVAAPI_H
 
+#include <QtCore/qglobal.h>
+#include "vaapi_helper.h"
+#define VA_X11_INTEROP 1
+#ifndef QT_NO_OPENGL
 #include <QtCore/QMap>
 #include <QtCore/QSharedPointer>
 #include "QtAV/SurfaceInterop.h"
-#include "vaapi_helper.h"
-#define VA_X11_INTEROP 1
 
 namespace QtAV {
 namespace vaapi {
+
+bool checkEGL_DMA();
+bool checkEGL_Pixmap();
+
 class InteropResource
 {
 public:
@@ -45,7 +51,11 @@ public:
      * \return true if success
      */
     virtual bool map(const surface_ptr &surface, GLuint tex, int w, int h, int plane) = 0;
-    virtual bool unmap(GLuint tex) { Q_UNUSED(tex); return true;}
+    virtual bool unmap(const surface_ptr &surface, GLuint tex) {
+        Q_UNUSED(surface);
+        Q_UNUSED(tex);
+        return true;
+    }
 };
 typedef QSharedPointer<InteropResource> InteropResourcePtr;
 
@@ -62,12 +72,12 @@ private:
     int frame_width, frame_height;
     // NOTE: must ensure va-x11/va-glx is unloaded after all va calls(don't know why, but it's true), for example vaTerminate(), to avoid crash
     // so declare InteropResourcePtr first then surface_ptr. InteropResource (va-xxx.so) will be destroyed later than surface_t (vaTerminate())
+    // also call vaInitialize() before vaTerminate() can avoid such crashes. Don't know why.
     InteropResourcePtr m_resource;
     surface_ptr m_surface;
 };
 // load/resolve symbols only once in decoder and pass a VAAPI_XXX ptr
 // or use pool
-#ifndef QT_NO_OPENGL
 class GLXInteropResource Q_DECL_FINAL: public InteropResource, protected VAAPI_GLX
 {
 public:
@@ -76,7 +86,6 @@ private:
     surface_glx_ptr surfaceGLX(const display_ptr& dpy, GLuint tex);
     QMap<GLuint,surface_glx_ptr> glx_surfaces; // render to different texture. surface_glx_ptr is created with texture
 };
-#endif //QT_NO_OPENGL
 
 class X11;
 class X11InteropResource Q_DECL_FINAL: public InteropResource, protected VAAPI_X11
@@ -85,7 +94,7 @@ public:
     X11InteropResource();
     ~X11InteropResource();
     bool map(const surface_ptr &surface, GLuint tex, int w, int h, int) Q_DECL_OVERRIDE;
-    bool unmap(GLuint tex) Q_DECL_OVERRIDE;
+    bool unmap(const surface_ptr &surface, GLuint tex) Q_DECL_OVERRIDE;
 private:
     bool ensurePixmaps(int w, int h);
     Display *xdisplay;
@@ -93,7 +102,6 @@ private:
     X11 *x11;
 };
 #if QTAV_HAVE(EGL_CAPI)
-#if VA_CHECK_VERSION(0, 38, 0)
 // libva-egl is dead and not complete. here we use dma
 class EGL;
 class EGLInteropResource Q_DECL_FINAL : public InteropResource
@@ -102,18 +110,17 @@ public:
     EGLInteropResource();
     ~EGLInteropResource();
     bool map(const surface_ptr &surface, GLuint tex, int w, int h, int plane) Q_DECL_OVERRIDE;
-    bool unmap(GLuint tex) Q_DECL_OVERRIDE;
+    bool unmap(const surface_ptr &surface, GLuint tex) Q_DECL_OVERRIDE;
 private:
     bool ensure();
-    void destroy();
+    void destroy(VADisplay va_dpy); //destroy dma buffer and egl images
     uintptr_t vabuf_handle;
-    display_ptr va_dpy;
     VAImage va_image;
     QMap<GLuint, int> mapped;
     EGL *egl;
 };
-#endif //VA_CHECK_VERSION(0, 38, 0)
 #endif //QTAV_HAVE(EGL_CAPI)
 } //namespace vaapi
 } //namespace QtAV
+#endif //QT_NO_OPENGL
 #endif // QTAV_SURFACEINTEROPVAAPI_H

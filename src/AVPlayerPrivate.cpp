@@ -102,6 +102,7 @@ AVPlayer::Private::Private()
     , force_fps(0)
     , notify_interval(-500)
     , status(NoMedia)
+    , state(AVPlayer::StoppedState)
 {
     demuxer.setInterruptTimeout(interrupt_timeout);
     /*
@@ -362,6 +363,8 @@ bool AVPlayer::Private::setupAudioThread(AVPlayer *player)
     adec->resampler()->inAudioFormat().setChannels(avctx->channels);
     adec->resampler()->inAudioFormat().setChannelLayoutFFmpeg(avctx->channel_layout);
 #endif
+    if (audio_track < 0)
+        return true;
     if (!athread) {
         qDebug("new audio thread");
         athread = new AudioThread(player);

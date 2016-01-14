@@ -82,6 +82,9 @@ Rectangle {
                 msg.info("capture saved at: " + path)
             }
         }
+        onSourceChanged: {
+            msg.info("url: " + source)
+        }
 
         onDurationChanged: control.duration = duration
         onPlaying: {
@@ -213,7 +216,6 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             onClicked: {
-                control.toggleVisible()
                 if (root.width - mouseX < Utils.scaled(60)) {
                     configPanel.state = "show"
                 } else {
@@ -221,18 +223,21 @@ Rectangle {
                 }
             }
             onDoubleClicked: {
-                player.muted = !player.muted
+                control.toggleVisible()
             }
-
             onMouseXChanged: {
                 if (player.playbackState == MediaPlayer.StoppedState || !player.hasVideo)
                     return;
-                control.showPreview(mouseX/parent.width)
+                if (mouseY < control.y - Utils.scaled(120))
+                    control.hidePreview()
+                else
+                    control.showPreview(mouseX/parent.width)
             }
         }
     }
     Text {
         id: msg
+        objectName: "msg"
         horizontalAlignment: Text.AlignHCenter
         font.pixelSize: Utils.scaled(20)
         style: Text.Outline
@@ -364,6 +369,7 @@ Rectangle {
             case Qt.Key_B:
                 player.stepBackward()
                 break;
+            //case Qt.Key_Back:
             case Qt.Key_Q:
                 Qt.quit()
                 break
@@ -385,7 +391,7 @@ Rectangle {
         anchors.right: configPanel.left
         //anchors.bottom: control.top
         y: Math.max(0, Math.min(configPanel.selectedY, root.height - pageLoader.height - control.height))
-        width: parent.width - 2*configPanel.width
+        width: parent.width < 4*configPanel.width ? parent.width - configPanel.width : parent.width/2 + configPanel.width
         height: Utils.scaled(200)
         Loader {
             id: pageLoader
@@ -489,6 +495,22 @@ Rectangle {
             player.source = fileDialog.fileUrl
             //player.stop() //remove this if autoLoad works
             //player.play()
+        }
+    }
+    Connections {
+        target: Qt.application
+        onStateChanged: { //since 5.1
+            if (Qt.platform.os !== "android")
+                return
+            // winrt is handled by system
+            switch (Qt.application.state) {
+            case Qt.ApplicationSuspended:
+            case Qt.ApplicationHidden:
+                player.pause()
+                break
+            default:
+                break
+            }
         }
     }
 }

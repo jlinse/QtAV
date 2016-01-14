@@ -255,15 +255,17 @@ VideoFrame VideoDecoderVideoToolbox::frame()
             if (pixfmt == NV12) {
                 dtype = GL_UNSIGNED_BYTE;
                 if (plane == 0) {
-                    iformat = format = GL_LUMINANCE;
+                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
                 } else {
-                    iformat = format = GL_LUMINANCE_ALPHA;
+                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE_ALPHA : GL_RG;
                 }
             } else if (pixfmt == UYVY || pixfmt == YUYV) {
                 w /= 2; //rgba texture
             } else if (pixfmt == YUV420P) {
                 dtype = GL_UNSIGNED_BYTE;
-                iformat = format = GL_LUMINANCE;
+                iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
+                if (plane > 1 && format == GL_LUMINANCE)
+                    iformat = format = GL_ALPHA;
             }
             DYGL(glBindTexture(target, *((GLuint*)handle)));
             CGLError err = CGLTexImageIOSurface2D(CGLGetCurrentContext(), target, iformat, w, h, format, dtype, surface, plane);
@@ -402,6 +404,18 @@ bool VideoDecoderVideoToolboxPrivate::open()
 {
     if (!prepare())
         return false;
+    switch (codec_ctx->profile) { //profile check code is from xbmc
+    case FF_PROFILE_H264_HIGH_10: //Apple A7 SoC
+    case FF_PROFILE_H264_HIGH_10_INTRA:
+    case FF_PROFILE_H264_HIGH_422:
+    case FF_PROFILE_H264_HIGH_422_INTRA:
+    case FF_PROFILE_H264_HIGH_444_PREDICTIVE:
+    case FF_PROFILE_H264_HIGH_444_INTRA:
+    case FF_PROFILE_H264_CAVLC_444:
+        return false;
+    default:
+        break;
+    }
     codec_ctx->thread_count = 1; // to avoid crash at av_videotoolbox_alloc_context/av_videotoolbox_default_free. I have no idea how the are called
     qDebug("opening VideoToolbox module");
     // codec/profile check?

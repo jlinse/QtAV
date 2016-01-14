@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2015-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -24,6 +24,7 @@
 */
 #include "QtAV/VideoRenderer.h"
 #include "QtAV/private/VideoRenderer_p.h"
+#include "QtAV/FilterContext.h"
 #include <QWidget>
 #include <QResizeEvent>
 #include <QtCore/qmath.h>
@@ -64,15 +65,13 @@ public:
     QWidget* widget() Q_DECL_OVERRIDE { return this; }
 protected:
     bool receiveFrame(const VideoFrame& frame) Q_DECL_OVERRIDE;
-    bool needUpdateBackground() const Q_DECL_OVERRIDE;
     //called in paintEvent before drawFrame() when required
     void drawBackground() Q_DECL_OVERRIDE;
-    bool needDrawFrame() const Q_DECL_OVERRIDE;
     //draw the current frame using the current paint engine. called by paintEvent()
     void drawFrame() Q_DECL_OVERRIDE;
     void paintEvent(QPaintEvent *) Q_DECL_OVERRIDE;
     void resizeEvent(QResizeEvent *) Q_DECL_OVERRIDE;
-    //stay on top will change parent, hide then show(windows). we need GetDC() again
+    //stay on top will change parent, hide then show(windows)
     void showEvent(QShowEvent *) Q_DECL_OVERRIDE;
 };
 typedef X11Renderer VideoRendererX11;
@@ -239,6 +238,8 @@ public:
             return false;
         }
         XSetBackground(display, gc, BlackPixel(display, DefaultScreen(display)));
+        if (filter_context)
+            ((X11FilterContext*)filter_context)->resetX11((X11FilterContext::Display*)display, (X11FilterContext::GC)gc, (X11FilterContext::Drawable)q_func().winId());
         return true;
     }
     bool ensureImage(int w, int h) {
@@ -340,6 +341,12 @@ X11Renderer::X11Renderer(QWidget *parent, Qt::WindowFlags f):
     //setAttribute(Qt::WA_NoSystemBackground);
     //setAutoFillBackground(false);
     setAttribute(Qt::WA_PaintOnScreen, true);
+    d_func().filter_context = VideoFilterContext::create(VideoFilterContext::X11);
+    if (!d_func().filter_context) {
+        qWarning("No filter context for X11");
+    } else {
+        d_func().filter_context->paint_device = this;
+    }
 }
 
 bool X11Renderer::isSupported(VideoFormat::PixelFormat pixfmt) const
@@ -353,14 +360,12 @@ bool X11Renderer::receiveFrame(const VideoFrame& frame)
 {
     DPTR_D(X11Renderer);
     if (!frame.isValid()) {
-        d.update_background = true;
         d.video_frame = VideoFrame(); // fill background
         update();
         return true;
     }
     d.frame_orig = frame;
     d.video_frame = frame; // must be set because it will be check isValid() somewhere else
-    d.current_index = (d.current_index+1)%kPoolSize;
     updateUi();
     return true;
 }
@@ -382,7 +387,7 @@ bool X11RendererPrivate::resizeXImage(int index)
         interopFrame.setBytesPerLine(ximage->bytes_per_line);
     }
     if (frame_orig.constBits(0)
-            || !video_frame.map(HostMemorySurface, &interopFrame) //check pixel format and scale to ximage size&line_size
+            || !video_frame.map(UserSurface, &interopFrame, VideoFormat(VideoFormat::Format_RGB32)) //check pixel format and scale to ximage size&line_size
             ) {
         if (!frame_orig.constBits(0) //always convert hw frames
                 || frame_orig.pixelFormat() != pixfmt || frame_orig.width() != ximage->width || frame_orig.height() != ximage->height)
@@ -419,45 +424,41 @@ QPaintEngine* X11Renderer::paintEngine() const
     return 0; //use native engine
 }
 
-bool X11Renderer::needUpdateBackground() const
-{
-    DPTR_D(const X11Renderer);
-    return d.update_background && d.out_rect != rect();/* || d.data.isEmpty()*/ //data is always empty because we never copy it now.
-}
-
 void X11Renderer::drawBackground()
 {
-    if (autoFillBackground())
+    const QRegion bgRegion(backgroundRegion());
+    if (bgRegion.isEmpty())
         return;
     DPTR_D(X11Renderer);
     // TODO: fill once each resize? mpv
-    if (d.video_frame.isValid()) {
-        if (d.out_rect.width() < width()) {
-            XFillRectangle(d.display, winId(), d.gc, 0, 0, (width() - d.out_rect.width())/2, height());
-            XFillRectangle(d.display, winId(), d.gc, d.out_rect.right(), 0, (width() - d.out_rect.width())/2, height());
-        }
-        if (d.out_rect.height() < height()) {
-            XFillRectangle(d.display, winId(), d.gc, 0, 0,  width(), (height() - d.out_rect.height())/2);
-            XFillRectangle(d.display, winId(), d.gc, 0, d.out_rect.bottom(), width(), (height() - d.out_rect.height())/2);
-        }
-    } else {
-        XFillRectangle(d.display, winId(), d.gc, 0, 0, width(), height());
+    // TODO: set color
+    //XSetBackground(d.display, d.gc, BlackPixel(d.display, DefaultScreen(d.display)));
+    const QVector<QRect> bg(bgRegion.rects());
+    foreach (const QRect& r, bg) {
+        XFillRectangle(d.display, winId(), d.gc, r.x(), r.y(), r.width(), r.height());
     }
     XFlush(d.display); // apply the color
-}
-
-bool X11Renderer::needDrawFrame() const
-{
-    DPTR_D(const X11Renderer);
-    return  d.ximage_pool[0] || d.video_frame.isValid();
 }
 
 void X11Renderer::drawFrame()
 {
     // TODO: interop
     DPTR_D(X11Renderer);
+    if (!d.resizeXImage(d.current_index))
+        return;
+    if (preferredPixelFormat() != d.pixfmt) {
+        qDebug() << "x11 preferred pixel format: " << d.pixfmt;
+        setPreferredPixelFormat(d.pixfmt);
+    }
+
     if (d.use_shm) {
+        int wait_count = 0;
         while (d.ShmCompletionWaitCount >= kPoolSize) {
+            if (wait_count++ > 100) {
+                qDebug("reset ShmCompletionWaitCount");
+                d.ShmCompletionWaitCount = 0;
+                break;
+            }
             while (XPending(d.display)) {
                 XEvent ev;
                 XNextEvent(d.display, &ev);
@@ -468,13 +469,6 @@ void X11Renderer::drawFrame()
             }
             usleep(1000);
         }
-    }
-
-    if (!d.resizeXImage(d.current_index))
-        return;
-    if (preferredPixelFormat() != d.pixfmt) {
-        qDebug() << "x11 preferred pixel format: " << d.pixfmt;
-        setPreferredPixelFormat(d.pixfmt);
     }
     QRect roi = realROI();
     XImage* ximage = d.ximage_pool[d.current_index];
@@ -490,6 +484,7 @@ void X11Renderer::drawFrame()
                    , d.out_rect.x(), d.out_rect.y(), d.out_rect.width(), d.out_rect.height());
         XSync(d.display, False); // update immediately
     }
+    d.current_index = (d.current_index+1)%kPoolSize;
 }
 
 void X11Renderer::paintEvent(QPaintEvent *)
@@ -500,7 +495,6 @@ void X11Renderer::paintEvent(QPaintEvent *)
 void X11Renderer::resizeEvent(QResizeEvent *e)
 {
     DPTR_D(X11Renderer);
-    d.update_background = true;
     resizeRenderer(e->size());
     update(); //update background
 }
@@ -509,7 +503,6 @@ void X11Renderer::showEvent(QShowEvent *event)
 {
     Q_UNUSED(event);
     DPTR_D(X11Renderer);
-    d.update_background = true;
     /*
      * Do something that depends on widget below! e.g. recreate render target for direct2d.
      * When Qt::WindowStaysOnTopHint changed, window will hide first then show. If you

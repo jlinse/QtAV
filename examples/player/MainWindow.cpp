@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -209,7 +209,7 @@ void MainWindow::setupUi()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout();
     mainLayout->setSpacing(0);
-    mainLayout->setMargin(0);
+    mainLayout->setContentsMargins(QMargins());
     setLayout(mainLayout);
 
     mpPlayerLayout = new QVBoxLayout();
@@ -225,18 +225,18 @@ void MainWindow::setupUi()
     mpTimeSlider->setMinimum(0);
     mpCurrent = new QLabel(mpControl);
     mpCurrent->setToolTip(tr("Current time"));
-    mpCurrent->setMargin(2);
+    mpCurrent->setContentsMargins(QMargins(2, 2, 2, 2));
     mpCurrent->setText(QString::fromLatin1("00:00:00"));
     mpEnd = new QLabel(mpControl);
     mpEnd->setToolTip(tr("Duration"));
-    mpEnd->setMargin(2);
+    mpEnd->setContentsMargins(QMargins(2, 2, 2, 2));
     mpEnd->setText(QString::fromLatin1("00:00:00"));
     mpTitle = new QLabel(mpControl);
     mpTitle->setToolTip(tr("Render engine"));
     mpTitle->setText(QString::fromLatin1("QPainter"));
     mpTitle->setIndent(8);
     mpSpeed = new QLabel(QString::fromLatin1("1.00"));
-    mpSpeed->setMargin(1);
+    mpSpeed->setContentsMargins(QMargins(1, 1, 1, 1));
     mpSpeed->setToolTip(tr("Speed. Ctrl+Up/Down"));
 
     mpPlayPauseBtn = new QToolButton(mpControl);
@@ -509,7 +509,7 @@ void MainWindow::setupUi()
 
     QHBoxLayout *controlLayout = new QHBoxLayout();
     controlLayout->setSpacing(0);
-    controlLayout->setMargin(1);
+    controlLayout->setContentsMargins(QMargins(1, 1, 1, 1));
     mpControl->setLayout(controlLayout);
     controlLayout->addWidget(mpCurrent);
     controlLayout->addWidget(mpTitle);
@@ -940,6 +940,7 @@ void MainWindow::onPositionChange(qint64 pos)
     if (mpPlayer->isSeekable())
         mpTimeSlider->setValue(pos);
     mpCurrent->setText(QTime(0, 0, 0).addMSecs(pos).toString(QString::fromLatin1("HH:mm:ss")));
+    //setWindowTitle(QString::number(mpPlayer->statistics().video_only.currentDisplayFPS(), 'f', 2).append(" ").append(mTitle));
 }
 
 void MainWindow::repeatAChanged(const QTime& t)
@@ -1025,10 +1026,10 @@ void MainWindow::wheelEvent(QWheelEvent *e)
         fp.setX(0);
     if (fp.y() < 0)
         fp.setY(0);
-    if (fp.x() > mpRenderer->frameSize().width())
-        fp.setX(mpRenderer->frameSize().width());
-    if (fp.y() > mpRenderer->frameSize().height())
-        fp.setY(mpRenderer->frameSize().height());
+    if (fp.x() > mpRenderer->videoFrameSize().width())
+        fp.setX(mpRenderer->videoFrameSize().width());
+    if (fp.y() > mpRenderer->videoFrameSize().height())
+        fp.setY(mpRenderer->videoFrameSize().height());
 
     QRectF viewport = QRectF(mpRenderer->mapToFrame(QPointF(0, 0)), mpRenderer->mapToFrame(QPointF(mpRenderer->rendererWidth(), mpRenderer->rendererHeight())));
     //qDebug("vo: (%.1f, %.1f)=> frame: (%.1f, %.1f)", p.x(), p.y(), fp.x(), fp.y());
@@ -1040,7 +1041,7 @@ void MainWindow::wheelEvent(QWheelEvent *e)
     m.scale(1.0/zoom, 1.0/zoom);
     m.translate(-fp.x(), -fp.y());
     QRectF r = m.mapRect(mpRenderer->realROI());
-    mpRenderer->setRegionOfInterest((r | m.mapRect(viewport))&QRectF(QPointF(0,0), mpRenderer->frameSize()));
+    mpRenderer->setRegionOfInterest((r | m.mapRect(viewport))&QRectF(QPointF(0,0), mpRenderer->videoFrameSize()));
 }
 
 void MainWindow::about()
@@ -1323,7 +1324,17 @@ void MainWindow::onMediaStatusChanged()
 
 void MainWindow::onBufferProgress(qreal percent)
 {
-    setWindowTitle(QString::fromLatin1("Buffering... %1% ").arg(percent*100.0, 0, 'f', 1) + mTitle);
+    const qreal bs = mpPlayer->bufferSpeed();
+    QString s;
+    if (bs > 1024*1024*1024)
+        s = QString("%1G/s").arg(bs/1024.0/1024.0/1024.0, 6, 'f', 1);
+    else if (bs > 1024*1024)
+        s = QString("%1M/s").arg(bs/1024.0/1024.0, 6, 'f', 1);
+    else if (bs > 1024)
+        s = QString("%1K/s").arg(bs/1024.0, 6, 'f', 1);
+    else
+        s = QString("%1B/s").arg(bs, 6, 'f', 1);
+    setWindowTitle(QString::fromLatin1("Buffering... %1% @%2 ").arg(percent*100.0, 5, 'f', 1).arg(s) + mTitle);
 }
 
 void MainWindow::onVideoEQEngineChanged()
@@ -1413,36 +1424,28 @@ void MainWindow::onCaptureConfigChanged()
 
 void MainWindow::onAVFilterVideoConfigChanged()
 {
-    if (Config::instance().avfilterVideoEnable()) {
-        if (!mpVideoFilter) {
-            mpVideoFilter = new LibAVFilterVideo(this);
-        }
-        mpVideoFilter->setEnabled(true);
-        mpPlayer->installFilter(mpVideoFilter);
-        mpVideoFilter->setOptions(Config::instance().avfilterVideoOptions());
-    } else {
-        if (mpVideoFilter) {
-            mpVideoFilter->setEnabled(false);
-        }
-        mpPlayer->uninstallFilter(mpVideoFilter);
+    if (mpVideoFilter) {
+        mpVideoFilter->uninstall();
+        delete mpVideoFilter;
+        mpVideoFilter = 0;
     }
+    mpVideoFilter = new LibAVFilterVideo(this);
+    mpVideoFilter->setEnabled(Config::instance().avfilterVideoEnable());
+    mpPlayer->installFilter(mpVideoFilter);
+    mpVideoFilter->setOptions(Config::instance().avfilterVideoOptions());
 }
 
 void MainWindow::onAVFilterAudioConfigChanged()
 {
-    if (Config::instance().avfilterAudioEnable()) {
-        if (!mpAudioFilter) {
-            mpAudioFilter = new LibAVFilterAudio(this);
-        }
-        mpAudioFilter->setEnabled(true);
-        mpPlayer->installFilter(mpAudioFilter);
-        mpAudioFilter->setOptions(Config::instance().avfilterAudioOptions());
-    } else {
-        if (mpAudioFilter) {
-            mpAudioFilter->setEnabled(false);
-        }
-        mpPlayer->uninstallFilter(mpAudioFilter);
+    if (mpAudioFilter) {
+        mpAudioFilter->uninstall();
+        delete mpAudioFilter;
+        mpAudioFilter = 0;
     }
+    mpAudioFilter = new LibAVFilterAudio(this);
+    mpAudioFilter->setEnabled(Config::instance().avfilterAudioEnable());
+    mpAudioFilter->installTo(mpPlayer);
+    mpAudioFilter->setOptions(Config::instance().avfilterAudioOptions());
 }
 
 void MainWindow::donate()

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -28,6 +28,12 @@ precision mediump float;
 #define mediump
 #define lowp
 #endif
+// >=1.40: texture(sampler2DRect,...). 'texture' is define in header
+#if __VERSION__ < 130
+#ifndef texture
+#define texture texture2D
+#endif
+#endif
 
 uniform sampler2D u_Texture0;
 varying vec2 v_TexCoords0;
@@ -35,8 +41,16 @@ uniform mat4 u_colorMatrix;
 uniform float u_opacity;
 uniform mat4 u_c;
 
+/***User Sampler code here***%1***/
+#ifndef USER_SAMPLER
+vec4 sample(sampler2D tex, vec2 pos)
+{
+    return texture(tex, pos);
+}
+#endif
+
 void main() {
-    vec4 c = texture2D(u_Texture0, v_TexCoords0);
+    vec4 c = sample(u_Texture0, v_TexCoords0);
     c = u_c * c;
 #ifndef HAS_ALPHA
     c.a = 1.0;

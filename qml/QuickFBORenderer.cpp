@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2015-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -80,7 +80,7 @@ public:
       , source(0)
       , glctx(0)
     {}
-    void setupAspectRatio() {
+    void setupAspectRatio() { //TODO: call when out_rect, renderer_size, orientation changed
         matrix.setToIdentity();
         matrix.scale((GLfloat)out_rect.width()/(GLfloat)renderer_width, (GLfloat)out_rect.height()/(GLfloat)renderer_height, 1);
         if (orientation)
@@ -166,7 +166,17 @@ void QuickFBORenderer::setFillMode(FillMode mode)
         return;
     d_func().fill_mode = mode;
     updateRenderRect();
-    emit fillModeChanged(mode);
+    Q_EMIT fillModeChanged(mode);
+}
+
+QRectF QuickFBORenderer::contentRect() const
+{
+    return videoRect();
+}
+
+QRectF QuickFBORenderer::sourceRect() const
+{
+    return QRectF(QPointF(), videoFrameSize());
 }
 
 bool QuickFBORenderer::isOpenGL() const
@@ -180,7 +190,7 @@ void QuickFBORenderer::setOpenGL(bool o)
     if (d.opengl == o)
         return;
     d.opengl = o;
-    emit openGLChanged();
+    Q_EMIT openGLChanged();
     if (o)
         setPreferredPixelFormat(VideoFormat::Format_YUV420P);
     else
@@ -201,20 +211,11 @@ void QuickFBORenderer::renderToFbo()
     handlePaintEvent();
 }
 
-bool QuickFBORenderer::needUpdateBackground() const
-{
-    DPTR_D(const QuickFBORenderer);
-    return d.out_rect != boundingRect().toRect();
-}
-
 void QuickFBORenderer::drawBackground()
 {
-    d_func().glv.fill(QColor(Qt::black));
-}
-
-bool QuickFBORenderer::needDrawFrame() const
-{
-    return true; //always call updatePaintNode, node must be set
+    if (backgroundRegion().isEmpty())
+        return;
+    d_func().glv.fill(backgroundColor());
 }
 
 void QuickFBORenderer::drawFrame()
@@ -240,17 +241,10 @@ bool QuickFBORenderer::event(QEvent *e)
     return true;
 }
 
-bool QuickFBORenderer::onSetRegionOfInterest(const QRectF &roi)
-{
-    Q_UNUSED(roi);
-    emit regionOfInterestChanged();
-    return true;
-}
-
 bool QuickFBORenderer::onSetOrientation(int value)
 {
     Q_UNUSED(value);
-    emit orientationChanged();
+    d_func().setupAspectRatio();
     return true;
 }
 
@@ -266,12 +260,6 @@ void QuickFBORenderer::onSetOutAspectRatioMode(OutAspectRatioMode mode)
     Q_UNUSED(mode);
     DPTR_D(QuickFBORenderer);
     d.setupAspectRatio();
-}
-
-void QuickFBORenderer::onFrameSizeChanged(const QSize &size)
-{
-    Q_UNUSED(size);
-    Q_EMIT frameSizeChanged();
 }
 
 void QuickFBORenderer::updateRenderRect()

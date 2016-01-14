@@ -133,35 +133,10 @@ Rectangle {
             showPreview(value)
         }
     }
-    Text {
-        id: now
-        text: Utils.msec2string(progress.value*duration)
-        anchors {
-            top: progress.bottom
-            topMargin: Utils.scaled(2)
-            left: progress.left
-        }
-        color: "white"
-        font {
-            pixelSize: Utils.scaled(12) //or point size?
-        }
-    }
-    Text {
-        id: life
-        text: Utils.msec2string(duration)
-        anchors {
-            top: progress.bottom
-            topMargin: Utils.scaled(2)
-            right: progress.right
-        }
-        color: "white"
-        font {
-            pixelSize: Utils.scaled(12)
-        }
-    }
     Rectangle {
         id: preview
-        opacity: 0.8
+        layer.enabled: true
+        //opacity: 0.8
         anchors.left: progress.left
         anchors.bottom: progress.top
         width: PlayerConfig.previewEnabled ? Utils.scaled(180) : previewText.contentWidth + 2*Utils.kSpacing
@@ -195,13 +170,29 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             propagateComposedEvents: true
+            property int gPos: 0
+            property int moved: 0
             onClicked: {
+                if (moved) //why press+move+release is click?
+                    return
                 if (preview.opacity === 0 || root.opacity === 0) {
                     mouse.accepted = false
                     return
                 }
                 mouse.accepted = true
                 seek(preview.timestamp)
+            }
+            onPressed: {
+                gPos = mapToItem(progress, mouseX, 0).x
+                moved = 0
+            }
+            onMouseXChanged: {
+                mouse.accepted = true
+                var x1 = mapToItem(progress, mouseX, 0).x
+                var dx = x1 - gPos
+                gPos = x1
+                moved += dx
+                showPreview(preview.timestamp/duration+dx/progress.width)
             }
         }
 
@@ -211,7 +202,7 @@ Rectangle {
                 PropertyChanges {
                     target: preview
                     anchors.bottomMargin: 2
-                    opacity: 0.9
+                    opacity: 1.0//0.9
                 }
             },
             State {
@@ -261,12 +252,40 @@ Rectangle {
         ]
     }
     Item {
+        layer.enabled: true
         anchors {
             top: progress.bottom
             bottom: parent.bottom
             left: parent.left
             right: parent.right
             margins: Utils.scaled(8)
+        }
+
+        Text {
+            id: now
+            text: Utils.msec2string(progress.value*duration)
+            anchors {
+                top: parent.top
+                topMargin: Utils.scaled(2)
+                left: parent.left
+            }
+            color: "white"
+            font {
+                pixelSize: Utils.scaled(12) //or point size?
+            }
+        }
+        Text {
+            id: life
+            text: Utils.msec2string(duration)
+            anchors {
+                top: parent.top
+                topMargin: Utils.scaled(2)
+                right: parent.right
+            }
+            color: "white"
+            font {
+                pixelSize: Utils.scaled(12)
+            }
         }
         Button {
             id: playBtn
@@ -460,6 +479,8 @@ Rectangle {
             aniHide()
     }
     function showPreview(value) {
+        if (value < 0)
+            return
         preview.visible = true
         preview.state = "in"
         if (PlayerConfig.previewEnabled && preview.video.file) {
@@ -470,5 +491,8 @@ Rectangle {
         preview.timestamp = value*duration
         previewText.text = Utils.msec2string(preview.timestamp)
         //console.log("hover: "+value + " duration: " + player.duration)
+    }
+    function hidePreview() {
+        preview.state = "out_"
     }
 }

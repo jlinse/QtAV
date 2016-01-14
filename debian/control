@@ -2,17 +2,18 @@
 Source: qtav
 Section: video
 Priority: optional
-Maintainer: Wang Bin <wbsecg1@gmail.com>, Sou Bunnbu <iyzsong@gmail.com>
+Maintainer: Wang Bin <wbsecg1@gmail.com>
 Build-Depends: debhelper (>= 9),
  qt5-qmake, libqt5opengl5-dev, qtdeclarative5-dev,
  libqt5x11extras5-dev,
+ libass-dev,
  libavutil-dev,
  libavresample-dev,
  libavcodec-dev,
  libavformat-dev,
- libass-dev,
- libswscale-dev,
+ libavdevice-dev,
  libavfilter-dev,
+ libswscale-dev,
  libopenal-dev,
  libpulse-dev,
  libxv-dev,
@@ -20,7 +21,7 @@ Build-Depends: debhelper (>= 9),
  libegl1-mesa-dev,
  libuchardet-dev,
 Standards-Version: 3.9.5
-Homepage: http://www.qtav.org
+Homepage: http://qtav.org
 
 Package: qtav-sdk
 Architecture: all
@@ -109,7 +110,7 @@ Package: qtav-players
 Section: video
 Architecture: any
 Pre-Depends: ${misc:Pre-Depends}
-Depends: ${misc:Depends}, ${shlibs:Depends}, libqtav, libqtavwidgets, qml-module-qtav, libqt5svg5, qml-module-qtquick-dialogs | qtdeclarative5-dialogs-plugin, qml-module-qt-labs-folderlistmodel | qtdeclarative5-folderlistmodel-plugin
+Depends: ${misc:Depends}, ${shlibs:Depends}, libqtav, libqtavwidgets, qml-module-qtav, libqt5svg5, qtdeclarative5-dialogs-plugin, qtdeclarative5-controls-plugin, qtdeclarative5-folderlistmodel-plugin
 Multi-Arch: same
 Description: QtAV/QML players
  QtAV is a multimedia playback framework based on Qt and FFmpeg.
