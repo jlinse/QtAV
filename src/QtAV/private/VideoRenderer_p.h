@@ -26,7 +26,6 @@
 #include <QtAV/VideoRenderer.h>
 #include <QtCore/QMutex>
 #include <QtCore/QRect>
-#include <QtGui/QColor>
 #include <QtAV/VideoFrame.h>
 
 /*TODO:
@@ -53,7 +52,6 @@ public:
       , out_aspect_ratio(0)
       , quality(VideoRenderer::QualityBest)
       , orientation(0)
-      , background_color(Qt::black)
       , preferred_format(VideoFormat::Format_RGB32)
       , force_preferred(false)
       , brightness(0)
@@ -109,7 +107,6 @@ public:
     QRect out_rect; //TODO: out_out_rect
     QRectF roi;
     int orientation;
-    QColor background_color;
 
     VideoFrame video_frame;
     VideoFormat::PixelFormat preferred_format;

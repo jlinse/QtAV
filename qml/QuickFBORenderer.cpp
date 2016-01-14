@@ -209,8 +209,7 @@ bool QuickFBORenderer::needUpdateBackground() const
 
 void QuickFBORenderer::drawBackground()
 {
-    DPTR_D(QuickFBORenderer);
-    d.glv.fill(d.background_color);
+    d_func().glv.fill(QColor(Qt::black));
 }
 
 bool QuickFBORenderer::needDrawFrame() const
@@ -226,7 +225,7 @@ void QuickFBORenderer::drawFrame()
         d.glv.setOpenGLContext(d.glctx);
     }
     if (!d.video_frame.isValid()) {
-        d.glv.fill(d.background_color);
+        d.glv.fill(QColor(0, 0, 0, 0));
         return;
     }
     //d.glv.setCurrentFrame(d.video_frame);
@@ -273,12 +272,6 @@ void QuickFBORenderer::onFrameSizeChanged(const QSize &size)
 {
     Q_UNUSED(size);
     Q_EMIT frameSizeChanged();
-}
-
-void QuickFBORenderer::onSetBackgroundColor(const QColor &color)
-{
-    Q_UNUSED(color);
-    Q_EMIT backgroundColorChanged();
 }
 
 void QuickFBORenderer::updateRenderRect()

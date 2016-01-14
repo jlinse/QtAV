@@ -106,8 +106,6 @@ Item {
     */
     property alias orientation:         videoOut.orientation
 
-    property alias backgroundColor:     videoOut.backgroundColor
-
 
     /*** Properties of MediaPlayer ***/
 
