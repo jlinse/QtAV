@@ -19,7 +19,9 @@ Rectangle {
     property string mediaSource
     property int duration: 0
     property real volume: 1
+    property bool mute: false
     property bool hiding: false
+    property int previewHeight: preview.height
     signal seek(int ms)
     signal seekForward(int ms)
     signal seekBackward(int ms)
@@ -29,6 +31,7 @@ Rectangle {
     signal showInfo
     signal showHelp
     signal openFile
+    signal openUrl
 
     function setPlayingProgress(value) {
         playState = "play"
@@ -61,9 +64,9 @@ Rectangle {
     }
 
     gradient: Gradient {
-        GradientStop { position: 0.0; color: "#aa445566" }
-        GradientStop { position: 0.618; color: "#bb1a2b3a" }
-        GradientStop { position: 1.0; color: "#ff000000" }
+        GradientStop { position: 0.0; color: "#88445566" }
+        GradientStop { position: 0.618; color: "#cc1a2b3a" }
+        GradientStop { position: 1.0; color: "#ee000000" }
     }
 
     MouseArea {
@@ -122,6 +125,8 @@ Rectangle {
             //if (player.playbackState == MediaPlayer.StoppedState)
               //  return
             if (playState == "stop")
+                return
+            if (pos.y > -previewText.height && pos.y <= height/2)
                 return
             preview.state = dpos.y > 0 ? "out" : "out_"
         }
@@ -187,6 +192,10 @@ Rectangle {
                 moved = 0
             }
             onMouseXChanged: {
+                if (!pressed) {
+                    mouse.accepted = false
+                    return
+                }
                 mouse.accepted = true
                 var x1 = mapToItem(progress, mouseX, 0).x
                 var dx = x1 - gPos
@@ -217,7 +226,7 @@ Rectangle {
                 name: "out_"
                 PropertyChanges {
                     target: preview
-                    anchors.bottomMargin: -preview.height
+                    anchors.bottomMargin: -(preview.height + progress.height)
                     opacity: 0
                 }
             }
@@ -253,6 +262,7 @@ Rectangle {
     }
     Item {
         layer.enabled: true
+        property int volBarPos: volBtn.x + volBtn.width/2 + x
         anchors {
             top: progress.bottom
             bottom: parent.bottom
@@ -315,123 +325,162 @@ Rectangle {
                 */
             }
         }
-        Row {
-            anchors.right: playBtn.left
+        /*
+        Button {
+            id: backwardBtn
+            anchors.right: stopBtn.left
             anchors.verticalCenter: playBtn.verticalCenter
-            spacing: Utils.scaled(4)
-            Button {
-                id: stopBtn
-                bgColor: "transparent"
-                bgColorSelected: "transparent"
-                width: Utils.scaled(35)
-                height: Utils.scaled(35)
-                icon: Utils.resurl("theme/default/stop.svg")
-                onClicked: {
-                    //player.stop()
-                    stop()
-                }
+            bgColor: "transparent"
+            bgColorSelected: "transparent"
+            width: Utils.scaled(35)
+            height: Utils.scaled(35)
+            icon: Utils.resurl("theme/default/backward.svg")
+            onClicked: {
+                //player.seek(player.position-10000)
+                seekBackward(10000)
             }
-            Button {
-                id: backwardBtn
-                bgColor: "transparent"
-                bgColorSelected: "transparent"
-                width: Utils.scaled(35)
-                height: Utils.scaled(35)
-                icon: Utils.resurl("theme/default/backward.svg")
-                onClicked: {
-                    //player.seek(player.position-10000)
-                    seekBackward(10000)
-                }
+        }*/
+        Button {
+            id: stopBtn
+            anchors.verticalCenter: playBtn.verticalCenter
+            anchors.right: playBtn.left
+            bgColor: "transparent"
+            bgColorSelected: "transparent"
+            width: Utils.scaled(35)
+            height: Utils.scaled(35)
+            icon: Utils.resurl("theme/default/stop.svg")
+            onClicked: {
+                //player.stop()
+                stop()
             }
         }
-        Row {
+        /*
+        Button {
+            id: forwardBtn
             anchors.left: playBtn.right
             anchors.verticalCenter: playBtn.verticalCenter
-            spacing: Utils.scaled(4)
-            Button {
-                id: forwardBtn
-                bgColor: "transparent"
-                bgColorSelected: "transparent"
-                width: Utils.scaled(35)
-                height: Utils.scaled(35)
-                icon: Utils.resurl("theme/default/forward.svg")
-                onClicked: {
-                    //player.seek(player.position+10000)
-                    seekForward(10000)
-                }
+            bgColor: "transparent"
+            bgColorSelected: "transparent"
+            width: Utils.scaled(35)
+            height: Utils.scaled(35)
+            icon: Utils.resurl("theme/default/forward.svg")
+            onClicked: {
+                //player.seek(player.position+10000)
+                seekForward(10000)
             }
-        }
-        Row {
+        }*/
+        Button {
+            id: fullScreenBtn
             anchors.left: parent.left
             anchors.leftMargin: Utils.scaled(50)
             anchors.verticalCenter: parent.verticalCenter
-            Button {
-                id: fullScreenBtn
-                checkable: true
-                checked: false
-                bgColor: "transparent"
-                bgColorSelected: "transparent"
-                width: Utils.scaled(25)
-                height: Utils.scaled(25)
-                icon: Utils.resurl("theme/default/fullscreen.svg")
-                iconChecked: Utils.resurl("theme/default/fullscreen.svg")
-                visible: true
-                onCheckedChanged: {
-                    if (checked)
-                        requestFullScreen()
-                    else
-                        requestNormalSize()
-                }
-            }
-            Slider { //volume
-                width: Utils.scaled(80)
-                height: Utils.scaled(30)
-                opacity: 0.9
-                value: volume/2
-                onValueChanged: {
-                    //player.volume = 2*value
-                    volume = 2*value
-                }
-                Text {
-                    color: "white"
-                    id: voltext
-                    text: Math.round(10*volume)/10
-                }
+            checkable: true
+            checked: false
+            bgColor: "transparent"
+            bgColorSelected: "transparent"
+            width: Utils.scaled(30)
+            height: Utils.scaled(30)
+            icon: Utils.resurl("theme/default/fullscreen.svg")
+            iconChecked: Utils.resurl("theme/default/fullscreen.svg")
+            visible: true
+            onCheckedChanged: {
+                if (checked)
+                    requestFullScreen()
+                else
+                    requestNormalSize()
             }
         }
-
+        Button {
+            id: volBtn
+            anchors.left: fullScreenBtn.right
+            anchors.verticalCenter: parent.verticalCenter
+            checkable: true
+            checked: false
+            bgColor: "transparent"
+            bgColorSelected: "transparent"
+            width: Utils.scaled(30)
+            height: Utils.scaled(30)
+            icon: Utils.resurl("theme/default/volume.svg")
+            iconChecked: Utils.resurl("theme/default/mute.svg")
+            onClicked: {
+                if (!isTouchScreen) {
+                    root.mute = checked
+                    return
+                }
+                volBar.visible = !volBar.visible
+                checked = root.mute
+            }
+            onPressAndHold: { //for qt5.6 mobile
+                if (!isTouchScreen)
+                    return
+                root.mute = !root.mute
+                checked = root.mute
+            }
+            onHoveredChanged: {
+                volBar.anchors.bottom = parent.top
+                if (isTouchScreen)
+                    volBar.anchors.bottomMargin = 0 //ensure grip does not cover volBtn
+                else
+                    volBar.anchors.bottomMargin = -(y + 2)//height/2)
+                volBar.x = parent.volBarPos - volBar.width/2
+            }
+        }
         Row {
             anchors.right: parent.right
             anchors.rightMargin: Utils.scaled(50)
             anchors.verticalCenter: parent.verticalCenter
+            /*
             Button {
                 id: infoBtn
                 bgColor: "transparent"
                 bgColorSelected: "transparent"
-                width: Utils.scaled(25)
-                height: Utils.scaled(25)
+                width: Utils.scaled(30)
+                height: Utils.scaled(30)
                 icon: Utils.resurl("theme/default/info.svg")
                 visible: true
                 onClicked: showInfo()
-            }
+            }*/
             Button {
                 id: openFileBtn
                 bgColor: "transparent"
                 bgColorSelected: "transparent"
-                width: Utils.scaled(25)
-                height: Utils.scaled(25)
+                width: Utils.scaled(30)
+                height: Utils.scaled(30)
                 icon: Utils.resurl("theme/default/open.svg")
                 onClicked: openFile()
-            }
+                onPressAndHold: openUrl()
+            } /*
             Button {
                 id: helpBtn
                 bgColor: "transparent"
                 bgColorSelected: "transparent"
-                width: Utils.scaled(25)
-                height: Utils.scaled(25)
+                width: Utils.scaled(30)
+                height: Utils.scaled(30)
                 icon: Utils.resurl("theme/default/help.svg")
                 onClicked: showHelp()
-            }
+            }*/
+        }
+    }
+
+    Slider { //volume
+        id: volBar
+        width:Utils.scaled(60)
+        height: Utils.scaled(140)
+        visible: hovered || volBtn.hovered
+        opacity: 0.9
+        value: volume > 1 ? 0.5 - (volume - 1)/4 : 1 - volume/2
+        orientation: Qt.Vertical
+        onValueChanged: {
+            if (value < 0.5)
+                volume = 1 + 4*(0.5-value)
+            else
+                volume = 2*(1-value)
+        }
+        Text {
+            color: "white"
+            id: voltext
+            // Math.floor(10*volume)/10 //why display 1.100000001?
+            text: Math.floor(volume) + "." + Math.floor((volume - Math.floor(volume))*10)
         }
     }
     Timer {

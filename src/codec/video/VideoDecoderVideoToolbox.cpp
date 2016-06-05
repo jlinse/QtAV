@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2015)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -22,10 +22,10 @@
 #include "VideoDecoderFFmpegHW.h"
 #include "VideoDecoderFFmpegHW_p.h"
 #include "utils/GPUMemCopy.h"
-#include "QtAV/SurfaceInterop.h"
 #include "QtAV/private/AVCompat.h"
 #include "QtAV/private/factory.h"
-#include "utils/OpenGLHelper.h"
+#include "SurfaceInteropCV.h"
+//#include <OpenGLES/EAGL.h>
 #include <assert.h>
 #ifdef __cplusplus
 extern "C" {
@@ -45,8 +45,8 @@ extern "C" {
 #define kCFCoreFoundationVersionNumber10_7      635.00
 #endif
 
+//kCVPixelBufferOpenGLESCompatibilityKey //ios6
 namespace QtAV {
-
 class VideoDecoderVideoToolboxPrivate;
 // qt4 moc can not correctly process Q_DECL_FINAL here
 class VideoDecoderVideoToolbox : public VideoDecoderFFmpegHW
@@ -54,16 +54,26 @@ class VideoDecoderVideoToolbox : public VideoDecoderFFmpegHW
     Q_OBJECT
     DPTR_DECLARE_PRIVATE(VideoDecoderVideoToolbox)
     Q_PROPERTY(PixelFormat format READ format WRITE setFormat NOTIFY formatChanged)
+    Q_PROPERTY(Interop interop READ interop WRITE setInterop NOTIFY interopChanged)
     // TODO: try async property
     Q_ENUMS(PixelFormat)
+    Q_ENUMS(Interop)
 public:
     enum PixelFormat {
         NV12 = '420v',
-        //NV12Full = '420f',
         UYVY = '2vuy',
+        BGRA = 'BGRA', //kCVPixelFormatType_32BGRA
         YUV420P = 'y420',
-        YUYV = 'yuvs'
+        YUYV = 'yuvs',
     };
+    // no ios macro check in Interop because moc is an idiot
+    enum Interop {
+        CVPixelBuffer = cv::InteropCVPixelBuffer,
+        CVOpenGLES = cv::InteropCVOpenGLES,
+        IOSurface = cv::InteropIOSurface,
+        Auto = cv::InteropAuto
+    };
+
     VideoDecoderVideoToolbox();
     VideoDecoderId id() const Q_DECL_OVERRIDE;
     QString description() const Q_DECL_OVERRIDE;
@@ -71,8 +81,11 @@ public:
     // QObject properties
     void setFormat(PixelFormat fmt);
     PixelFormat format() const;
+    void setInterop(Interop value);
+    Interop interop() const;
 Q_SIGNALS:
     void formatChanged();
+    void interopChanged();
 };
 extern VideoDecoderId VideoDecoderId_VideoToolbox;
 FACTORY_REGISTER(VideoDecoder, VideoToolbox, "VideoToolbox")
@@ -83,30 +96,33 @@ public:
     VideoDecoderVideoToolboxPrivate()
         : VideoDecoderFFmpegHWPrivate()
         , out_fmt(VideoDecoderVideoToolbox::NV12)
+        , interop_type(cv::InteropAuto)
     {
         if (kCFCoreFoundationVersionNumber < kCFCoreFoundationVersionNumber10_7)
             out_fmt = VideoDecoderVideoToolbox::UYVY;
         copy_mode = VideoDecoderFFmpegHW::ZeroCopy;
         description = QStringLiteral("VideoToolbox");
     }
-    ~VideoDecoderVideoToolboxPrivate() {qDebug("~VideoDecoderVideoToolboxPrivate");}
+    ~VideoDecoderVideoToolboxPrivate() {}
     bool open() Q_DECL_OVERRIDE;
     void close() Q_DECL_OVERRIDE;
 
-    bool setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
+    void* setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
     bool getBuffer(void **opaque, uint8_t **data) Q_DECL_OVERRIDE;
     void releaseBuffer(void *opaque, uint8_t *data) Q_DECL_OVERRIDE;
     AVPixelFormat vaPixelFormat() const Q_DECL_OVERRIDE { return AV_PIX_FMT_VIDEOTOOLBOX;}
 
     VideoDecoderVideoToolbox::PixelFormat out_fmt;
+    cv::InteropType interop_type;
+    cv::InteropResourcePtr interop_res;
 };
 
 typedef struct {
     int  code;
     const char *str;
-} videotoolbox_error;
+} cv_error;
 
-static const videotoolbox_error videotoolbox_errors[] = {
+static const cv_error cv_errors[] = {
     { AVERROR(ENOSYS),
       "Hardware doesn't support accelerated decoding for this stream"
       " or Videotoolbox decoder is not available at the moment (another"
@@ -119,50 +135,30 @@ static const videotoolbox_error videotoolbox_errors[] = {
     { 0, NULL },
 };
 
-static const char* videotoolbox_err_str(int err)
+static const char* cv_err_str(int err)
 {
-    for (int i = 0; videotoolbox_errors[i].code; ++i) {
-        if (videotoolbox_errors[i].code != err)
+    for (int i = 0; cv_errors[i].code; ++i) {
+        if (cv_errors[i].code != err)
             continue;
-        return videotoolbox_errors[i].str;
+        return cv_errors[i].str;
     }
-    return 0;
-}
-
-typedef struct {
-    int cv_pixfmt;
-    VideoFormat::PixelFormat pixfmt;
-} cv_format;
-
-//https://developer.apple.com/library/Mac/releasenotes/General/MacOSXLionAPIDiffs/CoreVideo.html
-/* use fourcc '420v', 'yuvs' for NV12 and yuyv to avoid build time version check
- * qt4 targets 10.6, so those enum values is not valid in build time, while runtime is supported.
- */
-static const cv_format cv_formats[] = {
-    { 'y420', VideoFormat::Format_YUV420P }, //kCVPixelFormatType_420YpCbCr8Planar
-    { '2vuy', VideoFormat::Format_UYVY }, //kCVPixelFormatType_422YpCbCr8
-//#ifdef OSX_TARGET_MIN_LION
-    { '420f' , VideoFormat::Format_NV12 }, // kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-    { '420v', VideoFormat::Format_NV12 }, //kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-    { 'yuvs', VideoFormat::Format_YUYV }, //kCVPixelFormatType_422YpCbCr8_yuvs
-//#endif
-    { 0, VideoFormat::Format_Invalid }
-};
-
-static VideoFormat::PixelFormat format_from_cv(int cv)
-{
-    for (int i = 0; cv_formats[i].cv_pixfmt; ++i) {
-        if (cv_formats[i].cv_pixfmt == cv)
-            return cv_formats[i].pixfmt;
-    }
-    return VideoFormat::Format_Invalid;
+    return "Unknown error";
 }
 
 VideoDecoderVideoToolbox::VideoDecoderVideoToolbox()
     : VideoDecoderFFmpegHW(*new VideoDecoderVideoToolboxPrivate())
 {
+    setProperty("threads", 1); // to avoid crash at av_videotoolbox_alloc_context/av_videotoolbox_default_free. I have no idea how the are called
     // dynamic properties about static property details. used by UI
-    setProperty("detail_format", tr("Output pixel format from decoder. Performance NV12 > UYVY > YUV420P > YUYV.\nOSX < 10.7 only supports UYVY and YUV420p"));
+    setProperty("detail_format", tr("Output pixel format from decoder. Performance NV12 > UYVY > BGRA > YUV420P > YUYV.\nOSX < 10.7 only supports UYVY, BGRA and YUV420p"));
+    setProperty("detail_interop"
+                , tr("Interop with OpenGL") + QStringLiteral("\n") +
+                  tr("CVPixelBuffer: macOS+iOS") + QStringLiteral("\n") +
+                  tr("CVOpenGLES: iOS, no copy, fast") + QStringLiteral("\n") +
+                  tr("IOSurface: macOS, no copy, fast") + QStringLiteral("\n") +
+                  tr("Auto: choose the fastest"));
+    Q_UNUSED(QObject::tr("interop"));
+    Q_UNUSED(QObject::tr("format"));
 }
 
 VideoDecoderId VideoDecoderVideoToolbox::id() const
@@ -172,7 +168,7 @@ VideoDecoderId VideoDecoderVideoToolbox::id() const
 
 QString VideoDecoderVideoToolbox::description() const
 {
-    return QStringLiteral("Video Decode Acceleration");
+    return QStringLiteral("Apple VideoToolbox");
 }
 
 VideoFrame VideoDecoderVideoToolbox::frame()
@@ -187,161 +183,53 @@ VideoFrame VideoDecoderVideoToolbox::frame()
         qDebug("Empty frame buffer");
         return VideoFrame();
     }
-    VideoFormat::PixelFormat pixfmt = format_from_cv(CVPixelBufferGetPixelFormatType(cv_buffer));
+    const VideoFormat::PixelFormat pixfmt = cv::format_from_cv(CVPixelBufferGetPixelFormatType(cv_buffer));
     if (pixfmt == VideoFormat::Format_Invalid) {
-        qWarning("unsupported videotoolbox pixel format: %#x", CVPixelBufferGetPixelFormatType(cv_buffer));
+        qWarning("unsupported cv pixel format: %#x", (quint32)CVPixelBufferGetPixelFormatType(cv_buffer));
         return VideoFrame();
     }
-    // we can map the cv buffer addresses to video frame in SurfaceInteropCVBuffer. (may need VideoSurfaceInterop::mapToTexture()
-    class SurfaceInteropCVBuffer Q_DECL_FINAL: public VideoSurfaceInterop {
-        bool glinterop;
-        CVPixelBufferRef cvbuf; // keep ref until video frame is destroyed
-    public:
-        SurfaceInteropCVBuffer(CVPixelBufferRef cv, bool gl) : glinterop(gl), cvbuf(cv) {
-            CVPixelBufferRetain(cvbuf); // videotoolbox need it for map and CVPixelBufferRelease
-        }
-        ~SurfaceInteropCVBuffer() {
-            CVPixelBufferRelease(cvbuf);
-        }
-        void* mapToHost(const VideoFormat &format, void *handle, int plane) {
-            Q_UNUSED(plane);
-            CVPixelBufferLockBaseAddress(cvbuf, 0);
-            const VideoFormat fmt(format_from_cv(CVPixelBufferGetPixelFormatType(cvbuf)));
-            if (!fmt.isValid()) {
-                CVPixelBufferUnlockBaseAddress(cvbuf, 0);
-                return NULL;
-            }
-            const int w = CVPixelBufferGetWidth(cvbuf);
-            const int h = CVPixelBufferGetHeight(cvbuf);
-            uint8_t *src[3];
-            int pitch[3];
-            for (int i = 0; i <fmt.planeCount(); ++i) {
-                // get address results in internal copy
-                src[i] = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(cvbuf, i);
-                pitch[i] = CVPixelBufferGetBytesPerRowOfPlane(cvbuf, i);
-            }
-            CVPixelBufferUnlockBaseAddress(cvbuf, 0);
-            //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
-            VideoFrame frame(VideoFrame::fromGPU(fmt, w, h, h, src, pitch));
-            if (fmt != format)
-                frame = frame.to(format);
-            VideoFrame *f = reinterpret_cast<VideoFrame*>(handle);
-            frame.setTimestamp(f->timestamp());
-            frame.setDisplayAspectRatio(f->displayAspectRatio());
-            *f = frame;
-            return f;
-        }
-        virtual void* map(SurfaceType type, const VideoFormat& fmt, void* handle = 0, int plane = 0) Q_DECL_OVERRIDE {
-            Q_UNUSED(fmt);
-            if (!glinterop)
-                return 0;
-            if (type == HostMemorySurface) {
-                return mapToHost(fmt, handle, plane);
-            }
-            if (type != GLTextureSurface)
-                return 0;
-            // https://www.opengl.org/registry/specs/APPLE/rgb_422.txt
-            // TODO: check extension GL_APPLE_rgb_422 and rectangle?
-            IOSurfaceRef surface  = CVPixelBufferGetIOSurface(cvbuf);
-            int w = IOSurfaceGetWidthOfPlane(surface, plane);
-            int h = IOSurfaceGetHeightOfPlane(surface, plane);
-            //qDebug("plane:%d, iosurface %dx%d, ctx: %p", plane, w, h, CGLGetCurrentContext());
-            OSType pixfmt = IOSurfaceGetPixelFormat(surface); //CVPixelBufferGetPixelFormatType(cvbuf);
-            GLenum iformat = GL_RGBA8;
-            GLenum format = GL_BGRA;
-            GLenum dtype = GL_UNSIGNED_INT_8_8_8_8_REV;
-            const GLenum target = GL_TEXTURE_RECTANGLE;
-            // TODO: GL_RED, GL_RG is better for gl >= 3.0
-            if (pixfmt == NV12) {
-                dtype = GL_UNSIGNED_BYTE;
-                if (plane == 0) {
-                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
-                } else {
-                    iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE_ALPHA : GL_RG;
-                }
-            } else if (pixfmt == UYVY || pixfmt == YUYV) {
-                w /= 2; //rgba texture
-            } else if (pixfmt == YUV420P) {
-                dtype = GL_UNSIGNED_BYTE;
-                iformat = format = OpenGLHelper::useDeprecatedFormats() ? GL_LUMINANCE : GL_RED;
-                if (plane > 1 && format == GL_LUMINANCE)
-                    iformat = format = GL_ALPHA;
-            }
-            DYGL(glBindTexture(target, *((GLuint*)handle)));
-            CGLError err = CGLTexImageIOSurface2D(CGLGetCurrentContext(), target, iformat, w, h, format, dtype, surface, plane);
-            if (err != kCGLNoError) {
-                qWarning("error creating IOSurface texture at plane %d: %s", plane, CGLErrorString(err));
-            }
-            DYGL(glBindTexture(target, 0));
-            return handle;
-        }
-        void* createHandle(void* handle, SurfaceType type, const VideoFormat &fmt, int plane, int planeWidth, int planeHeight) Q_DECL_OVERRIDE {
-            Q_UNUSED(type);
-            Q_UNUSED(fmt);
-            Q_UNUSED(plane);
-            Q_UNUSED(planeWidth);
-            Q_UNUSED(planeHeight);
-            if (!glinterop)
-                return 0;
-            GLuint *tex = (GLuint*)handle;
-            DYGL(glGenTextures(1, tex));
-            // no init required
-            return handle;
-        }
-    };
 
     uint8_t *src[3];
-    int pitch[3];
-    const bool zero_copy = copyMode() == VideoDecoderFFmpegHW::ZeroCopy;
-    if (zero_copy) {
-        // make sure VideoMaterial can correctly setup parameters
-        switch (format()) {
-        case UYVY:
-            pitch[0] = 2*d.width; //
-            pixfmt = VideoFormat::Format_VYUY; //FIXME: VideoShader assume uyvy is uploaded as rgba, but apple limits the result to bgra
-            break;
-        case NV12:
-            pitch[0] = d.width;
-            pitch[1] = d.width;
-            break;
-        case YUV420P:
-            pitch[0] = d.width;
-            pitch[1] = pitch[2] = d.width/2;
-            break;
-        case YUYV:
-            pitch[0] = 2*d.width; //
-            //pixfmt = VideoFormat::Format_YVYU; //
-            break;
-        default:
-            break;
-        }
-    }
-    const VideoFormat fmt(pixfmt);
-    if (!zero_copy) {
-        CVPixelBufferLockBaseAddress(cv_buffer, 0);
-        for (int i = 0; i <fmt.planeCount(); ++i) {
-            // get address results in internal copy
+    int pitch[3]; // must get the value from cvbuffer to compute opengl text size in VideoShader
+    VideoFormat fmt(pixfmt);
+    const bool zero_copy = copyMode() == ZeroCopy;
+    CVPixelBufferLockBaseAddress(cv_buffer, kCVPixelBufferLock_ReadOnly);
+    for (int i = 0; i < fmt.planeCount(); ++i) {
+        pitch[i] = CVPixelBufferGetBytesPerRowOfPlane(cv_buffer, i);
+        // get address results in internal copy
+        if (!zero_copy)
             src[i] = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(cv_buffer, i);
-            pitch[i] = CVPixelBufferGetBytesPerRowOfPlane(cv_buffer, i);
-        }
-        CVPixelBufferUnlockBaseAddress(cv_buffer, 0);
-        //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
     }
+    CVPixelBufferUnlockBaseAddress(cv_buffer, kCVPixelBufferLock_ReadOnly);
+    //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
     VideoFrame f;
+    // TODO: remove LazyCopy?
     if (zero_copy || copyMode() == VideoDecoderFFmpegHW::LazyCopy) {
+        if (d.interop_res) {
+            // make sure VideoMaterial can correctly setup parameters
+            VideoFormat::PixelFormat opixfmt = pixfmt;
+            d.interop_res->stridesForWidth(format(), d.width, pitch, &opixfmt);
+            if (pixfmt != opixfmt)
+                fmt = VideoFormat(opixfmt);
+        }
         f = VideoFrame(d.width, d.height, fmt);
         f.setBytesPerLine(pitch);
+        // TODO: move to updateFrameInfo
         f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
         f.setDisplayAspectRatio(d.getDAR(d.frame));
-        if (zero_copy) {
-            f.setMetaData(QStringLiteral("target"), QByteArrayLiteral("rect"));
+        d.updateColorDetails(&f);
+        if (d.interop_res) { // zero_copy
+            cv::SurfaceInteropCV *interop = new cv::SurfaceInteropCV(d.interop_res);
+            interop->setSurface(cv_buffer, d.width, d.height);
+            f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
+            if (!d.interop_res->mapToTexture2D())
+                f.setMetaData(QStringLiteral("target"), QByteArrayLiteral("rect"));
         } else {
             f.setBits(src); // only set for copy back mode
         }
     } else {
         f = copyToFrame(fmt, d.height, src, pitch, false);
     }
-    f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(new SurfaceInteropCVBuffer(cv_buffer, zero_copy))));
     return f;
 }
 
@@ -351,7 +239,7 @@ void VideoDecoderVideoToolbox::setFormat(PixelFormat fmt)
     if (d.out_fmt == fmt)
         return;
     d.out_fmt = fmt;
-    emit formatChanged();
+    Q_EMIT formatChanged();
     if (kCFCoreFoundationVersionNumber >= kCFCoreFoundationVersionNumber10_7)
         return;
     if (fmt != YUV420P && fmt != UYVY)
@@ -363,28 +251,38 @@ VideoDecoderVideoToolbox::PixelFormat VideoDecoderVideoToolbox::format() const
     return d_func().out_fmt;
 }
 
-bool VideoDecoderVideoToolboxPrivate::setup(AVCodecContext *avctx)
+void VideoDecoderVideoToolbox::setInterop(Interop value)
+{
+    DPTR_D(VideoDecoderVideoToolbox);
+    if (value == (Interop)d.interop_type)
+        return;
+    d.interop_type = (cv::InteropType)value;
+    Q_EMIT interopChanged();
+}
+
+VideoDecoderVideoToolbox::Interop VideoDecoderVideoToolbox::interop() const
+{
+    return (Interop)d_func().interop_type;
+}
+
+void* VideoDecoderVideoToolboxPrivate::setup(AVCodecContext *avctx)
 {
     releaseUSWC();
-
-    if (avctx->hwaccel_context) {
-        AVVideotoolboxContext *vt = reinterpret_cast<AVVideotoolboxContext*>(avctx->hwaccel_context);
-        const CMVideoDimensions dim = CMVideoFormatDescriptionGetDimensions(vt->cm_fmt_desc);
-        qDebug("AVVideotoolboxContext ready: %dx%d", dim.width, dim.height);
-        return true;
-    }
+    av_videotoolbox_default_free(avctx);
     AVVideotoolboxContext *vtctx = av_videotoolbox_alloc_context();
     vtctx->cv_pix_fmt_type = out_fmt;
 
     qDebug("AVVideotoolboxContext: %p", vtctx);
-    int err = av_videotoolbox_default_init2(codec_ctx, vtctx);
+    int err = av_videotoolbox_default_init2(avctx, vtctx); //ios h264 crashes when processing extra data. null H264Context
     if (err < 0) {
-        qWarning("Failed to init videotoolbox decoder (%#x): %s", err, videotoolbox_err_str(err));
-        return false;
+        qWarning("Failed to init videotoolbox decoder (%#x %s): %s", err, av_err2str(err), cv_err_str(err));
+        return NULL;
     }
-    initUSWC(codedWidth(avctx));
-    qDebug() << "VideoToolbox decoder created. format: " << format_from_cv(out_fmt);
-    return true;
+    const CMVideoDimensions dim = CMVideoFormatDescriptionGetDimensions(vtctx->cm_fmt_desc);
+    initUSWC(codedWidth(avctx)); // TODO: use stride
+    qDebug() << "VideoToolbox decoder created. format: " << cv::format_from_cv(out_fmt);
+    qDebug("AVVideotoolboxContext ready: %dx%d", dim.width, dim.height);
+    return vtctx; //the same as avctx->hwaccel_context;
 }
 
 bool VideoDecoderVideoToolboxPrivate::getBuffer(void **opaque, uint8_t **data)
@@ -416,10 +314,28 @@ bool VideoDecoderVideoToolboxPrivate::open()
     default:
         break;
     }
-    codec_ctx->thread_count = 1; // to avoid crash at av_videotoolbox_alloc_context/av_videotoolbox_default_free. I have no idea how the are called
+    switch (codec_ctx->codec_id) {
+    case AV_CODEC_ID_H264:
+    case AV_CODEC_ID_H263:
+    case AV_CODEC_ID_MPEG4:
+    case AV_CODEC_ID_MPEG2VIDEO:
+    case AV_CODEC_ID_MPEG1VIDEO:
+        break;
+    default:
+        qWarning("VideoToolbox unsupported codec: %s", avcodec_get_name(codec_ctx->codec_id));
+        return false;
+    }
     qDebug("opening VideoToolbox module");
-    // codec/profile check?
-    return setup(codec_ctx);
+    // setup() must be called in getFormat() from avcodec callback, otherwise in ffmpeg3.0 avctx->priv_data is null and crash
+    // TODO: block AVDecoder.open() until hw callback is done
+    //if (!setup(codec_ctx))
+      //  return false;
+    if (copy_mode == VideoDecoderFFmpegHW::ZeroCopy) {
+        interop_res = cv::InteropResourcePtr(cv::InteropResource::create(interop_type));
+    } else {
+        interop_res.clear();
+    }
+    return true;
 }
 
 void VideoDecoderVideoToolboxPrivate::close()

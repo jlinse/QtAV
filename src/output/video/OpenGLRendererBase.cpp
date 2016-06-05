@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2016 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -24,13 +24,14 @@
 #include "QtAV/OpenGLVideo.h"
 #include "QtAV/FilterContext.h"
 #include <QResizeEvent>
-#include "utils/OpenGLHelper.h"
+#include "opengl/OpenGLHelper.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
 
 OpenGLRendererBasePrivate::OpenGLRendererBasePrivate(QPaintDevice* pd)
     : painter(new QPainter())
+    , frame_changed(false)
 {
     filter_context = VideoFilterContext::create(VideoFilterContext::QtPainter);
     filter_context->paint_device = pd;
@@ -68,13 +69,16 @@ bool OpenGLRendererBase::isSupported(VideoFormat::PixelFormat pixfmt) const
     return OpenGLVideo::isSupported(pixfmt);
 }
 
+OpenGLVideo* OpenGLRendererBase::opengl() const
+{
+    return const_cast<OpenGLVideo*>(&d_func().glv);
+}
+
 bool OpenGLRendererBase::receiveFrame(const VideoFrame& frame)
 {
     DPTR_D(OpenGLRendererBase);
     d.video_frame = frame;
-
-    d.glv.setCurrentFrame(frame);
-
+    d.frame_changed = true;
     updateUi(); //can not call updateGL() directly because no event and paintGL() will in video thread
     return true;
 }
@@ -93,6 +97,10 @@ void OpenGLRendererBase::drawFrame()
     QRect roi = realROI();
     //d.glv.render(QRectF(-1, 1, 2, -2), roi, d.matrix);
     // QRectF() means the whole viewport
+    if (d.frame_changed) {
+        d.glv.setCurrentFrame(d.video_frame);
+        d.frame_changed = false;
+    }
     d.glv.render(QRectF(), roi, d.matrix);
 }
 
@@ -105,17 +113,6 @@ void OpenGLRendererBase::onInitializeGL()
 #endif
     QOpenGLContext *ctx = const_cast<QOpenGLContext*>(QOpenGLContext::currentContext()); //qt4 returns const
     d.glv.setOpenGLContext(ctx);
-    //const QByteArray extensions(reinterpret_cast<const char *>(glGetString(GL_EXTENSIONS)));
-    bool hasGLSL = QOpenGLShaderProgram::hasOpenGLShaderPrograms();
-    qDebug("OpenGL version: %d.%d  hasGLSL: %d", ctx->format().majorVersion(), ctx->format().minorVersion(), hasGLSL);  
-    static bool sInfo = true;
-    if (sInfo) {
-        sInfo = false;
-        qDebug("GL_VERSION: %s", DYGL(glGetString(GL_VERSION)));
-        qDebug("GL_VENDOR: %s", DYGL(glGetString(GL_VENDOR)));
-        qDebug("GL_RENDERER: %s", DYGL(glGetString(GL_RENDERER)));
-        qDebug("GL_SHADING_LANGUAGE_VERSION: %s", DYGL(glGetString(GL_SHADING_LANGUAGE_VERSION)));
-    }
 }
 
 void OpenGLRendererBase::onPaintGL()
@@ -139,7 +136,6 @@ void OpenGLRendererBase::onResizeGL(int w, int h)
     if (!QOpenGLContext::currentContext())
         return;
     DPTR_D(OpenGLRendererBase);
-    glViewport(0, 0, w, h);
     d.glv.setProjectionMatrixToRect(QRectF(0, 0, w, h));
     d.setupAspectRatio();
 }

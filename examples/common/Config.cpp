@@ -1,8 +1,8 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,8 @@
 #else
 #include <QtCore/QStandardPaths>
 #endif
+#include <QtSql/QSqlDatabase>
+#include <QtSql/QSqlQuery>
 #include <QtDebug>
 #include "common.h"
 
@@ -35,6 +37,7 @@ class Config::Data
 {
 public:
     Data() {
+        is_loading = false;
         if (!Data::name.isEmpty())
             file = appDataDir() + QString::fromLatin1("/") + Data::name + QString::fromLatin1(".ini");
         else
@@ -44,10 +47,10 @@ public:
                 qWarning() << "Failed to create appDataDir: " << appDataDir();
             }
         }
-        load();
+        moveOldCfg();
     }
 
-    void load() {
+    void moveOldCfg() {
         // for old config data migration
         QString dir_old = qApp->applicationDirPath() + QString::fromLatin1("/data");
         if (!QDir(dir_old).exists()) {
@@ -74,96 +77,16 @@ public:
                 }
             }
         }
-
-        QSettings settings(file, QSettings::IniFormat);
-        log = settings.value(QString::fromLatin1("log"), QString()).toString();
-        last_file = settings.value(QString::fromLatin1("last_file"), QString()).toString();
-        timeout = settings.value(QString::fromLatin1("timeout"), 30.0).toReal();
-        abort_timeout = settings.value(QString::fromLatin1("abort_timeout"), true).toBool();
-        force_fps = settings.value(QString::fromLatin1("force_fps"), 0.0).toReal();
-        settings.beginGroup(QString::fromLatin1("decoder"));
-        settings.beginGroup(QString::fromLatin1("video"));
-        QString decs_default(QString::fromLatin1("FFmpeg"));
-        //decs_default.append(QString::fromLatin1(" CUDA ")).append(QString::fromLatin1(" DXVA ")).append(QString::fromLatin1(" VAAPI ")).append(QString::fromLatin1(" VDA "));
-#if 0
-        QString all_names_string = settings.value("all", QString()).toString();
-        if (!all_names_string.isEmpty()) {
-            all_names = all_names_string.split(" ", QString::SkipEmptyParts);
-        }
-#endif
-        video_decoders = settings.value(QString::fromLatin1("priority"), decs_default).toString().split(QString::fromLatin1(" "), QString::SkipEmptyParts);
-        settings.endGroup(); //video
-        settings.endGroup(); //decoder
-
-        settings.beginGroup(QString::fromLatin1("capture"));
-        capture_dir = settings.value(QString::fromLatin1("dir"), QString()).toString();
-        if (capture_dir.isEmpty()) {
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-            capture_dir = QDesktopServices::storageLocation(QDesktopServices::PicturesLocation);
-#else
-            capture_dir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
-#endif
-        }
-        capture_fmt = settings.value(QString::fromLatin1("format"), QString::fromLatin1("png")).toString();
-        capture_quality = settings.value(QString::fromLatin1("quality"), 100).toInt();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("subtitle"));
-        subtitle_autoload = settings.value(QString::fromLatin1("autoLoad"), true).toBool();
-        subtitle_enabled = settings.value(QString::fromLatin1("enabled"), true).toBool();
-        subtitle_engines = settings.value(QString::fromLatin1("engines"), QStringList() << QString::fromLatin1("FFmpeg") << QString::fromLatin1("LibASS")).toStringList();
-        subtitle_delay = settings.value(QString::fromLatin1("delay"), 0.0).toInt();
-        QFont f;
-        f.setPointSize(20);
-        f.setBold(true);
-        subtitle_font = settings.value(QString::fromLatin1("font"), f).value<QFont>();
-        subtitle_color = settings.value(QString::fromLatin1("color"), QColor("white")).value<QColor>();
-        subtitle_outline_color = settings.value(QString::fromLatin1("outline_color"), QColor("blue")).value<QColor>();
-        subtitle_outline = settings.value(QString::fromLatin1("outline"), true).toBool();
-        subtilte_bottom_margin = settings.value(QString::fromLatin1("bottom margin"), 8).toInt();
-        settings.beginGroup(QString::fromLatin1("ass"));
-        ass_font_file = settings.value(QString::fromLatin1("font_file"), QString()).toString();
-        ass_force_font_file = settings.value(QString::fromLatin1("force_font_file"), false).toBool();
-        ass_fonts_dir = settings.value(QString::fromLatin1("fonts_dir"), QString()).toString();
-        settings.endGroup();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("preview"));
-        preview_enabled = settings.value(QString::fromLatin1("enabled"), true).toBool();
-        preview_w = settings.value(QString::fromLatin1("width"), 160).toInt();
-        preview_h = settings.value(QString::fromLatin1("height"), 90).toInt();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("avformat"));
-        avformat_on = settings.value(QString::fromLatin1("enable"), false).toBool();
-        direct = settings.value(QString::fromLatin1("avioflags"), 0).toString() == QLatin1String("direct");
-        probe_size = settings.value(QString::fromLatin1("probesize"), 5000000).toUInt();
-        analyze_duration = settings.value(QString::fromLatin1("analyzeduration"), 5000000).toInt();
-        avformat_extra = settings.value(QString::fromLatin1("extra"), QString()).toString();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("avfilterVideo"));
-        avfilterVideo_on = settings.value(QString::fromLatin1("enable"), true).toBool();
-        avfilterVideo = settings.value(QString::fromLatin1("options"), QString()).toString();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("avfilterAudio"));
-        avfilterAudio_on = settings.value(QString::fromLatin1("enable"), true).toBool();
-        avfilterAudio = settings.value(QString::fromLatin1("options"), QString()).toString();
-        settings.endGroup();
-        settings.beginGroup(QString::fromLatin1("opengl"));
-        egl = settings.value(QString::fromLatin1("egl"), false).toBool();
-        const QString glname = settings.value(QString::fromLatin1("type"), QString::fromLatin1("OpenGLES")).toString();
-        opengl = (Config::OpenGLType)Config::staticMetaObject.enumerator(Config::staticMetaObject.indexOfEnumerator("OpenGLType")).keysToValue(glname.toLatin1().constData());
-        // d3d11 bad performance (gltexsubimage2d)
-        angle_dx = settings.value(QString::fromLatin1("angle_platform"), QString::fromLatin1("d3d9")).toString();
-        settings.endGroup();
-
-        settings.beginGroup(QString::fromLatin1("buffer"));
-        buffer_value = settings.value(QString::fromLatin1("value"), -1).toInt();
-        settings.endGroup();
     }
 
     void save() {
+        if (is_loading)
+            return;
         qDebug() << "sync config to " << file;
         QSettings settings(file, QSettings::IniFormat);
         // TODO: why crash on mac qt5.4 if call on aboutToQuit()
         settings.setValue(QString::fromLatin1("log"), log);
+        settings.setValue(QString::fromLatin1("language"), lang);
         settings.setValue(QString::fromLatin1("last_file"), last_file);
         settings.setValue(QString::fromLatin1("timeout"), timeout);
         settings.setValue(QString::fromLatin1("abort_timeout"), abort_timeout);
@@ -174,6 +97,7 @@ public:
         settings.endGroup();
         settings.endGroup();
         settings.beginGroup(QString::fromLatin1("capture"));
+        settings.setValue(QString::fromLatin1("zeroCopy"), zero_copy);
         settings.setValue(QString::fromLatin1("dir"), capture_dir);
         settings.setValue(QString::fromLatin1("format"), capture_fmt);
         settings.setValue(QString::fromLatin1("quality"), capture_quality);
@@ -227,9 +151,11 @@ public:
     }
 
     QString file;
+    bool is_loading;
 
     qreal force_fps;
     QStringList video_decoders;
+    bool zero_copy;
 
     QString last_file;
 
@@ -270,6 +196,9 @@ public:
     qreal timeout;
     int buffer_value;
     QString log;
+    QString lang;
+
+    QVariantList history;
 
     static QString name;
 };
@@ -287,12 +216,23 @@ void Config::setName(const QString &name)
     Config::Data::name = name;
 }
 
+QString Config::getName()
+{
+    return Config::Data::name;
+}
+
+QString Config::defaultConfigFile()
+{
+    return appDataDir() + QString::fromLatin1("/") + Data::name + QString::fromLatin1(".ini");;
+}
+
 Config::Config(QObject *parent)
     : QObject(parent)
     , mpData(new Data())
 {
     // DO NOT call save() in dtor because it's a singleton and may be deleted later than qApp, QFont is not valid
-    connect(qApp, SIGNAL(aboutToQuit()), SLOT(save()));
+    connect(qApp, SIGNAL(aboutToQuit()), SLOT(save())); //FIXME: what if qapp not ready
+    reload();
 }
 
 Config::~Config()
@@ -300,7 +240,7 @@ Config::~Config()
     delete mpData;
 }
 
-QString Config::defaultDir() const
+QString Config::defaultDir()
 {
     return appDataDir();
 }
@@ -313,19 +253,113 @@ bool Config::reset()
         return false;
     }
     reload();
-    Q_EMIT changed();
     save();
     return true;
 }
 
 void Config::reload()
 {
-    mpData->load();
-    qDebug() << decoderPriorityNames();
-    emit decoderPriorityNamesChanged();
-    emit captureDirChanged(mpData->capture_dir);
-    emit captureFormatChanged(mpData->capture_fmt);
-    emit captureQualityChanged(mpData->capture_quality);
+    QSqlDatabase db(QSqlDatabase::database());
+    if (!db.isOpen()) {
+        db = QSqlDatabase::addDatabase(QString::fromUtf8("QSQLITE"));
+        db.setDatabaseName(appDataDir().append(QString("/%1.db").arg(mpData->name)));
+        if (!db.open())
+            qWarning("error open db");
+        db.exec("CREATE TABLE IF NOT EXISTS history (url TEXT primary key, start BIGINT, duration BIGINT)");
+    }
+    QSqlQuery query(db.exec(QString::fromUtf8("SELECT * FROM history")));
+    while (query.next()) {
+        QVariantMap var;
+        var[QString::fromUtf8("url")] = query.value(0).toString();
+        var[QString::fromUtf8("start")] = query.value(1).toLongLong();
+        var[QString::fromUtf8("duration")] = query.value(2).toLongLong();
+        mpData->history.append(var);
+    }
+    mpData->is_loading = true;
+    QSettings settings(mpData->file, QSettings::IniFormat);
+    setLogLevel(settings.value(QString::fromLatin1("log"), QString()).toString());
+    setLanguage(settings.value(QString::fromLatin1("language"),
+#if QT_VERSION == QT_VERSION_CHECK(5, 6, 0) && defined(Q_OS_WINPHONE) //qt bug
+                               QString::fromLatin1("en_US")
+#else
+                               QString::fromLatin1("system")
+#endif
+                               ).toString());
+    setLastFile(settings.value(QString::fromLatin1("last_file"), QString()).toString());
+    setTimeout(settings.value(QString::fromLatin1("timeout"), 30.0).toReal());
+    setAbortOnTimeout(settings.value(QString::fromLatin1("abort_timeout"), true).toBool());
+    setForceFrameRate(settings.value(QString::fromLatin1("force_fps"), 0.0).toReal());
+    settings.beginGroup(QString::fromLatin1("decoder"));
+    settings.beginGroup(QString::fromLatin1("video"));
+    QString decs_default(QString::fromLatin1("FFmpeg"));
+    setDecoderPriorityNames(settings.value(QString::fromLatin1("priority"), decs_default).toString().split(QString::fromLatin1(" "), QString::SkipEmptyParts));
+    setZeroCopy(settings.value(QString::fromLatin1("zeroCopy"), true).toBool());
+    settings.endGroup(); //video
+    settings.endGroup(); //decoder
+
+    settings.beginGroup(QString::fromLatin1("capture"));
+    setCaptureDir(settings.value(QString::fromLatin1("dir"), QString()).toString());
+    if (captureDir().isEmpty()) {
+#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
+        setCaptureDir(QDesktopServices::storageLocation(QDesktopServices::PicturesLocation));
+#else
+        setCaptureDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation));
+#endif
+    }
+    setCaptureFormat(settings.value(QString::fromLatin1("format"), QString::fromLatin1("png")).toString());
+    setCaptureQuality(settings.value(QString::fromLatin1("quality"), 100).toInt());
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("subtitle"));
+    setSubtitleAutoLoad(settings.value(QString::fromLatin1("autoLoad"), true).toBool());
+    setSubtitleEnabled(settings.value(QString::fromLatin1("enabled"), true).toBool());
+    setSubtitleEngines(settings.value(QString::fromLatin1("engines"), QStringList() << QString::fromLatin1("FFmpeg") << QString::fromLatin1("LibASS")).toStringList());
+    setSubtitleDelay(settings.value(QString::fromLatin1("delay"), 0.0).toInt());
+    QFont f;
+    f.setPointSize(20);
+    f.setBold(true);
+    setSubtitleFont(settings.value(QString::fromLatin1("font"), f).value<QFont>());
+    setSubtitleColor(settings.value(QString::fromLatin1("color"), QColor("white")).value<QColor>());
+    setSubtitleOutlineColor(settings.value(QString::fromLatin1("outline_color"), QColor("blue")).value<QColor>());
+    setSubtitleOutline(settings.value(QString::fromLatin1("outline"), true).toBool());
+    setSubtitleBottomMargin(settings.value(QString::fromLatin1("bottom margin"), 8).toInt());
+    settings.beginGroup(QString::fromLatin1("ass"));
+    setAssFontFile(settings.value(QString::fromLatin1("font_file"), QString()).toString());
+    setAssFontFileForced(settings.value(QString::fromLatin1("force_font_file"), false).toBool());
+    setAssFontsDir(settings.value(QString::fromLatin1("fonts_dir"), QString()).toString());
+    settings.endGroup();
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("preview"));
+    setPreviewEnabled(settings.value(QString::fromLatin1("enabled"), true).toBool());
+    setPreviewWidth(settings.value(QString::fromLatin1("width"), 160).toInt());
+    setPreviewHeight(settings.value(QString::fromLatin1("height"), 90).toInt());
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("avformat"));
+    setAvformatOptionsEnabled(settings.value(QString::fromLatin1("enable"), false).toBool());
+    reduceBuffering(settings.value(QString::fromLatin1("avioflags"), 0).toString() == QLatin1String("direct"));
+    probeSize(settings.value(QString::fromLatin1("probesize"), 5000000).toUInt());
+    analyzeDuration(settings.value(QString::fromLatin1("analyzeduration"), 5000000).toInt());
+    avformatExtra(settings.value(QString::fromLatin1("extra"), QString()).toString());
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("avfilterVideo"));
+    avfilterVideoEnable(settings.value(QString::fromLatin1("enable"), true).toBool());
+    avfilterVideoOptions(settings.value(QString::fromLatin1("options"), QString()).toString());
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("avfilterAudio"));
+    avfilterAudioEnable(settings.value(QString::fromLatin1("enable"), true).toBool());
+    avfilterAudioOptions(settings.value(QString::fromLatin1("options"), QString()).toString());
+    settings.endGroup();
+    settings.beginGroup(QString::fromLatin1("opengl"));
+    setEGL(settings.value(QString::fromLatin1("egl"), false).toBool());
+    const QString glname = settings.value(QString::fromLatin1("type"), QString::fromLatin1("OpenGLES")).toString();
+    setOpenGLType((Config::OpenGLType)Config::staticMetaObject.enumerator(Config::staticMetaObject.indexOfEnumerator("OpenGLType")).keysToValue(glname.toLatin1().constData()));
+    // d3d11 bad performance (gltexsubimage2d)
+    setANGLEPlatform(settings.value(QString::fromLatin1("angle_platform"), QString::fromLatin1("d3d9")).toString());
+    settings.endGroup();
+
+    settings.beginGroup(QString::fromLatin1("buffer"));
+    setBufferValue(settings.value(QString::fromLatin1("value"), -1).toInt());
+    settings.endGroup();
+    mpData->is_loading = false;
 }
 
 qreal Config::forceFrameRate() const
@@ -338,7 +372,7 @@ Config& Config::setForceFrameRate(qreal value)
     if (mpData->force_fps == value)
         return *this;
     mpData->force_fps = value;
-    emit forceFrameRateChanged();
+    Q_EMIT forceFrameRateChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -355,7 +389,23 @@ Config& Config::setDecoderPriorityNames(const QStringList &value)
         return *this;
     }
     mpData->video_decoders = value;
-    emit decoderPriorityNamesChanged();
+    Q_EMIT decoderPriorityNamesChanged();
+    Q_EMIT changed();
+    mpData->save();
+    return *this;
+}
+
+bool Config::zeroCopy() const
+{
+    return mpData->zero_copy;
+}
+
+Config& Config::setZeroCopy(bool value)
+{
+    if (mpData->zero_copy == value)
+        return *this;
+    mpData->zero_copy = value;
+    Q_EMIT zeroCopyChanged();
     Q_EMIT changed();
     mpData->save();
     return *this;
@@ -371,7 +421,7 @@ Config& Config::setCaptureDir(const QString& dir)
     if (mpData->capture_dir == dir)
         return *this;
     mpData->capture_dir = dir;
-    emit captureDirChanged(dir);
+    Q_EMIT captureDirChanged(dir);
     Q_EMIT changed();
     return *this;
 }
@@ -386,7 +436,7 @@ Config& Config::setCaptureFormat(const QString& format)
     if (mpData->capture_fmt == format)
         return *this;
     mpData->capture_fmt = format;
-    emit captureFormatChanged(format);
+    Q_EMIT captureFormatChanged(format);
     Q_EMIT changed();
     return *this;
 }
@@ -402,7 +452,7 @@ Config& Config::setCaptureQuality(int quality)
     if (mpData->capture_quality == quality)
         return *this;
     mpData->capture_quality = quality;
-    emit captureQualityChanged(quality);
+    Q_EMIT captureQualityChanged(quality);
     Q_EMIT changed();
     return *this;
 }
@@ -417,7 +467,7 @@ Config& Config::setSubtitleEngines(const QStringList &value)
     if (mpData->subtitle_engines == value)
         return *this;
     mpData->subtitle_engines = value;
-    emit subtitleEnginesChanged();
+    Q_EMIT subtitleEnginesChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -432,7 +482,7 @@ Config& Config::setSubtitleAutoLoad(bool value)
     if (mpData->subtitle_autoload == value)
         return *this;
     mpData->subtitle_autoload = value;
-    emit subtitleAutoLoadChanged();
+    Q_EMIT subtitleAutoLoadChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -447,7 +497,7 @@ Config& Config::setSubtitleEnabled(bool value)
     if (mpData->subtitle_enabled == value)
         return *this;
     mpData->subtitle_enabled = value;
-    emit subtitleEnabledChanged();
+    Q_EMIT subtitleEnabledChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -462,7 +512,7 @@ Config& Config::setSubtitleFont(const QFont& value)
     if (mpData->subtitle_font == value)
         return *this;
     mpData->subtitle_font = value;
-    emit subtitleFontChanged();
+    Q_EMIT subtitleFontChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -476,7 +526,7 @@ Config& Config::setSubtitleOutline(bool value)
     if (mpData->subtitle_outline == value)
         return *this;
     mpData->subtitle_outline = value;
-    emit subtitleOutlineChanged();
+    Q_EMIT subtitleOutlineChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -491,7 +541,7 @@ Config& Config::setSubtitleColor(const QColor& value)
     if (mpData->subtitle_color == value)
         return *this;
     mpData->subtitle_color = value;
-    emit subtitleColorChanged();
+    Q_EMIT subtitleColorChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -505,7 +555,7 @@ Config& Config::setSubtitleOutlineColor(const QColor& value)
     if (mpData->subtitle_outline_color == value)
         return *this;
     mpData->subtitle_outline_color = value;
-    emit subtitleOutlineColorChanged();
+    Q_EMIT subtitleOutlineColorChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -520,7 +570,7 @@ Config& Config::setSubtitleBottomMargin(int value)
     if (mpData->subtilte_bottom_margin == value)
         return *this;
     mpData->subtilte_bottom_margin = value;
-    emit subtitleBottomMarginChanged();
+    Q_EMIT subtitleBottomMarginChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -536,6 +586,7 @@ Config& Config::setSubtitleDelay(qreal value)
         return *this;
     mpData->subtitle_delay = value;
     Q_EMIT subtitleDelayChanged();
+    Q_EMIT changed();
     return *this;
 }
 
@@ -550,6 +601,7 @@ Config& Config::setAssFontFile(const QString &value)
         return *this;
     mpData->ass_font_file = value;
     Q_EMIT assFontFileChanged();
+    Q_EMIT changed();
     return *this;
 }
 
@@ -565,6 +617,7 @@ Config& Config::setAssFontsDir(const QString &value)
         return *this;
     mpData->ass_fonts_dir = value;
     Q_EMIT assFontsDirChanged();
+    Q_EMIT changed();
     return *this;
 }
 
@@ -579,6 +632,7 @@ Config& Config::setAssFontFileForced(bool value)
         return *this;
     mpData->ass_force_font_file = value;
     Q_EMIT assFontFileForcedChanged();
+    Q_EMIT changed();
     return *this;
 }
 
@@ -592,7 +646,7 @@ Config& Config::setPreviewEnabled(bool value)
     if (mpData->preview_enabled == value)
         return *this;
     mpData->preview_enabled = value;
-    emit previewEnabledChanged();
+    Q_EMIT previewEnabledChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -607,7 +661,7 @@ Config& Config::setPreviewWidth(int value)
     if (mpData->preview_w == value)
         return *this;
     mpData->preview_w = value;
-    emit previewWidthChanged();
+    Q_EMIT previewWidthChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -622,7 +676,7 @@ Config& Config::setPreviewHeight(int value)
     if (mpData->preview_h == value)
         return *this;
     mpData->preview_h = value;
-    emit previewHeightChanged();
+    Q_EMIT previewHeightChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -662,7 +716,7 @@ Config& Config::setAvformatOptionsEnabled(bool value)
     if (mpData->avformat_on == value)
         return *this;
     mpData->avformat_on = value;
-    emit avformatOptionsEnabledChanged();
+    Q_EMIT avformatOptionsEnabledChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -721,7 +775,7 @@ Config& Config::avfilterVideoOptions(const QString& options)
     if (mpData->avfilterVideo == options)
         return *this;
     mpData->avfilterVideo = options;
-    emit avfilterVideoChanged();
+    Q_EMIT avfilterVideoChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -736,7 +790,7 @@ Config& Config::avfilterVideoEnable(bool e)
     if (mpData->avfilterVideo_on == e)
         return *this;
     mpData->avfilterVideo_on = e;
-    emit avfilterVideoChanged();
+    Q_EMIT avfilterVideoChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -751,7 +805,7 @@ Config& Config::avfilterAudioOptions(const QString& options)
     if (mpData->avfilterAudio == options)
         return *this;
     mpData->avfilterAudio = options;
-    emit avfilterAudioChanged();
+    Q_EMIT avfilterAudioChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -766,7 +820,7 @@ Config& Config::avfilterAudioEnable(bool e)
     if (mpData->avfilterAudio_on == e)
         return *this;
     mpData->avfilterAudio_on = e;
-    emit avfilterAudioChanged();
+    Q_EMIT avfilterAudioChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -796,7 +850,7 @@ Config& Config::setOpenGLType(OpenGLType value)
     if (mpData->opengl == value)
         return *this;
     mpData->opengl = value;
-    emit openGLTypeChanged();
+    Q_EMIT openGLTypeChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -811,7 +865,7 @@ Config& Config::setANGLEPlatform(const QString& value)
     if (mpData->angle_dx == value)
         return *this;
     mpData->angle_dx = value;
-    emit ANGLEPlatformChanged();
+    Q_EMIT ANGLEPlatformChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -826,7 +880,7 @@ Config& Config::setBufferValue(int value)
     if (mpData->buffer_value == value)
         return *this;
     mpData->buffer_value = value;
-    emit bufferValueChanged();
+    Q_EMIT bufferValueChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -841,7 +895,7 @@ Config& Config::setTimeout(qreal value)
     if (mpData->timeout == value)
         return *this;
     mpData->timeout = value;
-    emit timeoutChanged();
+    Q_EMIT timeoutChanged();
     Q_EMIT changed();
     return *this;
 }
@@ -861,6 +915,80 @@ Config& Config::setLogLevel(const QString& value)
     return *this;
 }
 
+QString Config::language() const
+{
+    return mpData->lang;
+}
+
+Config& Config::setLanguage(const QString& value)
+{
+    if (mpData->lang == value)
+        return *this;
+    mpData->lang = value;
+    Q_EMIT languageChanged();
+    Q_EMIT changed();
+    return *this;
+}
+
+QVariantList Config::history() const
+{
+    return mpData->history;
+}
+
+void Config::addHistory(const QVariantMap &value)
+{
+    mpData->history.prepend(value);
+    Q_EMIT historyChanged();
+    QSqlDatabase db = QSqlDatabase::database();
+    QSqlQuery query(db);
+    if (!query.prepare(QString::fromUtf8("INSERT INTO history (url, start, duration) "
+                              "VALUES (:url, :start, :duration)"))) {
+            qWarning("error prepare sql query");
+    }
+    query.bindValue(QString::fromUtf8(":url"), value.value("url").toString());
+    query.bindValue(QString::fromUtf8(":start"), value.value("start").toLongLong());
+    query.bindValue(QString::fromUtf8(":duration"), value.value("duration").toLongLong());
+    if (!query.exec())
+        qWarning("failed to add history: %d", db.isOpen());
+}
+
+void Config::removeHistory(const QString &url)
+{
+    QVariantList::Iterator it = mpData->history.begin();
+    bool change = false;
+    while (it != mpData->history.end()) {
+        if (it->toMap().value("url") != url) {
+            ++it;
+            continue;
+        }
+        it = mpData->history.erase(it);
+        change = true;
+    }
+    if (!change)
+        return;
+    Q_EMIT historyChanged();
+    QSqlDatabase db = QSqlDatabase::database();
+    QSqlQuery query(db);
+    query.prepare(QString::fromUtf8("DELETE FROM history WHERE url = :url"));
+    query.bindValue(QString::fromUtf8(":url"), url);
+    if (!query.exec())
+        qWarning("failed to remove history");
+}
+
+void Config::clearHistory()
+{
+    if (mpData->history.isEmpty())
+        return;
+    mpData->history.clear();
+    Q_EMIT historyChanged();
+    QSqlDatabase db = QSqlDatabase::database();
+    QSqlQuery query(db);
+    query.prepare(QString::fromUtf8("DELETE FROM history"));
+    // 'TRUNCATE table history' is faster
+    if (!query.exec())
+        qWarning("failed to clear history");
+}
+
 bool Config::abortOnTimeout() const
 {
     return mpData->abort_timeout;
@@ -871,7 +999,7 @@ Config& Config::setAbortOnTimeout(bool value)
     if (mpData->abort_timeout == value)
         return *this;
     mpData->abort_timeout = value;
-    emit abortOnTimeoutChanged();
+    Q_EMIT abortOnTimeoutChanged();
     Q_EMIT changed();
     return *this;
 }

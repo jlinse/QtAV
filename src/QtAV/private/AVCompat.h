@@ -1,7 +1,7 @@
 /******************************************************************************
-	QtAV:  Media play library based on Qt and FFmpeg
+    QtAV:  Multimedia framework based on Qt and FFmpeg
 	solve the version problem and diffirent api in FFmpeg and libav
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -38,7 +38,7 @@
 #define AV_ENSURE(FUNC, ...) AV_RUN_CHECK(FUNC, return, __VA_ARGS__)
 #define AV_WARN(FUNC) AV_RUN_CHECK(FUNC, void)
 
-#include "QtAV_Global.h"
+#include "QtAV/QtAV_Global.h"
 #ifdef __cplusplus
 extern "C"
 {
@@ -320,9 +320,12 @@ typedef enum AVPixelFormat AVPixelFormat;
 // used by av_pix_fmt_count_planes
 #if !AV_MODULE_CHECK(LIBAVUTIL, 52, 3, 0, 13, 100)
 const AVPixFmtDescriptor *av_pix_fmt_desc_get(AVPixelFormat pix_fmt);
+const AVPixFmtDescriptor *av_pix_fmt_desc_next(const AVPixFmtDescriptor *prev);
+AVPixelFormat av_pix_fmt_desc_get_id(const AVPixFmtDescriptor *desc);
 #endif // !AV_MODULE_CHECK(LIBAVUTIL, 52, 3, 0, 13, 100)
-#if !FFMPEG_MODULE_CHECK(LIBAVUTIL, 52, 48, 101) // since ffmpeg2.1
+#if !FFMPEG_MODULE_CHECK(LIBAVUTIL, 52, 48, 101) // since ffmpeg2.1, libavutil53.16.0 (FF_API_AVFRAME_COLORSPACE), git 8c02adc
 enum AVColorSpace av_frame_get_colorspace(const AVFrame *frame);
+enum AVColorRange av_frame_get_color_range(const AVFrame *frame);
 #endif
 /*
  * lavu 52.9.0 git 2c328a907978b61949fd20f7c991803174337855
@@ -392,12 +395,14 @@ void av_packet_free_side_data(AVPacket *pkt);
 void avcodec_free_context(AVCodecContext **avctx);
 #endif
 
+#if QTAV_HAVE(AVFILTER)
 // ffmpeg2.0 2013-07-03 - 838bd73 - lavfi 3.78.100 - avfilter.h
 #if QTAV_USE_LIBAV(LIBAVFILTER)
 #define avfilter_graph_parse_ptr(pGraph, pFilters, ppInputs, ppOutputs, pLog) avfilter_graph_parse(pGraph, pFilters, *ppInputs, *ppOutputs, pLog)
 #elif !FFMPEG_MODULE_CHECK(LIBAVFILTER, 3, 78, 100)
 #define avfilter_graph_parse_ptr(pGraph, pFilters, ppInputs, ppOutputs, pLog) avfilter_graph_parse(pGraph, pFilters, ppInputs, ppOutputs, pLog)
-#endif
+#endif //QTAV_USE_LIBAV(LIBAVFILTER)
+
 //ffmpeg1.0 2012-06-12 - c7b9eab / 84b9fbe - lavfi 2.79.100 / 2.22.0 - avfilter.h
 #if !AV_MODULE_CHECK(LIBAVFILTER, 2, 22, 0, 79, 100) //FF_API_AVFILTERPAD_PUBLIC
 const char *avfilter_pad_get_name(const AVFilterPad *pads, int pad_idx);
@@ -414,8 +419,28 @@ int avfilter_copy_buf_props(AVFrame *dst, const AVFilterBufferRef *src);
 }
 #endif /* __cplusplus */
 #endif
+#endif //QTAV_HAVE(AVFILTER)
+
 /* helper functions */
 const char *get_codec_long_name(AVCodecID id);
+
+// AV_CODEC_ID_H265 is a macro defined as AV_CODEC_ID_HEVC in ffmpeg but not in libav. so we can use FF_PROFILE_HEVC_MAIN to avoid libavcodec version check. (from ffmpeg 2.1)
+#ifndef FF_PROFILE_HEVC_MAIN //libav does not define it
+#define AV_CODEC_ID_HEVC ((AVCodecID)0) //QTAV_CODEC_ID(NONE)
+#define CODEC_ID_HEVC ((AVCodecID)0) //QTAV_CODEC_ID(NONE)
+#define FF_PROFILE_HEVC_MAIN -1
+#define FF_PROFILE_HEVC_MAIN_10 -1
+#endif
+#if !FFMPEG_MODULE_CHECK(LIBAVCODEC, 54, 92, 100) && !LIBAV_MODULE_CHECK(LIBAVCODEC, 55, 34, 1) //ffmpeg1.2 libav10
+#define AV_CODEC_ID_VP9 ((AVCodecID)0) //QTAV_CODEC_ID(NONE)
+#define CODEC_ID_VP9 ((AVCodecID)0) //QTAV_CODEC_ID(NONE)
+#endif
+#ifndef FF_PROFILE_VP9_0
+#define FF_PROFILE_VP9_0 0
+#define FF_PROFILE_VP9_1 1
+#define FF_PROFILE_VP9_2 2
+#define FF_PROFILE_VP9_3 3
+#endif
 
 #define AV_RUN_CHECK(FUNC, RETURN, ...) do { \
     int ret = FUNC; \

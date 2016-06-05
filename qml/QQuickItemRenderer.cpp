@@ -1,9 +1,9 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2016 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
     theoribeiro <theo@fictix.com.br>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2013)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -75,6 +75,7 @@ public:
     QSGNode *node;
     QObject *source;
     QImage image;
+    QList<QuickVideoFilter*> filters;
 };
 
 QQuickItemRenderer::QQuickItemRenderer(QQuickItem *parent)
@@ -187,6 +188,98 @@ QRectF QQuickItemRenderer::sourceRect() const
     return QRectF(QPointF(), videoFrameSize());
 }
 
+QPointF QQuickItemRenderer::mapPointToItem(const QPointF &point) const
+{
+    if (videoFrameSize().isEmpty())
+        return QPointF();
+
+    // Just normalize and use that function
+    // m_nativeSize is transposed in some orientations
+    if (orientation()%180 == 0)
+        return mapNormalizedPointToItem(QPointF(point.x() / videoFrameSize().width(), point.y() / videoFrameSize().height()));
+    else
+        return mapNormalizedPointToItem(QPointF(point.x() / videoFrameSize().height(), point.y() / videoFrameSize().width()));
+}
+
+QRectF QQuickItemRenderer::mapRectToItem(const QRectF &rectangle) const
+{
+    return QRectF(mapPointToItem(rectangle.topLeft()),
+                  mapPointToItem(rectangle.bottomRight())).normalized();
+}
+
+QPointF QQuickItemRenderer::mapNormalizedPointToItem(const QPointF &point) const
+{
+    qreal dx = point.x();
+    qreal dy = point.y();
+    if (orientation()%180 == 0) {
+        dx *= contentRect().width();
+        dy *= contentRect().height();
+    } else {
+        dx *= contentRect().height();
+        dy *= contentRect().width();
+    }
+
+    switch (orientation()) {
+        case 0:
+        default:
+            return contentRect().topLeft() + QPointF(dx, dy);
+        case 90:
+            return contentRect().bottomLeft() + QPointF(dy, -dx);
+        case 180:
+            return contentRect().bottomRight() + QPointF(-dx, -dy);
+        case 270:
+            return contentRect().topRight() + QPointF(-dy, dx);
+    }
+}
+
+QRectF QQuickItemRenderer::mapNormalizedRectToItem(const QRectF &rectangle) const
+{
+    return QRectF(mapNormalizedPointToItem(rectangle.topLeft()),
+                  mapNormalizedPointToItem(rectangle.bottomRight())).normalized();
+}
+
+QPointF QQuickItemRenderer::mapPointToSource(const QPointF &point) const
+{
+    QPointF norm = mapPointToSourceNormalized(point);
+    if (orientation()%180 == 0)
+        return QPointF(norm.x() * videoFrameSize().width(), norm.y() * videoFrameSize().height());
+    else
+        return QPointF(norm.x() * videoFrameSize().height(), norm.y() * videoFrameSize().width());
+}
+
+QRectF QQuickItemRenderer::mapRectToSource(const QRectF &rectangle) const
+{
+    return QRectF(mapPointToSource(rectangle.topLeft()),
+                  mapPointToSource(rectangle.bottomRight())).normalized();
+}
+
+QPointF QQuickItemRenderer::mapPointToSourceNormalized(const QPointF &point) const
+{
+    if (contentRect().isEmpty())
+        return QPointF();
+
+    // Normalize the item source point
+    qreal nx = (point.x() - contentRect().x()) / contentRect().width();
+    qreal ny = (point.y() - contentRect().y()) / contentRect().height();
+    switch (orientation()) {
+        case 0:
+        default:
+            return QPointF(nx, ny);
+        case 90:
+            return QPointF(1.0 - ny, nx);
+        case 180:
+            return QPointF(1.0 - nx, 1.0 - ny);
+        case 270:
+            return QPointF(ny, 1.0 - nx);
+    }
+}
+
+QRectF QQuickItemRenderer::mapRectToSourceNormalized(const QRectF &rectangle) const
+{
+    return QRectF(mapPointToSourceNormalized(rectangle.topLeft()),
+                  mapPointToSourceNormalized(rectangle.bottomRight())).normalized();
+}
+
 bool QQuickItemRenderer::isOpenGL() const
 {
     return d_func().opengl;
@@ -199,6 +292,39 @@ void QQuickItemRenderer::setOpenGL(bool o)
         return;
     d.opengl = o;
     emit openGLChanged();
+}
+
+QQmlListProperty<QuickVideoFilter> QQuickItemRenderer::filters()
+{
+    return QQmlListProperty<QuickVideoFilter>(this, NULL, vf_append, vf_count, vf_at, vf_clear);
+}
+
+void QQuickItemRenderer::vf_append(QQmlListProperty<QuickVideoFilter> *property, QuickVideoFilter *value)
+{
+    QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
+    self->d_func().filters.append(value);
+    self->installFilter(value);
+}
+
+int QQuickItemRenderer::vf_count(QQmlListProperty<QuickVideoFilter> *property)
+{
+    QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
+    return self->d_func().filters.size();
+}
+
+QuickVideoFilter* QQuickItemRenderer::vf_at(QQmlListProperty<QuickVideoFilter> *property, int index)
+{
+    QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
+    return self->d_func().filters.at(index);
+}
+
+void QQuickItemRenderer::vf_clear(QQmlListProperty<QuickVideoFilter> *property)
+{
+    QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
+    foreach (QuickVideoFilter *f, self->d_func().filters) {
+        self->uninstallFilter(f);
+    }
+    self->d_func().filters.clear();
 }
 
 void QQuickItemRenderer::drawFrame()

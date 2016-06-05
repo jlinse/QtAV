@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -25,7 +25,7 @@
 #include "QtAV/SurfaceInterop.h"
 #include "QtAV/private/AVCompat.h"
 #include "QtAV/private/factory.h"
-#include "utils/OpenGLHelper.h"
+#include "opengl/OpenGLHelper.h"
 #include <assert.h>
 #ifdef __cplusplus
 extern "C" {
@@ -47,7 +47,9 @@ extern "C" {
 #endif
 
 namespace QtAV {
-
+namespace cv {
+VideoFormat::PixelFormat format_from_cv(int cv);
+}
 class VideoDecoderVDAPrivate;
 // qt4 moc can not correctly process Q_DECL_FINAL here
 class VideoDecoderVDA : public VideoDecoderFFmpegHW
@@ -59,8 +61,7 @@ class VideoDecoderVDA : public VideoDecoderFFmpegHW
     Q_ENUMS(PixelFormat)
 public:
     enum PixelFormat {
-        NV12 = '420v',
-        //NV12Full = '420f',
+        NV12 = '420f',
         UYVY = '2vuy',
         YUV420P = 'y420',
         YUYV = 'yuvs'
@@ -95,7 +96,7 @@ public:
     bool open() Q_DECL_OVERRIDE;
     void close() Q_DECL_OVERRIDE;
 
-    bool setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
+    void* setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
     bool getBuffer(void **opaque, uint8_t **data) Q_DECL_OVERRIDE;
     void releaseBuffer(void *opaque, uint8_t *data) Q_DECL_OVERRIDE;
     AVPixelFormat vaPixelFormat() const Q_DECL_OVERRIDE { return QTAV_PIX_FMT_C(VDA_VLD);}
@@ -134,44 +135,6 @@ static const char* vda_err_str(int err)
     return 0;
 }
 
-typedef struct {
-    int cv_pixfmt;
-    VideoFormat::PixelFormat pixfmt;
-} cv_format;
-
-//https://developer.apple.com/library/Mac/releasenotes/General/MacOSXLionAPIDiffs/CoreVideo.html
-/* use fourcc '420v', 'yuvs' for NV12 and yuyv to avoid build time version check
- * qt4 targets 10.6, so those enum values is not valid in build time, while runtime is supported.
- */
-static const cv_format cv_formats[] = {
-    { 'y420', VideoFormat::Format_YUV420P }, //kCVPixelFormatType_420YpCbCr8Planar
-    { '2vuy', VideoFormat::Format_UYVY }, //kCVPixelFormatType_422YpCbCr8
-//#ifdef OSX_TARGET_MIN_LION
-    { '420f' , VideoFormat::Format_NV12 }, // kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-    { '420v', VideoFormat::Format_NV12 }, //kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-    { 'yuvs', VideoFormat::Format_YUYV }, //kCVPixelFormatType_422YpCbCr8_yuvs
-//#endif
-    { 0, VideoFormat::Format_Invalid }
-};
-
-static VideoFormat::PixelFormat format_from_cv(int cv)
-{
-    for (int i = 0; cv_formats[i].cv_pixfmt; ++i) {
-        if (cv_formats[i].cv_pixfmt == cv)
-            return cv_formats[i].pixfmt;
-    }
-    return VideoFormat::Format_Invalid;
-}
-
-int format_to_cv(VideoFormat::PixelFormat fmt)
-{
-    for (int i = 0; cv_formats[i].cv_pixfmt; ++i) {
-        if (cv_formats[i].pixfmt == fmt)
-            return cv_formats[i].cv_pixfmt;
-    }
-    return 0;
-}
-
 VideoDecoderVDA::VideoDecoderVDA()
     : VideoDecoderFFmpegHW(*new VideoDecoderVDAPrivate())
 {
@@ -201,7 +164,7 @@ VideoFrame VideoDecoderVDA::frame()
         qDebug("Empty frame buffer");
         return VideoFrame();
     }
-    VideoFormat::PixelFormat pixfmt = format_from_cv(CVPixelBufferGetPixelFormatType(cv_buffer));
+    VideoFormat::PixelFormat pixfmt = cv::format_from_cv(CVPixelBufferGetPixelFormatType(cv_buffer));
     if (pixfmt == VideoFormat::Format_Invalid) {
         qWarning("unsupported vda pixel format: %#x", CVPixelBufferGetPixelFormatType(cv_buffer));
         return VideoFrame();
@@ -219,10 +182,10 @@ VideoFrame VideoDecoderVDA::frame()
         }
         void* mapToHost(const VideoFormat &format, void *handle, int plane) {
             Q_UNUSED(plane);
-            CVPixelBufferLockBaseAddress(cvbuf, 0);
-            const VideoFormat fmt(format_from_cv(CVPixelBufferGetPixelFormatType(cvbuf)));
+            CVPixelBufferLockBaseAddress(cvbuf, kCVPixelBufferLock_ReadOnly);
+            const VideoFormat fmt(cv::format_from_cv(CVPixelBufferGetPixelFormatType(cvbuf)));
             if (!fmt.isValid()) {
-                CVPixelBufferUnlockBaseAddress(cvbuf, 0);
+                CVPixelBufferUnlockBaseAddress(cvbuf, kCVPixelBufferLock_ReadOnly);
                 return NULL;
             }
             const int w = CVPixelBufferGetWidth(cvbuf);
@@ -234,7 +197,7 @@ VideoFrame VideoDecoderVDA::frame()
                 src[i] = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(cvbuf, i);
                 pitch[i] = CVPixelBufferGetBytesPerRowOfPlane(cvbuf, i);
             }
-            CVPixelBufferUnlockBaseAddress(cvbuf, 0);
+            CVPixelBufferUnlockBaseAddress(cvbuf, kCVPixelBufferLock_ReadOnly);
             //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
             VideoFrame frame(VideoFrame::fromGPU(fmt, w, h, h, src, pitch));
             if (fmt != format)
@@ -251,6 +214,11 @@ VideoFrame VideoDecoderVDA::frame()
                 return 0;
             if (type == HostMemorySurface) {
                 return mapToHost(fmt, handle, plane);
+            }
+            if (type == SourceSurface) {
+                CVPixelBufferRef *b = reinterpret_cast<CVPixelBufferRef*>(handle);
+                *b = cvbuf;
+                return handle;
             }
             if (type != GLTextureSurface)
                 return 0;
@@ -311,7 +279,7 @@ VideoFrame VideoDecoderVDA::frame()
         // make sure VideoMaterial can correctly setup parameters
         switch (format()) {
         case UYVY:
-            pitch[0] = 2*d.width; //
+            pitch[0] = 2*d.width;
             pixfmt = VideoFormat::Format_VYUY; //FIXME: VideoShader assume uyvy is uploaded as rgba, but apple limits the result to bgra
             break;
         case NV12:
@@ -338,7 +306,7 @@ VideoFrame VideoDecoderVDA::frame()
             src[i] = (uint8_t*)CVPixelBufferGetBaseAddressOfPlane(cv_buffer, i);
             pitch[i] = CVPixelBufferGetBytesPerRowOfPlane(cv_buffer, i);
         }
-        CVPixelBufferUnlockBaseAddress(cv_buffer, 0);
+        CVPixelBufferUnlockBaseAddress(cv_buffer, kCVPixelBufferLock_ReadOnly);
         //CVPixelBufferRelease(cv_buffer); // release when video frame is destroyed
     }
     VideoFrame f;
@@ -352,6 +320,7 @@ VideoFrame VideoDecoderVDA::frame()
         } else {
             f.setBits(src); // only set for copy back mode
         }
+        d.updateColorDetails(&f);
     } else {
         f = copyToFrame(fmt, d.height, src, pitch, false);
     }
@@ -377,14 +346,10 @@ VideoDecoderVDA::PixelFormat VideoDecoderVDA::format() const
     return d_func().out_fmt;
 }
 
-bool VideoDecoderVDAPrivate::setup(AVCodecContext *avctx)
+void* VideoDecoderVDAPrivate::setup(AVCodecContext *avctx)
 {
     const int w = codedWidth(avctx);
     const int h = codedHeight(avctx);
-    if (hw_ctx.width == w && hw_ctx.height == h && hw_ctx.decoder) {
-        avctx->hwaccel_context = &hw_ctx;
-        return true;
-    }
     if (hw_ctx.decoder) {
         ff_vda_destroy_decoder(&hw_ctx);
         releaseUSWC();
@@ -398,17 +363,15 @@ bool VideoDecoderVDAPrivate::setup(AVCodecContext *avctx)
     hw_ctx.height = h;
     width = avctx->width; // not necessary. set in decode()
     height = avctx->height;
-    avctx->hwaccel_context = NULL;
     /* create the decoder */
     int status = ff_vda_create_decoder(&hw_ctx, codec_ctx->extradata, codec_ctx->extradata_size);
     if (status) {
         qWarning("Failed to create decoder (%i): %s", status, vda_err_str(status));
-        return false;
+        return NULL;
     }
-    avctx->hwaccel_context = &hw_ctx;
     initUSWC(hw_ctx.width);
-    qDebug() << "VDA decoder created. format: " << format_from_cv(out_fmt);
-    return true;
+    qDebug() << "VDA decoder created. format: " << cv::format_from_cv(out_fmt);
+    return &hw_ctx;
 }
 
 bool VideoDecoderVDAPrivate::getBuffer(void **opaque, uint8_t **data)

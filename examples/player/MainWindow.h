@@ -24,8 +24,10 @@
 #include <QWidget>
 #include <QUrl>
 
+QT_BEGIN_NAMESPACE
 class QWidgetAction;
 class QToolButton;
+QT_END_NAMESPACE
 namespace QtAV {
 class AudioOutput;
 class AVError;
@@ -37,6 +39,7 @@ class LibAVFilterVideo;
 class SubtitleFilter;
 class VideoPreviewWidget;
 }
+QT_BEGIN_NAMESPACE
 class QMenu;
 class QTimeEdit;
 class QVBoxLayout;
@@ -44,6 +47,7 @@ class QLabel;
 class QPushButton;
 class QSpinBox;
 class QTimeEdit;
+QT_END_NAMESPACE
 class Button;
 class Slider;
 class PlayList;
@@ -98,6 +102,7 @@ private slots:
     void onPaused(bool p);
     void onSpeedChange(qreal speed);
     void seek();
+    void seek(int);
     void showHideVolumeBar();
     void setVolume();
     void tryHideControlBar();
@@ -119,7 +124,7 @@ private slots:
     void onHueChanged(int h);
     void onSaturationChanged(int s);
 
-    void onSeekFinished();
+    void onSeekFinished(qint64 pos);
     void onCaptureConfigChanged();
     void onAVFilterVideoConfigChanged();
     void onAVFilterAudioConfigChanged();

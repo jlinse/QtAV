@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2013)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -23,6 +23,7 @@
 #include <QtQml/qqml.h>
 #include "QmlAV/QQuickItemRenderer.h"
 #include "QmlAV/QmlAVPlayer.h"
+#include "QmlAV/QuickFilter.h"
 #include "QmlAV/QuickSubtitle.h"
 #include "QmlAV/QuickSubtitleItem.h"
 #include "QmlAV/MediaMetaData.h"
@@ -52,6 +53,12 @@ public:
 #endif
         qmlRegisterUncreatableType<VideoCapture>(uri, 1, 6, "VideoCapture", trUtf8("VideoCapture is provided by MediaPlayer"));
         qmlRegisterType<MediaMetaData>();
+
+        // FIXME: if version is 2.x, some qtav types will be undefined, why?
+        // 1.7
+        qmlRegisterType<QuickAudioFilter>(uri, 1, 7, "AudioFilter");
+        qmlRegisterType<QuickVideoFilter>(uri, 1, 7, "VideoFilter");
+        qmlRegisterType<QtAV::DynamicShaderObject>(uri, 1, 7, "Shader");
     }
 };
 } //namespace QtAV

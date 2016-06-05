@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -22,18 +22,40 @@
 #include "QtAV/VideoDecoder.h"
 #include "QtAV/private/AVDecoder_p.h"
 #include "QtAV/private/factory.h"
+#include "QtAV/private/mkid.h"
 #include "utils/Logger.h"
 
 namespace QtAV {
 FACTORY_DEFINE(VideoDecoder)
 
-void VideoDecoder_RegisterAll()
+VideoDecoderId VideoDecoderId_FFmpeg = mkid::id32base36_6<'F', 'F', 'm', 'p', 'e', 'g'>::value;
+VideoDecoderId VideoDecoderId_CUDA = mkid::id32base36_4<'C', 'U', 'D', 'A'>::value;
+VideoDecoderId VideoDecoderId_DXVA = mkid::id32base36_4<'D', 'X', 'V', 'A'>::value;
+VideoDecoderId VideoDecoderId_D3D11 = mkid::id32base36_5<'D','3','D','1','1'>::value;
+VideoDecoderId VideoDecoderId_VAAPI = mkid::id32base36_5<'V', 'A', 'A', 'P', 'I'>::value;
+VideoDecoderId VideoDecoderId_Cedarv = mkid::id32base36_6<'C', 'e', 'd', 'a', 'r', 'V'>::value;
+VideoDecoderId VideoDecoderId_VDA = mkid::id32base36_3<'V', 'D', 'A'>::value;
+VideoDecoderId VideoDecoderId_VideoToolbox = mkid::id32base36_5<'V', 'T', 'B', 'o', 'x'>::value;
+VideoDecoderId VideoDecoderId_MediaCodec = mkid::id32base36_4<'F','F','M','C'>::value;
+
+static void VideoDecoder_RegisterAll()
 {
+    static bool called = false;
+    if (called)
+        return;
+    called = true;
+    // factory.h does not check whether an id is registered
+    if (VideoDecoder::name(VideoDecoderId_FFmpeg)) //registered on load
+        return;
     extern bool RegisterVideoDecoderFFmpeg_Man();
     RegisterVideoDecoderFFmpeg_Man();
 #if QTAV_HAVE(DXVA)
     extern bool RegisterVideoDecoderDXVA_Man();
     RegisterVideoDecoderDXVA_Man();
+#endif //QTAV_HAVE(DXVA)
+#if QTAV_HAVE(D3D11VA)
+    extern bool RegisterVideoDecoderD3D11_Man();
+    RegisterVideoDecoderD3D11_Man();
 #endif //QTAV_HAVE(DXVA)
 #if QTAV_HAVE(CUDA)
     extern bool RegisterVideoDecoderCUDA_Man();
@@ -58,6 +80,7 @@ void VideoDecoder_RegisterAll()
 }
 QVector<VideoDecoderId> VideoDecoder::registered()
 {
+    VideoDecoder_RegisterAll();
     return QVector<VideoDecoderId>::fromStdVector(VideoDecoderFactory::Instance().registeredIds());
 }
 

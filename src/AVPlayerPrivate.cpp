@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -103,6 +103,7 @@ AVPlayer::Private::Private()
     , notify_interval(-500)
     , status(NoMedia)
     , state(AVPlayer::StoppedState)
+    , end_action(MediaEndAction_Default)
 {
     demuxer.setInterruptTimeout(interrupt_timeout);
     /*
@@ -326,11 +327,15 @@ bool AVPlayer::Private::setupAudioThread(AVPlayer *player)
     AudioFormat af;
     af.setSampleRate(avctx->sample_rate);
     af.setSampleFormatFFmpeg(avctx->sample_fmt);
+    af.setChannelLayoutFFmpeg(avctx->channel_layout);
+    qDebug() << "audio format from codec: " << af;
+    if (!af.isValid()) {
+        qWarning("invalid audio format. audio stream will be disabled");
+        return false;
+    }
     // 5, 6, 7 channels may not play
     if (avctx->channels > 2)
         af.setChannelLayout(ao->preferredChannelLayout());
-    else
-        af.setChannelLayoutFFmpeg(avctx->channel_layout);
     //af.setChannels(avctx->channels);
     // FIXME: workaround. planar convertion crash now!
     if (af.isPlanar()) {
@@ -480,7 +485,8 @@ bool AVPlayer::Private::tryApplyDecoderPriority(AVPlayer *player)
         Q_EMIT player->error(AVError(AVError::VideoCodecNotFound));
         return false;
     }
-    if (vd->id() == vdec->id()) {
+    if (vd->id() == vdec->id()
+            && vd->options() == vdec->options()) {
         qDebug("Video decoder does not change");
         delete vd;
         return true;
@@ -554,6 +560,7 @@ bool AVPlayer::Private::setupVideoThread(AVPlayer *player)
                 vthread->installFilter(filter);
             }
         }
+        QObject::connect(vthread, SIGNAL(finished()), player, SLOT(tryClearVideoRenderers()), Qt::DirectConnection);
     }
     vthread->setDecoder(vdec);
 

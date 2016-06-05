@@ -33,8 +33,10 @@
  * Region of Interest(ROI)
  * use matrix to compute out rect, mapped point etc
  */
+QT_BEGIN_NAMESPACE
 class QObject;
 class QWidget;
+QT_END_NAMESPACE
 namespace QtAV {
 class Filter;
 class Q_AV_PRIVATE_EXPORT VideoRendererPrivate : public AVOutputPrivate
@@ -82,12 +84,12 @@ public:
         if (rendererAspectRatio >= dar) { //equals to original video aspect ratio here, also equals to out ratio
             //renderer is too wide, use renderer's height, horizonal align center
             const int h = renderer_height;
-            const int w = dar * qreal(h);
+            const int w = qRound(dar * qreal(h));
             out_rect = QRect((renderer_width - w)/2, 0, w, h);
         } else if (rendererAspectRatio < dar) {
             //renderer is too high, use renderer's width
             const int w = renderer_width;
-            const int h = qreal(w)/dar;
+            const int h = qRound(qreal(w)/dar);
             out_rect = QRect(0, (renderer_height - h)/2, w, h);
         }
         out_aspect_ratio = outAspectRatio;

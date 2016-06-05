@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -67,7 +67,7 @@ public:
 
     bool isPaused() const;
 
-    void waitForReady();
+    bool waitForStarted(int msec = -1);
 
     bool installFilter(Filter *filter, int index = 0x7FFFFFFF, bool lock = true);
     bool uninstallFilter(Filter *filter, bool lock = true);
@@ -75,6 +75,7 @@ public:
 
     // TODO: resample, resize task etc.
     void scheduleTask(QRunnable *task);
+    void requestSeek();
     void scheduleFrameDrop(bool value = true);
     qreal previousHistoryPts() const; //move to statistics?
     qreal decodeFrameRate() const; //move to statistics?
@@ -93,6 +94,10 @@ Q_SIGNALS:
      * \param timestamp the frame pts after seek
      */
     void seekFinished(qint64 timestamp);
+    void eofDecoded();
+private Q_SLOTS:
+    void onStarted();
+    void onFinished();
 protected:
     AVThread(AVThreadPrivate& d, QObject *parent = 0);
     void resetState();
@@ -107,7 +112,6 @@ protected:
     void waitAndCheck(ulong value, qreal pts);
 
     DPTR_DECLARE(AVThread)
-
 private:
     void setStatistics(Statistics* statistics);
     friend class AVPlayer;

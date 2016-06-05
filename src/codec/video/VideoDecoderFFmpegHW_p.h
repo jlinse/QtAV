@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2013)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -44,6 +44,9 @@ public:
         , get_buffer2(NULL)
         , threads(0)
         , copy_mode(VideoDecoderFFmpegHW::OptimizedCopy)
+        , hw_w(0)
+        , hw_h(0)
+        , hw_profile(0)
     {}
     virtual ~VideoDecoderFFmpegHWPrivate() {} //ctx is 0 now
     bool enableFrameRef() const Q_DECL_OVERRIDE { return false;} //because of ffmpeg_get_va_buffer2?
@@ -60,8 +63,8 @@ public:
         codec_ctx->reget_buffer = reget_buffer;
 #endif //QTAV_HAVE(AVBUFREF)
     }
-
-    virtual bool setup(AVCodecContext* avctx) = 0;
+    // return hwaccel_context or null
+    virtual void* setup(AVCodecContext* avctx) = 0;
 
     AVPixelFormat getFormat(struct AVCodecContext *p_context, const AVPixelFormat *pi_fmt);
     //TODO: remove opaque
@@ -83,11 +86,14 @@ public:
     int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
 
     QString description;
-    int threads;
+    int threads; // multithread decoding may crash for some decoders (dxva, videotoolbox)
     // false for not intel gpu. my test result is intel gpu is supper fast and lower cpu usage if use optimized uswc copy. but nv is worse.
     // TODO: flag enable, disable, auto
     VideoDecoderFFmpegHW::CopyMode copy_mode;
     GPUMemCopy gpu_mem;
+
+private:
+    int hw_w, hw_h, hw_profile;
 };
 
 } //namespace QtAV

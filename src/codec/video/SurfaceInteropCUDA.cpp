@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2015)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -30,12 +30,12 @@
 namespace QtAV {
 namespace cuda {
 
-InteropResource::InteropResource(CUdevice d, CUvideodecoder decoder, CUvideoctxlock declock)
+InteropResource::InteropResource()
     : cuda_api()
-    , dev(d)
-    , ctx(NULL)
-    , dec(decoder)
-    , lock(declock)
+    , dev(0)
+    , ctx(0)
+    , dec(0)
+    , lock(0)
 {
     memset(res, 0, sizeof(res));
 }
@@ -53,7 +53,8 @@ InteropResource::~InteropResource()
         CUDA_WARN(cuStreamDestroy(res[1].stream));
 
     // FIXME: we own the context. But why crash to destroy ctx? CUDA_ERROR_INVALID_VALUE
-    //CUDA_ENSURE(cuCtxDestroy(ctx));
+    if (!share_ctx && ctx)
+        CUDA_ENSURE(cuCtxDestroy(ctx));
 }
 
 void* InteropResource::mapToHost(const VideoFormat &format, void *handle, int picIndex, const CUVIDPROCPARAMS &param, int width, int height, int coded_height)
@@ -67,7 +68,7 @@ void* InteropResource::mapToHost(const VideoFormat &format, void *handle, int pi
     CUVIDAutoUnmapper unmapper(this, dec, devptr);
     Q_UNUSED(unmapper);
     uchar* host_data = NULL;
-    const size_t host_size = pitch*coded_height*3/2;
+    const unsigned int host_size = pitch*coded_height*3/2;
     CUDA_ENSURE(cuMemAllocHost((void**)&host_data, host_size), NULL);
     // copy to the memory not allocated by cuda is possible but much slower
     CUDA_ENSURE(cuMemcpyDtoH(host_data, devptr, host_size), NULL);
@@ -89,9 +90,95 @@ void* InteropResource::mapToHost(const VideoFormat &format, void *handle, int pi
     else
         *f = frame.to(format);
 
-    cuMemFreeHost(host_data);
+    CUDA_ENSURE(cuMemFreeHost(host_data), f);
     return f;
 }
+
+#ifndef QT_NO_OPENGL
+HostInteropResource::HostInteropResource()
+    : InteropResource()
+{
+    memset(&host_mem, 0, sizeof(host_mem));
+    host_mem.index = -1;
+}
+
+HostInteropResource::~HostInteropResource()
+{
+    if (ctx) { //cuMemFreeHost need the context of mem allocated, it's shared context, or own context
+        CUDA_WARN(cuCtxPushCurrent(ctx));
+    }
+    if (host_mem.data) { //FIXME: CUDA_ERROR_INVALID_VALUE
+        CUDA_ENSURE(cuMemFreeHost(host_mem.data));
+        host_mem.data = NULL;
+    }
+    if (ctx) {
+        CUDA_WARN(cuCtxPopCurrent(NULL));
+    }
+}
+
+bool HostInteropResource::map(int picIndex, const CUVIDPROCPARAMS &param, GLuint tex, int w, int h, int H, int plane)
+{
+    Q_UNUSED(w);
+    if (host_mem.index != picIndex || !host_mem.data) {
+        AutoCtxLock locker((cuda_api*)this, lock);
+        Q_UNUSED(locker);
+
+        CUdeviceptr devptr;
+        unsigned int pitch;
+        //qDebug("index: %d=>%d, plane: %d", host_mem.index, picIndex, plane);
+        CUDA_ENSURE(cuvidMapVideoFrame(dec, picIndex, &devptr, &pitch, const_cast<CUVIDPROCPARAMS*>(&param)), false);
+        CUVIDAutoUnmapper unmapper(this, dec, devptr);
+        Q_UNUSED(unmapper);
+        if (!ensureResource(pitch, H)) //copy height is coded height
+            return false;
+        // the same thread (context) as cuMemAllocHost, so no ccontext switch is needed
+        CUDA_ENSURE(cuMemcpyDtoH(host_mem.data, devptr, pitch*H*3/2), NULL);
+        host_mem.index = picIndex;
+    }
+    // map to texture
+    //qDebug("map plane %d @%d", plane, picIndex);
+    GLint iformat[2];
+    GLenum format[2], dtype[2];
+    OpenGLHelper::videoFormatToGL(VideoFormat::Format_NV12, iformat, format, dtype);
+    DYGL(glBindTexture(GL_TEXTURE_2D, tex));
+    const int chroma = plane != 0;
+    // chroma pitch for gl is 1/2 (gl_rg)
+    // texture height is not coded height!
+    DYGL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, host_mem.pitch>>chroma, h>>chroma, format[plane], dtype[plane], host_mem.data + chroma*host_mem.pitch*host_mem.height));
+    //DYGL(glTexImage2D(GL_TEXTURE_2D, 0, iformat[plane], host_mem.pitch>>chroma, h>>chroma, 0, format[plane], dtype[plane], host_mem.data + chroma*host_mem.pitch*host_mem.height));
+    return true;
+}
+
+bool HostInteropResource::unmap(GLuint)
+{
+    return true;
+}
+
+bool HostInteropResource::ensureResource(int pitch, int height)
+{
+    if (host_mem.data && host_mem.pitch == pitch && host_mem.height == height)
+        return true;
+    if (host_mem.data) {
+        CUDA_ENSURE(cuMemFreeHost(host_mem.data), false);
+        host_mem.data = NULL;
+    }
+    qDebug("allocate cuda host mem. %dx%d=>%dx%d", host_mem.pitch, host_mem.height, pitch, height);
+    host_mem.pitch = pitch;
+    host_mem.height = height;
+    if (!ctx) {
+        CUDA_ENSURE(cuCtxCreate(&ctx, CU_CTX_SCHED_BLOCKING_SYNC, dev), false);
+        CUDA_WARN(cuCtxPopCurrent(&ctx));
+        share_ctx = false;
+    }
+    if (!share_ctx) // cuMemFreeHost will be called in dtor which is not the current thread.
+        CUDA_WARN(cuCtxPushCurrent(ctx));
+    // NV12
+    CUDA_ENSURE(cuMemAllocHost((void**)&host_mem.data, pitch*height*3/2), NULL);
+    if (!share_ctx)
+        CUDA_WARN(cuCtxPopCurrent(NULL)); //can be null or &ctx
+    return true;
+}
+#endif //QT_NO_OPENGL
 
 void SurfaceInteropCUDA::setSurface(int picIndex, CUVIDPROCPARAMS param, int width, int height, int surface_height)
 {
@@ -137,10 +224,6 @@ void SurfaceInteropCUDA::unmap(void *handle)
 } //namespace QtAV
 
 #if QTAV_HAVE(CUDA_EGL)
-#if QTAV_HAVE(GUI_PRIVATE)
-#include <qpa/qplatformnativeinterface.h>
-#include <QtGui/QGuiApplication>
-#endif //QTAV_HAVE(GUI_PRIVATE)
 #ifdef QT_OPENGL_ES_2_ANGLE_STATIC
 #define CAPI_LINK_EGL
 #else
@@ -165,8 +248,8 @@ public:
 #endif //EGL_VERSION_1_5
 };
 
-EGLInteropResource::EGLInteropResource(CUdevice d, CUvideodecoder decoder, CUvideoctxlock declock)
-    : InteropResource(d, decoder, declock)
+EGLInteropResource::EGLInteropResource()
+    : InteropResource()
     , egl(new EGL())
     , dll9(NULL)
     , d3d9(NULL)
@@ -177,6 +260,8 @@ EGLInteropResource::EGLInteropResource(CUdevice d, CUvideodecoder decoder, CUvid
     , surface9_nv12(NULL)
     , query9(NULL)
 {
+    ctx = NULL; //need a context created with d3d (TODO: check it?)
+    share_ctx = false;
 }
 
 EGLInteropResource::~EGLInteropResource()
@@ -260,6 +345,10 @@ bool EGLInteropResource::ensureD3D9CUDA(int w, int h, int W, int H)
     TexRes &r = res[0];// 1 NV12 texture
     if (r.w == w && r.h == h && r.W == W && r.H == H && r.cuRes)
         return true;
+    if (share_ctx) {
+        share_ctx = false;
+        ctx = NULL;
+    }
     if (!ctx) {
         // TODO: how to use pop/push decoder's context without the context in opengl context
         if (!ensureD3DDevice())
@@ -293,7 +382,7 @@ bool EGLInteropResource::ensureD3D9CUDA(int w, int h, int W, int H)
                                          , &texture9_nv12
                                          , NULL) // - Resources allocated as shared may not be registered with CUDA.
                   , false);
-        DX_ENSURE(device9->CreateOffscreenPlainSurface(W, H, (D3DFORMAT)MAKEFOURCC('N','V','1','2'), D3DPOOL_DEFAULT, &surface9_nv12, NULL), false);
+        DX_ENSURE(device9->CreateOffscreenPlainSurface(W, H, (D3DFORMAT)MAKEFOURCC('N','V','1','2'), D3DPOOL_DEFAULT, &surface9_nv12, NULL), false); //TODO: createrendertarget
     }
 
     // TODO: cudaD3D9.h says NV12 is not supported
@@ -304,45 +393,26 @@ bool EGLInteropResource::ensureD3D9CUDA(int w, int h, int W, int H)
 }
 
 bool EGLInteropResource::ensureD3D9EGL(int w, int h) {
-    if (surface9 && res[0].w == w && res[0].h == h)
+    if (egl->surface && res[0].w == w && res[0].h == h)
         return true;
-#if QTAV_HAVE(GUI_PRIVATE)
-    QPlatformNativeInterface *nativeInterface = QGuiApplication::platformNativeInterface();
-    egl->dpy = static_cast<EGLDisplay>(nativeInterface->nativeResourceForContext("eglDisplay", QOpenGLContext::currentContext()));
-    EGLConfig egl_cfg = static_cast<EGLConfig>(nativeInterface->nativeResourceForContext("eglConfig", QOpenGLContext::currentContext()));
-#else
-#ifdef Q_OS_WIN
-#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
-#ifdef _MSC_VER
-#pragma message("ANGLE version in Qt<5.5 does not support eglQueryContext. You must upgrade your runtime ANGLE libraries")
-#else
-#warning "ANGLE version in Qt<5.5 does not support eglQueryContext. You must upgrade your runtime ANGLE libraries"
-#endif //_MSC_VER
-#endif
-#endif //Q_OS_WIN
-    // eglQueryContext() added (Feb 2015): https://github.com/google/angle/commit/8310797003c44005da4143774293ea69671b0e2a
+    releaseEGL();
     egl->dpy = eglGetCurrentDisplay();
     qDebug("EGL version: %s, client api: %s", eglQueryString(egl->dpy, EGL_VERSION), eglQueryString(egl->dpy, EGL_CLIENT_APIS));
-    // TODO: check runtime egl>=1.4 for eglGetCurrentContext()
-    EGLint cfg_id = 0;
-    EGL_ENSURE(eglQueryContext(egl->dpy, eglGetCurrentContext(), EGL_CONFIG_ID , &cfg_id) == EGL_TRUE, false);
-    qDebug("egl config id: %d", cfg_id);
-    EGLint nb_cfg = 0;
-    EGL_ENSURE(eglGetConfigs(egl->dpy, NULL, 0, &nb_cfg) == EGL_TRUE, false);
-    qDebug("eglGetConfigs number: %d", nb_cfg);
-    QVector<EGLConfig> cfgs(nb_cfg); //check > 0
-    EGL_ENSURE(eglGetConfigs(egl->dpy, cfgs.data(), cfgs.size(), &nb_cfg) == EGL_TRUE, false);
-    EGLConfig egl_cfg = NULL;
-    for (int i = 0; i < nb_cfg; ++i) {
-        EGLint id = 0;
-        eglGetConfigAttrib(egl->dpy, cfgs[i], EGL_CONFIG_ID, &id);
-        if (id == cfg_id) {
-            egl_cfg = cfgs[i];
-            break;
-        }
+    EGLint cfg_attribs[] = {
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_ALPHA_SIZE, 8, //
+        EGL_BIND_TO_TEXTURE_RGBA, EGL_TRUE, //remove?
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_NONE
+    };
+    EGLint nb_cfgs;
+    EGLConfig egl_cfg;
+    if (!eglChooseConfig(egl->dpy, cfg_attribs, &egl_cfg, 1, &nb_cfgs)) {
+        qWarning("Failed to create EGL configuration");
+        return false;
     }
-#endif
-    qDebug("egl display:%p config: %p", egl->dpy, egl_cfg);
     // check extensions
     QList<QByteArray> extensions = QByteArray(eglQueryString(egl->dpy, EGL_EXTENSIONS)).split(' ');
     // ANGLE_d3d_share_handle_client_buffer will be used if possible
@@ -354,6 +424,7 @@ bool EGLInteropResource::ensureD3D9EGL(int w, int h) {
     }
     GLint has_alpha = 1; //QOpenGLContext::currentContext()->format().hasAlpha()
     eglGetConfigAttrib(egl->dpy, egl_cfg, EGL_BIND_TO_TEXTURE_RGBA, &has_alpha); //EGL_ALPHA_SIZE
+    qDebug("choose egl display:%p config: %p/%d, has alpha: %d", egl->dpy, egl_cfg, nb_cfgs, has_alpha);
     EGLint attribs[] = {
         EGL_WIDTH, w,
         EGL_HEIGHT, h,
@@ -464,7 +535,7 @@ bool EGLInteropResource::map(int picIndex, const CUVIDPROCPARAMS &param, GLuint 
 #if 0
     //IDirect3DSurface9 *raw_surface = NULL;
     //DX_ENSURE(texture9_nv12->GetSurfaceLevel(0, &raw_surface), false);
-    const RECT src = { 0, 0, w, h*3/2};
+    const RECT src = { 0, 0, (~0-1)&w, (~0-1)&(h*3/2)};
     DX_ENSURE(device9->StretchRect(raw_surface, &src, surface9_nv12, NULL, D3DTEXF_NONE), false);
 #endif
     if (!map(surface9_nv12, tex, w, h, H))
@@ -477,31 +548,27 @@ bool EGLInteropResource::map(IDirect3DSurface9* surface, GLuint tex, int w, int 
     Q_UNUSED(H);
     D3DSURFACE_DESC dxvaDesc;
     surface->GetDesc(&dxvaDesc);
-    DYGL(glBindTexture(GL_TEXTURE_2D, tex));
-    const RECT src = { 0, 0, w, h};
-    HRESULT ret = device9->StretchRect(surface, &src, surface9, NULL, D3DTEXF_NONE);
-    if (SUCCEEDED(ret)) {
-        if (query9) {
-            // Flush the draw command now. Ideally, this should be done immediately before the draw call that uses the texture. Flush it once here though.
-            query9->Issue(D3DISSUE_END);
-            // ensure data is copied to egl surface. Solution and comment is from chromium
-            // The DXVA decoder has its own device which it uses for decoding. ANGLE has its own device which we don't have access to.
-            // The above code attempts to copy the decoded picture into a surface which is owned by ANGLE.
-            // As there are multiple devices involved in this, the StretchRect call above is not synchronous.
-            // We attempt to flush the batched operations to ensure that the picture is copied to the surface owned by ANGLE.
-            // We need to do this in a loop and call flush multiple times.
-            // We have seen the GetData call for flushing the command buffer fail to return success occassionally on multi core machines, leading to an infinite loop.
-            // Workaround is to have an upper limit of 10 on the number of iterations to wait for the Flush to finish.
-            int k = 0;
-            // skip at decoder.close()
-            while (/*!skip_dx.load() && */(query9->GetData(NULL, 0, D3DGETDATA_FLUSH) == FALSE) && ++k < 10) {
-                Sleep(1);
-            }
+    const RECT src = { 0, 0, (~0-1)&w, (~0-1)&h}; //StretchRect does not supports odd values
+    DX_ENSURE(device9->StretchRect(surface, &src, surface9, NULL, D3DTEXF_NONE), false);
+    if (query9) {
+        // Flush the draw command now. Ideally, this should be done immediately before the draw call that uses the texture. Flush it once here though.
+        query9->Issue(D3DISSUE_END);
+        // ensure data is copied to egl surface. Solution and comment is from chromium
+        // The DXVA decoder has its own device which it uses for decoding. ANGLE has its own device which we don't have access to.
+        // The above code attempts to copy the decoded picture into a surface which is owned by ANGLE.
+        // As there are multiple devices involved in this, the StretchRect call above is not synchronous.
+        // We attempt to flush the batched operations to ensure that the picture is copied to the surface owned by ANGLE.
+        // We need to do this in a loop and call flush multiple times.
+        // We have seen the GetData call for flushing the command buffer fail to return success occassionally on multi core machines, leading to an infinite loop.
+        // Workaround is to have an upper limit of 10 on the number of iterations to wait for the Flush to finish.
+        int k = 0;
+        // skip at decoder.close()
+        while (/*!skip_dx.load() && */(query9->GetData(NULL, 0, D3DGETDATA_FLUSH) == FALSE) && ++k < 10) {
+            Sleep(1);
         }
-        eglBindTexImage(egl->dpy, egl->surface, EGL_BACK_BUFFER);
-    } else {
-        qWarning() << "map to egl error: " << ret << " - " << qt_error_string(ret);
     }
+    DYGL(glBindTexture(GL_TEXTURE_2D, tex));
+    eglBindTexImage(egl->dpy, egl->surface, EGL_BACK_BUFFER);
     DYGL(glBindTexture(GL_TEXTURE_2D, 0));
     return true;
 }
@@ -512,10 +579,6 @@ bool EGLInteropResource::map(IDirect3DSurface9* surface, GLuint tex, int w, int 
 #if QTAV_HAVE(CUDA_GL)
 namespace QtAV {
 namespace cuda {
-GLInteropResource::GLInteropResource(CUdevice d, CUvideodecoder decoder, CUvideoctxlock lk)
-    : InteropResource(d, decoder, lk)
-{}
-
 bool GLInteropResource::map(int picIndex, const CUVIDPROCPARAMS &param, GLuint tex, int w, int h, int H, int plane)
 {
     AutoCtxLock locker((cuda_api*)this, lock);

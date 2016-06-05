@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -112,6 +112,7 @@ public:
     SubtitleFrame frame;
     QString current_text;
     QImage current_image;
+    SubImageSet current_ass;
     QLinkedList<SubtitleFrame>::iterator itf;
     /* number of subtitle frames at current time.
      * <0 means itf is the last. >0 means itf is the 1st
@@ -466,6 +467,8 @@ void Subtitle::checkCapability()
 
 void Subtitle::loadAsync()
 {
+    if (fileName().isEmpty())
+        return;
     class Loader : public QRunnable {
     public:
         Loader(Subtitle *sub) : m_sub(sub) {}
@@ -529,6 +532,23 @@ QImage Subtitle::getImage(int width, int height, QRect* boundingRect)
     // TODO: store bounding rect here and not in processor
     priv->current_image = priv->processor->getImage(priv->t - priv->delay, boundingRect);
     return priv->current_image;
+}
+
+SubImageSet Subtitle::getSubImages(int width, int height, QRect *boundingRect)
+{
+    QMutexLocker lock(&priv->mutex);
+    Q_UNUSED(lock);
+    if (!isLoaded())
+        return SubImageSet();
+    if (width == 0 || height == 0)
+        return SubImageSet();
+    priv->update_image = false;
+    if (!canRender())
+        return SubImageSet();
+    priv->processor->setFrameSize(width, height);
+    // TODO: store bounding rect here and not in processor
+    priv->current_ass = priv->processor->getSubImages(priv->t - priv->delay, boundingRect);
+    return priv->current_ass;
 }
 
 bool Subtitle::processHeader(const QByteArray& codec, const QByteArray &data)

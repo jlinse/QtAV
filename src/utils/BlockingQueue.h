@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2014 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
     
 *   This file is part of QtAV
 
@@ -28,7 +28,9 @@
 #include <QtCore/QWaitCondition>
 
 //TODO: block full and empty condition separately
+QT_BEGIN_NAMESPACE
 template<typename T> class QQueue;
+QT_END_NAMESPACE
 namespace QtAV {
 
 template <typename T, template <typename> class Container = QQueue>

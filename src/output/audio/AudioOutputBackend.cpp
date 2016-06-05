@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2015)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -24,6 +24,34 @@
 #include "utils/Logger.h"
 
 namespace QtAV {
+
+QStringList AudioOutputBackend::defaultPriority()
+{
+    static const QStringList sBackends = QStringList()
+#ifdef Q_OS_MAC
+            << QStringLiteral("AudioToolbox")
+#endif
+#if QTAV_HAVE(XAUDIO2)
+            << QStringLiteral("XAudio2")
+#endif
+#if QTAV_HAVE(PULSEAUDIO)&& !defined(Q_OS_MAC)
+            << QStringLiteral("Pulse")
+#endif
+#if QTAV_HAVE(OPENSL)
+            << QStringLiteral("OpenSL")
+#endif
+#if QTAV_HAVE(OPENAL)
+            << QStringLiteral("OpenAL")
+#endif
+#if QTAV_HAVE(PORTAUDIO)
+            << QStringLiteral("PortAudio")
+#endif
+#if QTAV_HAVE(DSOUND)
+            << QStringLiteral("DirectSound")
+#endif
+              ;
+    return sBackends;
+}
 
 AudioOutputBackend::AudioOutputBackend(AudioOutput::DeviceFeatures f, QObject *parent)
     : QObject(parent)
@@ -53,29 +81,35 @@ void AudioOutput_RegisterAll()
     // check whether ids are registered automatically
     if (!AudioOutputBackendFactory::Instance().registeredIds().empty())
         return;
-#if QTAV_HAVE(PORTAUDIO)
-    extern bool RegisterAudioOutputBackendPortAudio_Man();
-    RegisterAudioOutputBackendPortAudio_Man();
-#endif //QTAV_HAVE(PORTAUDIO)
-#if QTAV_HAVE(OPENAL)
-    extern bool RegisterAudioOutputBackendOpenAL_Man();
-    RegisterAudioOutputBackendOpenAL_Man();
-#endif //QTAV_HAVE(OPENAL)
+    extern bool RegisterAudioOutputBackendNull_Man();
+    RegisterAudioOutputBackendNull_Man();
+#ifdef Q_OS_DARWIN
+    extern bool RegisterAudioOutputBackendAudioToolbox_Man();
+    RegisterAudioOutputBackendAudioToolbox_Man();
+#endif
 #if QTAV_HAVE(OPENSL)
     extern bool RegisterAudioOutputBackendOpenSL_Man();
     RegisterAudioOutputBackendOpenSL_Man();
 #endif //QTAV_HAVE(OPENSL)
-#if QTAV_HAVE(DSOUND)
-    extern bool RegisterAudioOutputBackendDSound_Man();
-    RegisterAudioOutputBackendDSound_Man();
-#endif
 #if QTAV_HAVE(XAUDIO2)
     extern bool RegisterAudioOutputBackendXAudio2_Man();
     RegisterAudioOutputBackendXAudio2_Man();
 #endif
+#if QTAV_HAVE(OPENAL)
+    extern bool RegisterAudioOutputBackendOpenAL_Man();
+    RegisterAudioOutputBackendOpenAL_Man();
+#endif //QTAV_HAVE(OPENAL)
 #if QTAV_HAVE(PULSEAUDIO)
     extern bool RegisterAudioOutputBackendPulse_Man();
     RegisterAudioOutputBackendPulse_Man();
+#endif
+#if QTAV_HAVE(PORTAUDIO)
+    extern bool RegisterAudioOutputBackendPortAudio_Man();
+    RegisterAudioOutputBackendPortAudio_Man();
+#endif //QTAV_HAVE(PORTAUDIO)
+#if QTAV_HAVE(DSOUND)
+    extern bool RegisterAudioOutputBackendDSound_Man();
+    RegisterAudioOutputBackendDSound_Man();
 #endif
 }
 

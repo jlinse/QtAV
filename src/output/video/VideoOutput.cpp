@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2016 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -21,7 +21,10 @@
 
 #include "QtAV/VideoOutput.h"
 #include "QtAV/private/VideoRenderer_p.h"
+#include "QtAV/version.h"
+#include <QtCore/QLibrary>
 #include <QtGui/QResizeEvent>
+#include "utils/Logger.h"
 /*!
  * onSetXXX(...): impl->onSetXXX(...); set value as impl; return ;
  */
@@ -32,11 +35,29 @@ class VideoOutputPrivate : public VideoRendererPrivate
 {
 public:
     VideoOutputPrivate(VideoRendererId rendererId, bool force) {
+        if (!VideoRenderer::id("Widget")) {
+            //TODO: dso version check?
+#if defined(Q_OS_DARWIN)
+            avwidgets.setFileName(QStringLiteral("QtAVWidgets.framework/QtAVWidgets")); //no dylib check
+#elif defined(Q_OS_WIN)
+            avwidgets.setFileName(QStringLiteral("QtAVWidgets").append(QString::number(QTAV_VERSION_MAJOR(QtAV_Version()))));
+#else
+            avwidgets.setFileNameAndVersion(QStringLiteral("QtAVWidgets"), QTAV_VERSION_MAJOR(QtAV_Version()));
+#endif
+            qDebug() << "Loading QtAVWidgets module: " << avwidgets.fileName();
+            if (!avwidgets.load()) {
+                qWarning("Failed to load QtAVWidgets module");
+            }
+        }
         impl = VideoRenderer::create(rendererId);
         if (!impl && !force) {
             VideoRendererId *vid = NULL;
             while ((vid = VideoRenderer::next(vid))) {
                 qDebug("next id: %d, name: %s", *vid, VideoRenderer::name(*vid));
+                if (impl) {
+                    delete impl;
+                    impl = 0;
+                }
                 impl = VideoRenderer::create(*vid);
                 if (impl && impl->isAvailable() && impl->widget())
                     break;
@@ -66,12 +87,15 @@ public:
     }
     ~VideoOutputPrivate() {
         if (impl) {
-            delete impl;
+            QObject* obj = reinterpret_cast<QObject*>(impl->widget());
+            if (obj && !obj->parent())
+                obj->deleteLater();
             impl = 0;
         }
     }
 
     VideoRenderer *impl;
+    QLibrary avwidgets;
 };
 
 VideoOutput::VideoOutput(QObject *parent)
@@ -151,17 +175,23 @@ QGraphicsItem* VideoOutput::graphicsItem()
     return d_func().impl->graphicsItem();
 }
 
+OpenGLVideo* VideoOutput::opengl() const
+{
+    if (!isAvailable())
+        return 0;
+    return d_func().impl->opengl();
+}
+
 bool VideoOutput::eventFilter(QObject *obj, QEvent *event)
 {
     DPTR_D(VideoOutput);
     if (!d.impl || (QObject*)d.impl->widget() != obj)
-        return false;
+        return QObject::eventFilter(obj, event);
     if (event->type() == QEvent::Resize) {
         QResizeEvent *re = static_cast<QResizeEvent*>(event);
         resizeRenderer(re->size());
-        return false;
     }
-    return false;
+    return QObject::eventFilter(obj, event);
 }
 
 bool VideoOutput::receiveFrame(const VideoFrame& frame)
@@ -176,26 +206,12 @@ bool VideoOutput::receiveFrame(const VideoFrame& frame)
     return d.impl->receiveFrame(frame);
 }
 
-bool VideoOutput::needUpdateBackground() const
-{
-    if (!isAvailable())
-        return false;
-    DPTR_D(const VideoOutput);
-    return d.impl->needUpdateBackground();
-}
-
 void VideoOutput::drawBackground()
 {
     if (!isAvailable())
         return;
     DPTR_D(VideoOutput);
     d.impl->drawBackground();
-}
-
-bool VideoOutput::needDrawFrame() const
-{
-    DPTR_D(const VideoOutput);
-    return d.impl->needDrawFrame();
 }
 
 void VideoOutput::drawFrame()
@@ -345,6 +361,13 @@ bool VideoOutput::onSetSaturation(qreal saturation)
         return false;
     }
     return true;
+}
+
+void VideoOutput::onSetBackgroundColor(const QColor &color)
+{
+    if (!isAvailable())
+        return;
+    d_func().impl->setBackgroundColor(color);
 }
 
 void VideoOutput::setStatistics(Statistics* statistics)

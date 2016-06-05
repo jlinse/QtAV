@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -24,7 +24,7 @@
 #include "utils/Logger.h"
 
 //ffmpeg2.1 libav10
-#define AVPACKET_REF AV_MODULE_CHECK(LIBAVCODEC, 55, 34, 1 ,39, 101)
+#define AVPACKET_REF AV_MODULE_CHECK(LIBAVCODEC, 55, 34, 1, 39, 101)
 
 namespace QtAV {
 namespace {
@@ -114,20 +114,20 @@ bool Packet::fromAVPacket(Packet* pkt, const AVPacket *avpkt, double time_base)
     pkt->pts = qMax<qreal>(0, pkt->pts);
     pkt->dts = qMax<qreal>(0, pkt->dts);
 
-
+    if (avpkt->duration > 0)
+        pkt->duration = avpkt->duration * time_base;
+    else
+        pkt->duration = 0;
+#if (LIBAVCODEC_VERSION_MAJOR < 57) //FF_API_CONVERGENCE_DURATION since 57
     // subtitle always has a key frame? convergence_duration may be 0
-    if (avpkt->convergence_duration > 0  // mpv demux_lavf only check this
+    if (avpkt->convergence_duration > 0
             && pkt->hasKeyFrame
 #if 0
             && codec->codec_type == AVMEDIA_TYPE_SUBTITLE
 #endif
             )
         pkt->duration = avpkt->convergence_duration * time_base;
-    else if (avpkt->duration > 0)
-        pkt->duration = avpkt->duration * time_base;
-    else
-        pkt->duration = 0;
-
+#endif
     //qDebug("AVPacket.pts=%f, duration=%f, dts=%lld", pkt->pts, pkt->duration, packet.dts);
     pkt->data.clear();
     // TODO: pkt->avpkt. data is not necessary now. see mpv new_demux_packet_from_avpacket
@@ -239,4 +239,31 @@ const AVPacket *Packet::asAVPacket() const
     }
     return p;
 }
+
+void Packet::skip(int bytes)
+{
+    if (!d.constData()) { //not constructed from AVPacket
+        d = QSharedDataPointer<PacketPrivate>(new PacketPrivate());
+    }
+    d->initialized = false;
+    data = QByteArray::fromRawData(data.constData() + bytes, data.size() - bytes);
+    if (position >= 0)
+        position += bytes;
+    // TODO: if duration is valid, compute pts/dts and no manually update outside?
+}
+
+#ifndef QT_NO_DEBUG_STREAM
+QDebug operator<<(QDebug dbg, const Packet &pkt)
+{
+    dbg.nospace() << "QtAV::Packet.data " << hex << (qptrdiff)pkt.data.constData() << "+" << dec << pkt.data.size();
+    dbg.nospace() << ", dts: " << pkt.dts;
+    dbg.nospace() << ", pts: " << pkt.pts;
+    dbg.nospace() << ", duration: " << pkt.duration;
+    dbg.nospace() << ", position: " << pkt.position;
+    dbg.nospace() << ", hasKeyFrame: " << pkt.hasKeyFrame;
+    dbg.nospace() << ", isCorrupt: " << pkt.isCorrupt;
+    dbg.nospace() << ", eof: " << pkt.isEOF();
+    return dbg.space();
+}
+#endif //QT_NO_DEBUG_STREAM
 } //namespace QtAV

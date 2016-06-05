@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -20,6 +20,7 @@
 ******************************************************************************/
 
 #include "AVThread.h"
+#include <limits>
 #include "AVThread_p.h"
 #include "QtAV/AVClock.h"
 #include "QtAV/AVDecoder.h"
@@ -41,7 +42,6 @@ AVThreadPrivate::~AVThreadPrivate() {
         next_pause = false;
         cond.wakeAll();
     }
-    ready_cond.wakeAll();
     packets.setBlocking(true); //???
     packets.clear();
     QList<Filter*>::iterator it = filters.begin();
@@ -56,11 +56,15 @@ AVThreadPrivate::~AVThreadPrivate() {
 AVThread::AVThread(QObject *parent) :
     QThread(parent)
 {
+    connect(this, SIGNAL(started()), SLOT(onStarted()), Qt::DirectConnection);
+    connect(this, SIGNAL(finished()), SLOT(onFinished()), Qt::DirectConnection);
 }
 
 AVThread::AVThread(AVThreadPrivate &d, QObject *parent)
     :QThread(parent),DPTR_INIT(&d)
 {
+    connect(this, SIGNAL(started()), SLOT(onStarted()), Qt::DirectConnection);
+    connect(this, SIGNAL(finished()), SLOT(onFinished()), Qt::DirectConnection);
 }
 
 AVThread::~AVThread()
@@ -120,6 +124,19 @@ const QList<Filter*>& AVThread::filters() const
 void AVThread::scheduleTask(QRunnable *task)
 {
     d_func().tasks.put(task);
+}
+
+void AVThread::requestSeek()
+{
+    class SeekPTS : public QRunnable {
+        AVThread *self;
+    public:
+        SeekPTS(AVThread* thread) : self(thread) {}
+        void run() Q_DECL_OVERRIDE {
+            self->d_func().seek_requested = true;
+        }
+    };
+    scheduleTask(new SeekPTS(this));
 }
 
 void AVThread::scheduleFrameDrop(bool value)
@@ -184,8 +201,6 @@ void AVThread::stop()
     d.packets.setBlocking(false); //stop blocking take()
     d.packets.clear();
     pause(false);
-    QMutexLocker lock(&d.ready_mutex);
-    d.ready = false;
     //terminate();
 }
 
@@ -282,18 +297,27 @@ OutputSet* AVThread::outputSet() const
     return d_func().outputSet;
 }
 
+void AVThread::onStarted()
+{
+    d_func().sem.release();
+}
+
+void AVThread::onFinished()
+{
+    if (d_func().sem.available() > 0)
+        d_func().sem.release(d_func().sem.available());
+}
+
 void AVThread::resetState()
 {
     DPTR_D(AVThread);
     pause(false);
+    d.pts_history = ring<qreal>(d.pts_history.capacity());
     d.tasks.clear();
     d.render_pts0 = -1;
     d.stop = false;
     d.packets.setBlocking(true);
     d.packets.clear();
-    QMutexLocker lock(&d.ready_mutex);
-    d.ready = true;
-    d.ready_cond.wakeOne();
 }
 
 bool AVThread::tryPause(unsigned long timeout)
@@ -327,12 +351,9 @@ void AVThread::setStatistics(Statistics *statistics)
     d.statistics = statistics;
 }
 
-void AVThread::waitForReady()
+bool AVThread::waitForStarted(int msec)
 {
-    QMutexLocker lock(&d_func().ready_mutex);
-    while (!d_func().ready) {
-        d_func().ready_cond.wait(&d_func().ready_mutex);
-    }
+    return d_func().sem.tryAcquire(1, msec > 0 ? msec : std::numeric_limits<int>::max());
 }
 
 void AVThread::waitAndCheck(ulong value, qreal pts)

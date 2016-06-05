@@ -1,8 +1,8 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -21,10 +21,12 @@
 #include "common.h"
 #include <cstdio>
 #include <cstdlib>
+#include <QtCore/QSettings>
 #include <QFileOpenEvent>
 #include <QtCore/QLocale>
 #include <QtCore/QTranslator>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
 #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
@@ -92,13 +94,15 @@ QOptions get_common_options()
             ("height", 450, QLatin1String("height of player"))
             ("fullscreen", QLatin1String("fullscreen"))
             ("decoder", QLatin1String("FFmpeg"), QLatin1String("use a given decoder"))
-            ("decoders,-vd", QLatin1String("cuda;vaapi;vda;dxva;cedarv;ffmpeg"), QLatin1String("decoder name list in priority order seperated by ';'"))
+            ("decoders,-vd", QLatin1String("cuda;vaapi;vda;dxva;cedarv;ffmpeg"), QLatin1String("decoder name list in priority order separated by ';'"))
             ("file,f", QString(), QLatin1String("file or url to play"))
-            ("language", QLatin1String("system"), QLatin1String("language on UI. can be 'system', 'none' and locale name e.g. zh_CN"))
+            ("language", QString(), QLatin1String("language on UI. can be 'system' and locale name e.g. zh_CN"))
             ("log", QString(), QLatin1String("log level. can be 'off', 'fatal', 'critical', 'warning', 'debug', 'all'"))
             ("logfile"
-#if defined(Q_OS_WINRT) || defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
+#if defined(Q_OS_IOS)
              , appDataDir().append(QString::fromLatin1("/log-%1.txt"))
+#elif defined(Q_OS_WINRT) || defined(Q_OS_ANDROID)
+             , QString()
 #else
              , QString::fromLatin1("log-%1.txt")
 #endif
@@ -109,14 +113,19 @@ QOptions get_common_options()
 
 void do_common_options_before_qapp(const QOptions& options)
 {
+#ifdef Q_OS_LINUX
+    QSettings cfg(Config::defaultConfigFile(), QSettings::IniFormat);
+    const bool set_egl = cfg.value("opengl/egl").toBool();
+    //https://bugreports.qt.io/browse/QTBUG-49529
     // it's too late if qApp is created. but why ANGLE is not?
-    if (options.value(QString::fromLatin1("egl")).toBool() || Config::instance().isEGL()) {
+    if (options.value(QString::fromLatin1("egl")).toBool() || set_egl) { //FIXME: Config is constructed too early because it requires qApp
         // only apply to current run. no config change
         qputenv("QT_XCB_GL_INTEGRATION", "xcb_egl");
     } else {
         qputenv("QT_XCB_GL_INTEGRATION", "xcb_glx");
     }
     qDebug() << "QT_XCB_GL_INTEGRATION: " << qgetenv("QT_XCB_GL_INTEGRATION");
+#endif //Q_OS_LINUX
 }
 
 void do_common_options(const QOptions &options, const QString& appName)
@@ -127,12 +136,22 @@ void do_common_options(const QOptions &options, const QString& appName)
     }
     // has no effect if qInstallMessageHandler() called
     //qSetMessagePattern("%{function} @%{line}: %{message}");
+#if !defined(Q_OS_WINRT) && !defined(Q_OS_ANDROID)
     QString app(appName);
     if (app.isEmpty() && qApp)
         app = qApp->applicationName();
     QString logfile(options.option(QString::fromLatin1("logfile")).value().toString().arg(app));
     if (!logfile.isEmpty()) {
-        qDebug("set log file");
+        if (QDir(logfile).isRelative()) {
+            QString log_path(QString::fromLatin1("%1/%2").arg(qApp->applicationDirPath()).arg(logfile));
+            QFile f(log_path);
+            if (!f.open(QIODevice::WriteOnly)) {
+                log_path = QString::fromLatin1("%1/%2").arg(appDataDir()).arg(logfile);
+                qDebug() << "executable dir is not writable. log to " << log_path;
+            }
+            logfile = log_path;
+        }
+        qDebug() << "set log file: " << logfile;
         fileLogger()->setFileName(logfile);
         if (fileLogger()->open(QIODevice::WriteOnly)) {
             qDebug() << "Logger";
@@ -141,6 +160,7 @@ void do_common_options(const QOptions &options, const QString& appName)
             qWarning() << "Failed to open log file '" << fileLogger()->fileName() << "': " << fileLogger()->errorString();
         }
     }
+#endif
     QByteArray level(options.value(QString::fromLatin1("log")).toByteArray());
     if (level.isEmpty())
         level = Config::instance().logLevel().toLatin1();
@@ -150,9 +170,9 @@ void do_common_options(const QOptions &options, const QString& appName)
 
 void load_qm(const QStringList &names, const QString& lang)
 {
-    if (lang.isEmpty() || lang.toLower() == QLatin1String("none"))
-        return;
-    QString l(lang);
+    QString l(Config::instance().language());
+    if (!lang.isEmpty())
+        l = lang;
     if (l.toLower() == QLatin1String("system"))
         l = QLocale::system().name();
     QStringList qms(names);

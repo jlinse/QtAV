@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2013)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -120,16 +120,10 @@ static const  codec_profile_t va_profiles[] = {
     { QTAV_CODEC_ID(WMV3), FF_PROFILE_VC1_MAIN, VAProfileVC1Main },
     { QTAV_CODEC_ID(WMV3), FF_PROFILE_VC1_SIMPLE, VAProfileVC1Simple },
 #if VA_CHECK_VERSION(0, 38, 0)
-#ifdef FF_PROFILE_HEVC_MAIN
-    { QTAV_CODEC_ID(HEVC), FF_PROFILE_HEVC_MAIN, VAProfileHEVCMain},
-#endif
-#ifdef FF_PROFILE_HEVC_MAIN_10
-    { QTAV_CODEC_ID(HEVC), FF_PROFILE_HEVC_MAIN_10, VAProfileHEVCMain10},
-#endif
-#if FFMPEG_MODULE_CHECK(LIBAVCODEC, 54, 92, 100) || LIBAV_MODULE_CHECK(LIBAVCODEC, 55, 34, 1) //ffmpeg1.2 libav10
-    { QTAV_CODEC_ID(VP9), FF_PROFILE_UNKNOWN, VAProfileVP9Profile0},
-#endif
     { QTAV_CODEC_ID(VP8), FF_PROFILE_UNKNOWN, VAProfileVP8Version0_3}, //defined in 0.37
+    { QTAV_CODEC_ID(VP9), FF_PROFILE_UNKNOWN, VAProfileVP9Profile0},
+    { QTAV_CODEC_ID(HEVC), FF_PROFILE_HEVC_MAIN, VAProfileHEVCMain},
+    { QTAV_CODEC_ID(HEVC), FF_PROFILE_HEVC_MAIN_10, VAProfileHEVCMain10},
 #endif //VA_CHECK_VERSION(0, 38, 0)
     { QTAV_CODEC_ID(NONE), FF_PROFILE_UNKNOWN, VAProfileNone }
 };
@@ -150,7 +144,7 @@ const codec_profile_t* findProfileEntry(AVCodecID codec, int profile, const code
     if (p0 && p0->codec == QTAV_CODEC_ID(NONE)) //search from the end
         return 0;
     const codec_profile_t* pe0 = p0 ? ++p0 : va_profiles;
-    for (const codec_profile_t* p = pe0 ; p->codec != QTAV_CODEC_ID(NONE); ++p) {
+    for (const codec_profile_t* p = pe0; p < va_profiles+sizeof(va_profiles)/sizeof(va_profiles[0]); ++p) {
         if (codec != p->codec || profile != p->profile)
             continue;
         // return the first profile entry if given profile is unknow
@@ -167,24 +161,19 @@ struct fmtentry {
     uint32_t va;
     VideoFormat::PixelFormat fmt;
 };
-static const struct fmtentry va_to_imgfmt[] = {
-    {VA_FOURCC_NV12, VideoFormat::Format_NV12},
-    {VA_FOURCC_YV12,  VideoFormat::Format_YUV420P},
-    {VA_FOURCC_IYUV, VideoFormat::Format_YUV420P},
-    {VA_FOURCC_UYVY, VideoFormat::Format_UYVY},
-    {VA_FOURCC_YUY2, VideoFormat::Format_YUYV},
-    // Note: not sure about endian issues
-    {VA_FOURCC_RGBA, VideoFormat::Format_RGB32},
-    {VA_FOURCC_RGBX, VideoFormat::Format_RGB32},
-    {VA_FOURCC_BGRA, VideoFormat::Format_RGB32},
-    {VA_FOURCC_BGRX, VideoFormat::Format_RGB32},
-    {0             , VideoFormat::Format_Invalid}
-};
+
 VideoFormat::PixelFormat pixelFormatFromVA(uint32_t fourcc)
 {
-    for (const struct fmtentry *entry = va_to_imgfmt; entry->va; ++entry) {
-        if (entry->va == fourcc)
-            return entry->fmt;
+    switch (fourcc) {
+    case VA_FOURCC_NV12:
+        return VideoFormat::Format_NV12;
+    case VA_FOURCC_YV12:
+    case VA_FOURCC_IYUV:
+        return VideoFormat::Format_YUV420P;
+    case VA_FOURCC_UYVY:
+        return VideoFormat::Format_UYVY;
+    default:
+        return VideoFormat::Format_Invalid;
     }
     return VideoFormat::Format_Invalid;
 }
@@ -237,7 +226,7 @@ public:
     void close() Q_DECL_OVERRIDE;
     bool ensureSurfaces(int count, int w, int h, bool discard_old = false);
     bool prepareVAImage(int w, int h);
-    bool setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
+    void* setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
     bool getBuffer(void **opaque, uint8_t **data) Q_DECL_OVERRIDE;
     void releaseBuffer(void *opaque, uint8_t *data) Q_DECL_OVERRIDE;
     AVPixelFormat vaPixelFormat() const Q_DECL_OVERRIDE { return QTAV_PIX_FMT_C(VAAPI_VLD); }
@@ -369,7 +358,7 @@ VideoFrame VideoDecoderVAAPI::frame()
         SurfaceInteropVAAPI *interop = new SurfaceInteropVAAPI(d.interop_res);
         interop->setSurface(p, d.width, d.height);
 
-        VideoFormat fmt(VideoFormat::Format_RGB32);
+        VideoFormat fmt(VideoFormat::Format_RGB32); //TODO: nv12
         VAImage img;
         // TODO: derive/get image only once and pass to interop object
         const bool test_format = OpenGLHelper::isEGL() && vaapi::checkEGL_DMA() && va_0_38::isValid();
@@ -392,10 +381,8 @@ VideoFrame VideoDecoderVAAPI::frame()
         f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
         f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
         f.setDisplayAspectRatio(d.getDAR(d.frame));
-
-        ColorSpace cs = colorSpaceFromFFmpeg(av_frame_get_colorspace(d.frame));
-        if (cs != ColorSpace_Unknow)
-            cs = colorSpaceFromFFmpeg(d.codec_ctx->colorspace);
+        d.updateColorDetails(&f);
+        const ColorSpace cs = f.colorSpace();
         if (cs == ColorSpace_BT601)
             p->setColorSpace(VA_SRC_BT601);
         else
@@ -590,7 +577,6 @@ bool VideoDecoderVAAPIPrivate::open()
     }
 #endif //QTAV_HAVE(EGL_CAPI)
 #endif //QT_NO_OPENGL
-    codec_ctx->hwaccel_context = &hw_ctx; //must set before open
     return true;
 }
 
@@ -644,12 +630,12 @@ bool VideoDecoderVAAPIPrivate::prepareVAImage(int w, int h)
     return true;
 }
 
-bool VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
+void* VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
 {
     Q_UNUSED(avctx);
     if (!display || config_id == VA_INVALID_ID) {
         qWarning("va-api is not initialized. display: %p, config_id: %#x", display->get(), config_id);
-        return false;
+        return NULL;
     }
     int surface_count =  nb_surfaces;
     if (surface_count <= 0) {
@@ -665,24 +651,31 @@ bool VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
         if (codec_ctx->active_thread_type & FF_THREAD_FRAME)
             surface_count += codec_ctx->thread_count;
     }
+    releaseUSWC();
+    if (image.image_id != VA_INVALID_ID) {
+        VAWARN(vaDestroyImage(display->get(), image.image_id));
+        image.image_id = VA_INVALID_ID;
+    }
+    if (context_id != VA_INVALID_ID) {
+        VAWARN(vaDestroyContext(display->get(), context_id));
+        context_id = VA_INVALID_ID;
+    }
+    // TODO: config_id reset?
     if (!ensureSurfaces(surface_count, surface_width, surface_height, true))
-        return false;
+        return NULL;
     if (copy_mode != VideoDecoderFFmpegHW::ZeroCopy || OpenGLHelper::isEGL()) { //egl_dma && va_0_38
         // egl needs VAImage too
         if (!prepareVAImage(surface_width, surface_height))
-            return false;
-        // copy-back mode
-        if (copy_mode != VideoDecoderFFmpegHW::ZeroCopy)
-            initUSWC(surface_width);
+            return NULL;
     }
-    context_id = VA_INVALID_ID;
-    VA_ENSURE_TRUE(vaCreateContext(display->get(), config_id, surface_width, surface_height, VA_PROGRESSIVE, surfaces.data(), surfaces.size(), &context_id), false);
+    initUSWC(surface_width);
+    VA_ENSURE_TRUE(vaCreateContext(display->get(), config_id, surface_width, surface_height, VA_PROGRESSIVE, surfaces.data(), surfaces.size(), &context_id), NULL);
     /* Setup the ffmpeg hardware context */
     memset(&hw_ctx, 0, sizeof(hw_ctx));
     hw_ctx.display = display->get();
     hw_ctx.config_id = config_id;
     hw_ctx.context_id = context_id;
-    return true;
+    return &hw_ctx;
 }
 
 void VideoDecoderVAAPIPrivate::close()

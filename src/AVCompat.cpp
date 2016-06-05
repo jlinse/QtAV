@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -155,9 +155,31 @@ AVAudioResampleContext *swr_alloc_set_opts(AVAudioResampleContext *s
 extern const AVPixFmtDescriptor av_pix_fmt_descriptors[];
 const AVPixFmtDescriptor *av_pix_fmt_desc_get(AVPixelFormat pix_fmt)
 {
-    if (pix_fmt < 0 || pix_fmt >= PIX_FMT_NB)
+    if (pix_fmt < 0 || pix_fmt >= QTAV_PIX_FMT_C(NB))
         return NULL;
     return &av_pix_fmt_descriptors[pix_fmt];
+}
+
+const AVPixFmtDescriptor *av_pix_fmt_desc_next(const AVPixFmtDescriptor *prev)
+{
+    if (!prev)
+        return &av_pix_fmt_descriptors[0];
+    // can not use sizeof(av_pix_fmt_descriptors)
+    while (prev - av_pix_fmt_descriptors < QTAV_PIX_FMT_C(NB) - 1) {
+        prev++;
+        if (prev->name)
+            return prev;
+    }
+    return NULL;
+}
+
+AVPixelFormat av_pix_fmt_desc_get_id(const AVPixFmtDescriptor *desc)
+{
+    if (desc < av_pix_fmt_descriptors ||
+        desc >= av_pix_fmt_descriptors + QTAV_PIX_FMT_C(NB))
+        return QTAV_PIX_FMT_C(NONE);
+
+    return AVPixelFormat(desc - av_pix_fmt_descriptors);
 }
 #endif // !AV_MODULE_CHECK(LIBAVUTIL, 52, 3, 0, 13, 100)
 #if !FFMPEG_MODULE_CHECK(LIBAVUTIL, 52, 48, 101)
@@ -165,10 +187,20 @@ enum AVColorSpace av_frame_get_colorspace(const AVFrame *frame)
 {
     if (!frame)
         return AVCOL_SPC_NB;
-#if LIBAV_MODULE_CHECK(LIBAVUTIL, 54, 3, 0) //has AVFrame.colorspace
+#if LIBAV_MODULE_CHECK(LIBAVUTIL, 53, 16, 0) //8c02adc
     return frame->colorspace;
 #endif
     return AVCOL_SPC_NB;
+}
+
+enum AVColorRange av_frame_get_color_range(const AVFrame *frame)
+{
+    if (!frame)
+        return AVCOL_RANGE_UNSPECIFIED;
+#if LIBAV_MODULE_CHECK(LIBAVUTIL, 53, 16, 0) //8c02adc
+    return frame->color_range;
+#endif
+    return AVCOL_RANGE_UNSPECIFIED;
 }
 #endif //!FFMPEG_MODULE_CHECK(LIBAVUTIL, 52, 28, 101)
 #if LIBAVUTIL_VERSION_INT < AV_VERSION_INT(52, 38, 100)
@@ -182,7 +214,7 @@ int av_pix_fmt_count_planes(AVPixelFormat pix_fmt)
 
     for (i = 0; i < desc->nb_components; i++)
         planes[desc->comp[i].plane] = 1;
-    for (i = 0; i < FF_ARRAY_ELEMS(planes); i++)
+    for (i = 0; i < (int)FF_ARRAY_ELEMS(planes); i++)
         ret += planes[i];
     return ret;
 }
@@ -313,6 +345,7 @@ const char *get_codec_long_name(enum AVCodecID id)
     return "unknown_codec";
 }
 
+#if QTAV_HAVE(AVFILTER)
 #if !AV_MODULE_CHECK(LIBAVFILTER, 2, 22, 0, 79, 100) //FF_API_AVFILTERPAD_PUBLIC
 const char *avfilter_pad_get_name(const AVFilterPad *pads, int pad_idx)
 {
@@ -324,3 +357,4 @@ enum AVMediaType avfilter_pad_get_type(const AVFilterPad *pads, int pad_idx)
     return pads[pad_idx].type;
 }
 #endif
+#endif //QTAV_HAVE(AVFILTER)

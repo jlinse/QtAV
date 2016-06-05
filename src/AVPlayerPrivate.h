@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2014-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -25,7 +25,6 @@
 #include <limits>
 #include "QtAV/AVDemuxer.h"
 #include "QtAV/AVPlayer.h"
-#include "QtAV/CommonTypes.h"
 #include "AudioThread.h"
 #include "VideoThread.h"
 #include "AVDemuxThread.h"
@@ -157,6 +156,7 @@ public:
     int notify_interval;
     MediaStatus status; // status changes can be from demuxer or demux thread
     AVPlayer::State state;
+    MediaEndAction end_action;
     QMutex load_mutex;
 };
 

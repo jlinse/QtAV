@@ -1,5 +1,5 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
+    QtAV:  Multimedia framework based on Qt and FFmpeg
     Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
@@ -179,6 +179,7 @@ void VideoRenderer::setOutAspectRatio(qreal ratio)
         onSetOutAspectRatio(ratio);
         Q_EMIT outAspectRatioChanged();
     }
+    updateUi();
 }
 
 void VideoRenderer::onSetOutAspectRatio(qreal ratio)
@@ -200,6 +201,8 @@ void VideoRenderer::setQuality(Quality q)
     d.quality = q;
     if (!onSetQuality(q)) {
         d.quality = old;
+    } else {
+        updateUi();
     }
 }
 
@@ -252,11 +255,13 @@ void VideoRenderer::resizeRenderer(int width, int height)
         return;
     d.renderer_width = width;
     d.renderer_height = height;
+    if (d.out_aspect_ratio_mode == RendererAspectRatio)
+        Q_EMIT outAspectRatioChanged();
     if (d.computeOutParameters(d.out_aspect_ratio)) {
         Q_EMIT videoRectChanged();
         Q_EMIT contentRectChanged();
     }
-    onResizeRenderer(width, height);
+    onResizeRenderer(width, height); //TODO: resize widget
 }
 
 void VideoRenderer::onResizeRenderer(int width, int height)
@@ -301,6 +306,7 @@ void VideoRenderer::setOrientation(int value)
             Q_EMIT contentRectChanged();
         }
         onSetOutAspectRatio(outAspectRatio());
+        updateUi();
     }
 }
 
@@ -348,6 +354,7 @@ void VideoRenderer::setRegionOfInterest(const QRectF &roi)
         d.roi = old;
     } else {
         Q_EMIT regionOfInterestChanged();
+        updateUi();
     }
     // TODO: how to fill video? what's out_rect now?
 }
@@ -403,7 +410,7 @@ QRectF VideoRenderer::normalizedROI() const
         r.setX(r.x()/qreal(d.src_width));
     else
         normalized = true;
-    if (qAbs(r.y() >= 1))
+    if (qAbs(r.y()) >= 1)
         r.setY(r.y()/qreal(d.src_height));
     else
         normalized = true;
@@ -447,24 +454,17 @@ QPointF VideoRenderer::onMapFromFrame(const QPointF &p) const
 
 QRegion VideoRenderer::backgroundRegion() const
 {
-    return QRegion(0, 0, rendererWidth(), rendererHeight()) - QRegion(d_func().out_rect);
-}
-
-bool VideoRenderer::needUpdateBackground() const
-{
+  //If video has alpha we need to retrun full size.
     DPTR_D(const VideoRenderer);
-    const QRect rendererRect(QPoint(), rendererSize());
-    return d.update_background || !d.video_frame.isValid()
-            || d.out_rect.intersected(rendererRect)  != rendererRect;
+    if(d.video_frame.pixelFormat() < 5) { //Alpha
+      return QRegion(0, 0, rendererWidth(), rendererHeight());
+    } else {
+      return QRegion(0, 0, rendererWidth(), rendererHeight()) - QRegion(d_func().out_rect);
+    }
 }
 
 void VideoRenderer::drawBackground()
 {
-}
-
-bool VideoRenderer::needDrawFrame() const
-{
-    return d_func().video_frame.isValid();
 }
 
 void VideoRenderer::handlePaintEvent()
@@ -476,7 +476,8 @@ void VideoRenderer::handlePaintEvent()
         //lock is required only when drawing the frame
         QMutexLocker locker(&d.img_mutex);
         Q_UNUSED(locker);
-        if (!d.filters.isEmpty() && d.statistics) {
+        // do not apply filters if d.video_frame is already filtered. e.g. rendering an image and resize window to repaint
+        if (!d.video_frame.metaData(QStringLiteral("gpu_filtered")).toBool() && !d.filters.isEmpty() && d.statistics) {
             // vo filter will not modify video frame, no lock required
             foreach(Filter* filter, d.filters) {
                 VideoFilter *vf = static_cast<VideoFilter*>(filter);
@@ -489,10 +490,13 @@ void VideoRenderer::handlePaintEvent()
                     continue;
                 // qpainter on video frame always runs on video thread. qpainter on renderer's paint device can work on rendering thread
                 // Here apply filters on frame on video thread, for example, GPU filters
-                if (!vf->context() || vf->context()->type() != VideoFilterContext::OpenGL)
-                    continue;
+
                 //vf->prepareContext(d.filter_context, d.statistics, 0);
+                //if (!vf->context() || vf->context()->type() != VideoFilterContext::OpenGL)
+                if (!vf->isSupported(VideoFilterContext::OpenGL))
+                    continue;
                 vf->apply(d.statistics, &d.video_frame); //painter and paint device are ready, pass video frame is ok.
+                d.video_frame.setMetaData(QStringLiteral("gpu_filtered"), true);
             }
         }
         /* begin paint. how about QPainter::beginNativePainting()?
@@ -527,10 +531,11 @@ void VideoRenderer::handlePaintEvent()
             if (!vf->isEnabled())
                 continue;
             // qpainter rendering on renderer's paint device. only supported by none-null paint engine
-            if (!vf->context() || vf->context()->type()  == VideoFilterContext::OpenGL) {
+            if (!vf->context() || vf->context()->type()  == VideoFilterContext::OpenGL)
                 continue;
-            }
             if (vf->prepareContext(d.filter_context, d.statistics, 0)) {
+                if (!vf->isSupported(d.filter_context->type()))
+                    continue;
                 vf->apply(d.statistics, &d.video_frame); //painter and paint device are ready, pass video frame is ok.
             }
         }
@@ -639,11 +644,17 @@ QColor VideoRenderer::backgroundColor() const
     return d_func().bg_color;
 }
 
+void VideoRenderer::onSetBackgroundColor(const QColor &color)
+{
+    Q_UNUSED(color);
+}
+
 void VideoRenderer::setBackgroundColor(const QColor &c)
 {
     DPTR_D(VideoRenderer);
     if (d.bg_color == c)
         return;
+    onSetBackgroundColor(c);
     d.bg_color = c;
     Q_EMIT backgroundColorChanged();
     updateUi();

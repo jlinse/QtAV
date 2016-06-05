@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015-2016 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2015)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -23,7 +23,9 @@
 #define QTAV_QUICKFBORENDERER_H
 
 #include <QtAV/VideoRenderer.h>
+#include <QtQml/QQmlListProperty>
 #include <QtQuick/QQuickFramebufferObject>
+#include <QmlAV/QuickFilter.h>
 
 namespace QtAV {
 class QuickFBORendererPrivate;
@@ -43,6 +45,11 @@ class QuickFBORenderer : public QQuickFramebufferObject, public VideoRenderer
     Q_PROPERTY(QSize videoFrameSize READ videoFrameSize NOTIFY videoFrameSizeChanged)
     Q_PROPERTY(QSize frameSize READ videoFrameSize NOTIFY videoFrameSizeChanged)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor NOTIFY backgroundColorChanged)
+    Q_PROPERTY(QQmlListProperty<QuickVideoFilter> filters READ filters)
+    Q_PROPERTY(qreal brightness READ brightness WRITE setBrightness NOTIFY brightnessChanged)
+    Q_PROPERTY(qreal contrast READ contrast WRITE setContrast NOTIFY contrastChanged)
+    Q_PROPERTY(qreal hue READ hue WRITE setHue NOTIFY hueChanged)
+    Q_PROPERTY(qreal saturation READ saturation WRITE setSaturation NOTIFY saturationChanged)
     Q_ENUMS(FillMode)
 public:
     enum FillMode {
@@ -56,6 +63,7 @@ public:
     explicit QuickFBORenderer(QQuickItem *parent = 0);
     VideoRendererId id() const Q_DECL_OVERRIDE;
     bool isSupported(VideoFormat::PixelFormat pixfmt) const Q_DECL_OVERRIDE;
+    OpenGLVideo* opengl() const Q_DECL_OVERRIDE;
 
     QObject *source() const;
     void setSource(QObject *source);
@@ -66,10 +74,21 @@ public:
     QRectF contentRect() const;
     QRectF sourceRect() const;
 
+    Q_INVOKABLE QPointF mapPointToItem(const QPointF &point) const;
+    Q_INVOKABLE QRectF mapRectToItem(const QRectF &rectangle) const;
+    Q_INVOKABLE QPointF mapNormalizedPointToItem(const QPointF &point) const;
+    Q_INVOKABLE QRectF mapNormalizedRectToItem(const QRectF &rectangle) const;
+    Q_INVOKABLE QPointF mapPointToSource(const QPointF &point) const;
+    Q_INVOKABLE QRectF mapRectToSource(const QRectF &rectangle) const;
+    Q_INVOKABLE QPointF mapPointToSourceNormalized(const QPointF &point) const;
+    Q_INVOKABLE QRectF mapRectToSourceNormalized(const QRectF &rectangle) const;
+
     bool isOpenGL() const;
     void setOpenGL(bool o);
     void fboSizeChanged(const QSize& size);
-    void renderToFbo();
+    void renderToFbo(QOpenGLFramebufferObject *fbo);
+
+    QQmlListProperty<QuickVideoFilter> filters();
 Q_SIGNALS:
     void sourceChanged();
     void fillModeChanged(QuickFBORenderer::FillMode);
@@ -80,6 +99,10 @@ Q_SIGNALS:
     void sourceAspectRatioChanged(qreal value) Q_DECL_OVERRIDE;
     void videoFrameSizeChanged() Q_DECL_OVERRIDE;
     void backgroundColorChanged() Q_DECL_OVERRIDE;
+    void brightnessChanged(qreal value) Q_DECL_OVERRIDE;
+    void contrastChanged(qreal) Q_DECL_OVERRIDE;
+    void hueChanged(qreal) Q_DECL_OVERRIDE;
+    void saturationChanged(qreal) Q_DECL_OVERRIDE;
 protected:
     bool event(QEvent *e) Q_DECL_OVERRIDE;
     bool receiveFrame(const VideoFrame &frame) Q_DECL_OVERRIDE;
@@ -89,7 +112,16 @@ private:
     bool onSetOrientation(int value) Q_DECL_OVERRIDE;
     void onSetOutAspectRatio(qreal ratio) Q_DECL_OVERRIDE;
     void onSetOutAspectRatioMode(OutAspectRatioMode mode) Q_DECL_OVERRIDE;
+    bool onSetBrightness(qreal b) Q_DECL_OVERRIDE;
+    bool onSetContrast(qreal c) Q_DECL_OVERRIDE;
+    bool onSetHue(qreal h) Q_DECL_OVERRIDE;
+    bool onSetSaturation(qreal s) Q_DECL_OVERRIDE;
     void updateRenderRect();
+
+    static void vf_append(QQmlListProperty<QuickVideoFilter> *property, QuickVideoFilter *value);
+    static int vf_count(QQmlListProperty<QuickVideoFilter> *property);
+    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, int index);
+    static void vf_clear(QQmlListProperty<QuickVideoFilter> *property);
 };
 typedef QuickFBORenderer VideoRendererQuickFBO;
 } //namespace QtAV

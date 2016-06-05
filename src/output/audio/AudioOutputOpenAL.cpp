@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
     
 *   This file is part of QtAV
 
@@ -27,6 +27,10 @@
 #include <QtCore/QWaitCondition>
 #include <QtCore/QVector>
 
+#if QTAV_HAVE(CAPI)
+#define OPENAL_CAPI_NS // CAPI_LINK_OPENAL will override it
+#include "capi/openal_api.h"
+#else
 #if defined(HEADER_OPENAL_PREFIX)
 #include <OpenAL/al.h>
 #include <OpenAL/alc.h>
@@ -34,6 +38,7 @@
 #include <AL/al.h>
 #include <AL/alc.h>
 #endif
+#endif //QTAV_HAVE(CAPI)
 #include "utils/Logger.h"
 
 #define UNQUEUE_QUICK 0
@@ -124,7 +129,7 @@ static ALenum audioFormatToAL(const AudioFormat& fmt)
     // al functions need a context
     ALCcontext *ctx = alcGetCurrentContext(); //a context is required for al functions!
     const int c = fmt.channels();
-    const AudioFormat::SampleFormat spfmt = fmt.sampleFormat();
+    const AudioFormat::SampleFormat spfmt = fmt.sampleFormat(); //TODO: planar formats are fine too
     if (AudioFormat::SampleFormat_Unsigned8 == spfmt) {
         static const al_fmt_t u8fmt[] = {
             {(const char*)AL_FORMAT_MONO8},
@@ -268,7 +273,6 @@ bool AudioOutputOpenAL::open()
         alDeleteBuffers(buffer.size(), buffer.constData());
         goto fail;
     }
-
     alSourcei(source, AL_LOOPING, AL_FALSE);
     alSourcei(source, AL_SOURCE_RELATIVE, AL_TRUE);
     alSourcei(source, AL_ROLLOFF_FACTOR, 0);

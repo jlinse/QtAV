@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -68,9 +68,9 @@ VideoFrame VideoFrame::fromGPU(const VideoFormat& fmt, int width, int height, in
         }
         // additional 15 bytes to ensure 16 bytes aligned
         QByteArray buf(15 + yuv_size, 0);
-        const int offset_16 = (16 - ((uintptr_t)buf.data() & 0x0f)) & 0x0f;
+        const int offset_16 = (16 - ((uintptr_t)buf.constData() & 0x0f)) & 0x0f;
         // plane 1, 2... is aligned?
-        uchar* plane_ptr = (uchar*)buf.data() + offset_16;
+        uchar* plane_ptr = (uchar*)buf.constData() + offset_16;
         QVector<uchar*> dst(nb_planes, 0);
         for (int i = 0; i < nb_planes; ++i) {
             dst[i] = plane_ptr;
@@ -117,35 +117,34 @@ public:
         : FramePrivate()
         , width(0)
         , height(0)
-        , color_space(ColorSpace_Unknow)
+        , color_space(ColorSpace_Unknown)
+        , color_range(ColorRange_Unknown)
         , displayAspectRatio(0)
         , format(VideoFormat::Format_Invalid)
-        , textures(4, 0)
     {}
     VideoFramePrivate(int w, int h, const VideoFormat& fmt)
         : FramePrivate()
         , width(w)
         , height(h)
-        , color_space(ColorSpace_Unknow)
+        , color_space(ColorSpace_Unknown)
+        , color_range(ColorRange_Unknown)
         , displayAspectRatio(0)
         , format(fmt)
-        , textures(4, 0)
     {
         if (!format.isValid())
             return;
         planes.resize(format.planeCount());
         line_sizes.resize(format.planeCount());
-        textures.resize(format.planeCount());
         planes.reserve(format.planeCount());
         line_sizes.reserve(format.planeCount());
-        textures.reserve(format.planeCount());
     }
     ~VideoFramePrivate() {}
     int width, height;
     ColorSpace color_space;
+    ColorRange color_range;
     float displayAspectRatio;
     VideoFormat format;
-    QVector<int> textures;
+    QScopedPointer<QImage> qt_image;
 
     VideoSurfaceInteropPtr surface_interop;
 };
@@ -162,25 +161,12 @@ VideoFrame::VideoFrame(int width, int height, const VideoFormat &format, const Q
     d->data = data;
 }
 
-VideoFrame::VideoFrame(const QByteArray& data, int width, int height, const VideoFormat &format)
-    : Frame(new VideoFramePrivate(width, height, format))
-{
-    Q_D(VideoFrame);
-    d->data = data;
-}
-
-VideoFrame::VideoFrame(const QVector<int>& textures, int width, int height, const VideoFormat &format)
-    : Frame(new VideoFramePrivate(width, height, format))
-{
-    Q_D(VideoFrame);
-    d->textures = textures;
-}
-
 VideoFrame::VideoFrame(const QImage& image)
     : Frame(new VideoFramePrivate(image.width(), image.height(), VideoFormat(image.format())))
 {
     setBits((uchar*)image.constBits(), 0);
     setBytesPerLine(image.bytesPerLine(), 0);
+    d_func()->qt_image.reset(new QImage(image));
 }
 
 /*!
@@ -252,6 +238,7 @@ VideoFrame VideoFrame::clone() const
     f.setTimestamp(d->timestamp);
     f.setDisplayAspectRatio(d->displayAspectRatio);
     f.setColorSpace(d->color_space);
+    f.setColorRange(d->color_range);
     return f;
 }
 
@@ -299,14 +286,13 @@ int VideoFrame::height() const
 
 int VideoFrame::effectivePlaneWidth(int plane) const
 {
-    Q_D(const VideoFrame);
-    return effectiveBytesPerLine(plane)/d->format.bytesPerPixel(plane); //padded bpl?
+    return planeWidth(plane)*effectiveBytesPerLine(plane)/bytesPerLine(plane);
 }
 
 int VideoFrame::planeWidth(int plane) const
 {
     Q_D(const VideoFrame);
-    return bytesPerLine(plane)/d->format.bytesPerPixel(plane);
+    return d->format.width(width(), plane);
 }
 
 int VideoFrame::planeHeight(int plane) const
@@ -344,6 +330,16 @@ void VideoFrame::setColorSpace(ColorSpace value)
     d_func()->color_space = value;
 }
 
+ColorRange VideoFrame::colorRange() const
+{
+    return d_func()->color_range;
+}
+
+void VideoFrame::setColorRange(ColorRange value)
+{
+    d_func()->color_range = value;
+}
+
 int VideoFrame::effectiveBytesPerLine(int plane) const
 {
     Q_D(const VideoFrame);
@@ -352,6 +348,13 @@ int VideoFrame::effectiveBytesPerLine(int plane) const
 
 QImage VideoFrame::toImage(QImage::Format fmt, const QSize& dstSize, const QRectF &roi) const
 {
+    Q_D(const VideoFrame);
+    if (!d->qt_image.isNull()
+            && fmt == d->qt_image->format()
+            && dstSize == d->qt_image->size()
+            && (!roi.isValid() || roi == d->qt_image->rect())) {
+        return *d->qt_image.data();
+    }
     VideoFrame f(to(VideoFormat(VideoFormat::pixelFormatFromImageFormat(fmt)), dstSize, roi));
     if (!f)
         return QImage();
@@ -392,6 +395,7 @@ VideoFrame VideoFrame::to(const VideoFormat &fmt, const QSize& dstSize, const QR
     conv.setOutFormat(fmt.pixelFormatFFmpeg());
     conv.setInSize(width(), height());
     conv.setOutSize(w, h);
+    conv.setInRange(colorRange());
     if (!conv.convert(d->planes.constData(), d->line_sizes.constData())) {
         qWarning() << "VideoFrame::to error: " << format() << "=>" << fmt;
         return VideoFrame();
@@ -402,8 +406,9 @@ VideoFrame VideoFrame::to(const VideoFormat &fmt, const QSize& dstSize, const QR
     if (fmt.isRGB()) {
         f.setColorSpace(fmt.isPlanar() ? ColorSpace_GBR : ColorSpace_RGB);
     } else {
-        f.setColorSpace(ColorSpace_Unknow);
+        f.setColorSpace(ColorSpace_Unknown);
     }
+    // TODO: color range
     f.setTimestamp(timestamp());
     f.setDisplayAspectRatio(displayAspectRatio());
     f.d_ptr->metadata = d->metadata; // need metadata?
@@ -454,14 +459,6 @@ void* VideoFrame::createInteropHandle(void* handle, SurfaceType type, int plane)
     if (plane > planeCount())
         return 0;
     return d->surface_interop->createHandle(handle, type, format(), plane, planeWidth(plane), planeHeight(plane));
-}
-
-int VideoFrame::texture(int plane) const
-{
-    Q_D(const VideoFrame);
-    if (d->textures.size() <= plane)
-        return -1;
-    return d->textures[plane];
 }
 
 VideoFrameConverter::VideoFrameConverter()
@@ -522,6 +519,7 @@ VideoFrame VideoFrameConverter::convert(const VideoFrame &frame, int fffmt) cons
     m_cvt->setOutFormat(fffmt);
     m_cvt->setInSize(frame.width(), frame.height());
     m_cvt->setOutSize(frame.width(), frame.height());
+    m_cvt->setInRange(frame.colorRange());
     QVector<const uchar*> pitch(format.planeCount());
     QVector<int> stride(format.planeCount());
     for (int i = 0; i < format.planeCount(); ++i) {
@@ -541,8 +539,9 @@ VideoFrame VideoFrameConverter::convert(const VideoFrame &frame, int fffmt) cons
     if (fmt.isRGB()) {
         f.setColorSpace(fmt.isPlanar() ? ColorSpace_GBR : ColorSpace_RGB);
     } else {
-        f.setColorSpace(ColorSpace_Unknow);
+        f.setColorSpace(ColorSpace_Unknown);
     }
+    // TODO: color range
     return f;
 }
 

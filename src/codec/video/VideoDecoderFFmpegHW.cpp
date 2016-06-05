@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2013-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2013)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -114,6 +114,7 @@ bool VideoDecoderFFmpegHWPrivate::prepare()
 {
     //// From vlc begin
     codec_ctx->thread_safe_callbacks = true; //?
+    codec_ctx->thread_count = threads;
 #ifdef _MSC_VER
 #pragma warning(disable:4065) //vc: switch has default but no case
 #endif //_MSC_VER
@@ -152,7 +153,7 @@ bool VideoDecoderFFmpegHWPrivate::prepare()
     return true;
 }
 
-AVPixelFormat VideoDecoderFFmpegHWPrivate::getFormat(struct AVCodecContext *p_context, const AVPixelFormat *pi_fmt)
+AVPixelFormat VideoDecoderFFmpegHWPrivate::getFormat(struct AVCodecContext *avctx, const AVPixelFormat *pi_fmt)
 {
     bool can_hwaccel = false;
     for (size_t i = 0; pi_fmt[i] != QTAV_PIX_FMT_C(NONE); i++) {
@@ -171,21 +172,27 @@ AVPixelFormat VideoDecoderFFmpegHWPrivate::getFormat(struct AVCodecContext *p_co
     for (size_t i = 0; pi_fmt[i] != QTAV_PIX_FMT_C(NONE); i++) {
         if (vaPixelFormat() != pi_fmt[i])
             continue;
-        /* We try to call setup when possible to detect errors when possible (later is too late) */
-        if (p_context->width > 0 && p_context->height > 0
-         && !setup(p_context)) {
+        if (hw_w == codedWidth((avctx)) && hw_h == codedHeight(avctx)
+                && hw_profile == avctx->profile // update decoder if profile changed. but now only surfaces are updated
+                && avctx->hwaccel_context)
+            return pi_fmt[i];
+        // TODO: manage uswc here for x86 (surface size is decoder dependent)
+        avctx->hwaccel_context = setup(avctx);
+        if (!avctx->hwaccel_context) {
             qWarning("acceleration setup failure");
             break;
         }
+        hw_w = codedWidth((avctx));
+        hw_h = codedHeight(avctx);
+        hw_profile = avctx->profile;
         qDebug("Using %s for hardware decoding.", qPrintable(description));
-        p_context->draw_horiz_band = NULL; //??
         return pi_fmt[i];
     }
     close();
 end:
     qWarning("hardware acceleration is not available" );
     /* Fallback to default behaviour */
-    return avcodec_default_get_format(p_context, pi_fmt);
+    return avcodec_default_get_format(avctx, pi_fmt);
 }
 
 int VideoDecoderFFmpegHWPrivate::codedWidth(AVCodecContext *avctx) const
@@ -225,8 +232,9 @@ VideoDecoderFFmpegHW::VideoDecoderFFmpegHW(VideoDecoderFFmpegHWPrivate &d):
                 .arg(tr("Not implemented for all codecs"))
                 .arg(tr("OptimizedCopy: copy from USWC memory optimized by SSE4.1"))
                 .arg(tr("GenericCopy: slowest. Generic cpu copy")));
-    setProperty("detail_threads", QString("%1\n%2\n%3")
+    setProperty("detail_threads", QString("%1\n%2\n%3\n%4")
                 .arg(tr("Number of decoding threads. Set before open. Maybe no effect for some decoders"))
+                .arg(tr("Multithread decoding may crash"))
                 .arg(tr("0: auto"))
                 .arg(tr("1: single thread decoding")));
     Q_UNUSED(QObject::tr("ZeroCopy"));
