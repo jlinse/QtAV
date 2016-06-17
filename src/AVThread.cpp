@@ -212,7 +212,7 @@ void AVThread::pause(bool p)
         return;
     d.paused = p;
     if (!d.paused) {
-        qDebug("wake up paused thread");
+        qDebug("wake up paused thread %d", p);
         d.next_pause = false;
         d.cond.wakeAll();
     }

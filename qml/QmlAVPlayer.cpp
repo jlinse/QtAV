@@ -106,8 +106,10 @@ void QmlAVPlayer::componentComplete()
         mpPlayer->setFile(QUrl::fromPercentEncoding(mSource.toEncoded()));
         if (mAutoLoad)
             mpPlayer->load();
-        if (mAutoPlay)
-            mpPlayer->play();
+        if (mAutoPlay) {
+            m_complete = true;
+            setPlaybackState(PlayingState);
+        }
     }
 
     m_complete = true;
@@ -513,6 +515,8 @@ void QmlAVPlayer::setLoopCount(int c)
         return;
     }
     mLoopCount = c;
+    if(mpPlayer) //update here so we can effect current playback.
+        mpPlayer->setRepeat(mLoopCount - 1);
     Q_EMIT loopCountChanged();
 }
 
