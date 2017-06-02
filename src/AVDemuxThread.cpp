@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -52,6 +52,8 @@ public:
         if (!mDemuxThread)
             return;
         if (mDemuxThread->isEnd())
+            return;
+        if (mDemuxThread->atEndOfMedia())
             return;
         mDemuxThread->updateBufferState(); // ensure detect buffering immediately
         AVThread *thread = mDemuxThread->videoThread();
@@ -173,7 +175,7 @@ void AVDemuxThread::stepBackward()
             AVThread *avt = demux_thread->videoThread();
             avt->packetQueue()->clear(); // clear here
             if (pts <= 0) {
-                demux_thread->demuxer->seek(qint64(-pts*1000.0) - 1000LL);
+                demux_thread->demuxer->seek(qint64(-pts*1000.0) - 500LL);
                 QVector<qreal> ts;
                 qreal t = -1.0;
                 while (t < -pts) {
@@ -183,9 +185,12 @@ void AVDemuxThread::stepBackward()
                     t = demux_thread->demuxer->packet().pts;
                     ts.push_back(t);
                 }
+                const qreal t0 = ts.back();
                 ts.pop_back();
+                const qreal dt = t0 - ts.back();
                 pts = ts.back();
-                // FIXME: sometimes can not seek to the previous pts, the result pts is always current pts
+                // FIXME: sometimes can not seek to the previous pts, the result pts is always current pts, so let the target pts a little earlier
+                pts -= dt/2.0;
             }
             qDebug("step backward: %lld, %f", qint64(pts*1000.0), pts);
             demux_thread->video_thread->setDropFrameOnSeek(false);
@@ -317,6 +322,11 @@ bool AVDemuxThread::isPaused() const
 bool AVDemuxThread::isEnd() const
 {
     return end;
+}
+
+bool AVDemuxThread::atEndOfMedia() const
+{
+    return demuxer->atEnd();
 }
 
 PacketBuffer* AVDemuxThread::buffer()
@@ -460,6 +470,7 @@ void AVDemuxThread::frameDeliveredOnStepForward()
         thread->clock()->setClockAuto(clock_type & 1);
         thread->clock()->setClockType(AVClock::ClockType(clock_type/2));
         clock_type = -1;
+        thread->clock()->updateExternalClock((thread->previousHistoryPts() - thread->clock()->initialValue())*1000.0);
     }
     Q_EMIT stepFinished();
 }
@@ -589,6 +600,10 @@ void AVDemuxThread::run()
             msleep(100);
             continue;
         }
+        if (demuxer->mediaStatus() == StalledMedia) {
+            qDebug("stalled media. exiting demuxing thread");
+            break;
+        }
         was_end = 0;
         if (tryPause()) {
             continue; //the queue is empty and will block
@@ -701,7 +716,10 @@ void AVDemuxThread::run()
     }
     thread->disconnect(this, SIGNAL(seekFinished(qint64)));
     qDebug("Demux thread stops running....");
-    Q_EMIT mediaStatusChanged(QtAV::EndOfMedia);
+    if (demuxer->atEnd())
+        Q_EMIT mediaStatusChanged(QtAV::EndOfMedia);
+    else
+        Q_EMIT mediaStatusChanged(QtAV::StalledMedia);
 }
 
 bool AVDemuxThread::tryPause(unsigned long timeout)

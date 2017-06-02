@@ -152,9 +152,10 @@ public:
     }
 
     struct FrameInfo {
-        FrameInfo(qreal t = 0, int s = 0) : timestamp(t), data_size(s) {}
+        FrameInfo(const QByteArray& d = QByteArray(), qreal t = 0, int us = 0) : timestamp(t), duration(us), data(d) {}
         qreal timestamp;
-        int data_size;
+        int duration; // in us
+        QByteArray data;
     };
 
     void resetStatus() {
@@ -177,7 +178,7 @@ public:
     qreal vol;
     qreal speed;
     AudioFormat format;
-    QByteArray data;
+    AudioFormat requested;
     //AudioFrame audio_frame;
     quint32 nb_buffers;
     qint32 buffer_samples;
@@ -213,14 +214,13 @@ AudioOutputPrivate::~AudioOutputPrivate()
 
 void AudioOutputPrivate::playInitialData()
 {
-    if (!backend)
-        return;
     const char c = (format.sampleFormat() == AudioFormat::SampleFormat_Unsigned8
                     || format.sampleFormat() == AudioFormat::SampleFormat_Unsigned8Planar)
             ? 0x80 : 0;
     for (quint32 i = 0; i < nb_buffers; ++i) {
-        backend->write(QByteArray(buffer_samples*format.bytesPerSample(), c)); // fill silence byte, not always 0. AudioFormat.silenceByte
-        frame_infos.push_back(FrameInfo(0, 1*format.bytesPerSample())); // initial data can be small (1 instead of buffer_samples)
+        const QByteArray data(backend->buffer_size, c);
+        backend->write(data); // fill silence byte, not always 0. AudioFormat.silenceByte
+        frame_infos.push_back(FrameInfo(data, 0, 0)); // initial data can be small (1 instead of buffer_samples)
     }
     backend->play();
 }
@@ -257,8 +257,6 @@ AudioOutput::AudioOutput(QObject* parent)
     , AVOutput(*new AudioOutputPrivate())
 {
     qDebug() << "Registered audio backends: " << AudioOutput::backendsAvailable(); // call this to register
-    d_func().format.setSampleFormat(AudioFormat::SampleFormat_Signed16);
-    d_func().format.setChannelLayout(AudioFormat::ChannelLayout_Stereo);
     setBackends(AudioOutputBackend::defaultPriority()); //ensure a backend is available
 }
 
@@ -317,7 +315,7 @@ void AudioOutput::setBackends(const QStringList &backendNames)
         connect(d.backend, SIGNAL(muteReported(bool)), SLOT(reportMute(bool)));
     }
 
-    emit backendsChanged();
+    Q_EMIT backendsChanged();
 }
 
 QStringList AudioOutput::backends() const
@@ -357,6 +355,7 @@ bool AudioOutput::open()
     QMutexLocker lock(&d.mutex);
     Q_UNUSED(lock);
     d.available = false;
+    d.paused = false;
     d.resetStatus();
     if (!d.backend)
         return false;
@@ -380,6 +379,7 @@ bool AudioOutput::close()
     QMutexLocker lock(&d.mutex);
     Q_UNUSED(lock);
     d.available = false;
+    d.paused = false;
     d.resetStatus();
     if (!d.backend)
         return false;
@@ -398,84 +398,113 @@ bool AudioOutput::play(const QByteArray &data, qreal pts)
     DPTR_D(AudioOutput);
     if (!d.backend)
         return false;
-    receiveData(data, pts);
+    if (!receiveData(data, pts))
+        return false;
     return d.backend->play();
+}
+
+void AudioOutput::pause(bool value)
+{
+    DPTR_D(AudioOutput);
+    d.paused = value;
+    // backend pause? Without backend pause, the buffered data will be played
+}
+
+bool AudioOutput::isPaused() const
+{
+    return d_func().paused;
 }
 
 bool AudioOutput::receiveData(const QByteArray &data, qreal pts)
 {
     DPTR_D(AudioOutput);
-    if (d.paused)
+    if (isPaused())
         return false;
-    d.data = data;
+    QByteArray queue_data(data);
     if (isMute() && d.sw_mute) {
         char s = 0;
         if (d.format.isUnsigned() && !d.format.isFloat())
             s = 1<<((d.format.bytesPerSample() << 3)-1);
-        d.data.fill(s);
+        queue_data.fill(s);
     } else {
         if (!qFuzzyCompare(volume(), (qreal)1.0)
                 && d.sw_volume
                 && d.scale_samples
                 ) {
             // TODO: af_volume needs samples_align to get nb_samples
-            const int nb_samples = d.data.size()/d.format.bytesPerSample();
-            quint8 *dst = (quint8*)d.data.constData();
+            const int nb_samples = queue_data.size()/d.format.bytesPerSample();
+            quint8 *dst = (quint8*)queue_data.constData();
             d.scale_samples(dst, dst, nb_samples, d.volume_i, volume());
         }
     }
     // wait after all data processing finished to reduce time error
-    if (!waitForNextBuffer()) {
+    if (!waitForNextBuffer()) { // TODO: wait or not parameter, set by user (async)
         qWarning("ao backend maybe not open");
         d.resetStatus();
         return false;
     }
-    d.frame_infos.push_back(AudioOutputPrivate::FrameInfo(pts, data.size()));
-    if (!d.backend || !isOpen())
-        return false;
-    return d.backend->write(d.data);
+    d.frame_infos.push_back(AudioOutputPrivate::FrameInfo(queue_data, pts, d.format.durationForBytes(queue_data.size())));
+    return d.backend->write(queue_data); // backend is not null here
 }
 
-void AudioOutput::setAudioFormat(const AudioFormat& format)
+AudioFormat AudioOutput::setAudioFormat(const AudioFormat& format)
 {
     DPTR_D(AudioOutput);
     // no support check because that may require an open device(AL) while this function is called before ao.open()
     if (d.format == format)
-        return;
+        return format;
+    d.requested = format;
+    if (!d.backend) {
+        d.format = AudioFormat();
+        d.scale_samples = NULL;
+        return AudioFormat();
+    }
+    if (d.backend->isSupported(format)) {
+        d.format = format;
+        d.updateSampleScaleFunc();
+        return format;
+    }
+    AudioFormat af(format);
+    // set channel layout first so that isSupported(AudioFormat) will not always false
+    if (!d.backend->isSupported(format.channelLayout()))
+        af.setChannelLayout(AudioFormat::ChannelLayout_Stereo); // assume stereo is supported
+    bool check_up = af.bytesPerSample() == 1;
+    while (!d.backend->isSupported(af) && !d.backend->isSupported(af.sampleFormat())) {
+        if (af.isPlanar()) {
+            af.setSampleFormat(ToPacked(af.sampleFormat()));
+            continue;
+        }
+        if (af.isFloat()) {
+            if (af.bytesPerSample() == 8)
+                af.setSampleFormat(AudioFormat::SampleFormat_Float);
+            else
+                af.setSampleFormat(AudioFormat::SampleFormat_Signed32);
+        } else {
+            af.setSampleFormat(AudioFormat::make(af.bytesPerSample()/2, false, (af.bytesPerSample() == 2) | af.isUnsigned() /* U8, no S8 */, false));
+        }
+        if (af.bytesPerSample() < 1) {
+            if (!check_up) {
+                qWarning("No sample format found");
+                break;
+            }
+            af.setSampleFormat(AudioFormat::SampleFormat_Float);
+            check_up = false;
+            continue;
+        }
+    }
+    d.format = af;
     d.updateSampleScaleFunc();
-    d.format = format;
+    return af;
 }
 
-AudioFormat& AudioOutput::audioFormat()
+const AudioFormat& AudioOutput::requestedFormat() const
 {
-    return d_func().format;
+    return d_func().requested;
 }
 
 const AudioFormat& AudioOutput::audioFormat() const
 {
     return d_func().format;
-}
-
-void AudioOutput::setSampleRate(int rate)
-{
-    d_func().format.setSampleRate(rate);
-}
-
-int AudioOutput::sampleRate() const
-{
-    return d_func().format.sampleRate();
-}
-
-// TODO: check isSupported
-void AudioOutput::setChannels(int channels)
-{
-    DPTR_D(AudioOutput);
-    d.format.setChannels(channels);
-}
-
-int AudioOutput::channels() const
-{
-    return d_func().format.channels();
 }
 
 void AudioOutput::setVolume(qreal value)
@@ -529,38 +558,6 @@ bool AudioOutput::isSupported(const AudioFormat &format) const
     return d.backend->isSupported(format);
 }
 
-bool AudioOutput::isSupported(AudioFormat::SampleFormat sampleFormat) const
-{
-    DPTR_D(const AudioOutput);
-    if (!d.backend)
-        return false;
-    return d.backend->isSupported(sampleFormat);
-}
-
-bool AudioOutput::isSupported(AudioFormat::ChannelLayout channelLayout) const
-{
-    DPTR_D(const AudioOutput);
-    if (!d.backend)
-        return false;
-    return d.backend->isSupported(channelLayout);
-}
-
-AudioFormat::SampleFormat AudioOutput::preferredSampleFormat() const
-{
-    DPTR_D(const AudioOutput);
-    if (!d.backend)
-        return AudioFormat::SampleFormat_Signed16;
-    return d.backend->preferredSampleFormat();
-}
-
-AudioFormat::ChannelLayout AudioOutput::preferredChannelLayout() const
-{
-    DPTR_D(const AudioOutput);
-    if (!d.backend)
-        return AudioFormat::ChannelLayout_Stereo;
-    return d.backend->preferredChannelLayout();
-}
-
 int AudioOutput::bufferSize() const
 {
     return bufferSamples() * d_func().format.bytesPerSample();
@@ -612,21 +609,21 @@ AudioOutput::DeviceFeatures AudioOutput::supportedDeviceFeatures() const
     return d.backend->supportedFeatures();
 }
 
-bool AudioOutput::waitForNextBuffer()
+bool AudioOutput::waitForNextBuffer() // parameter bool wait: if no wait and no next buffer, return false
 {
     DPTR_D(AudioOutput);
     if (d.frame_infos.empty())
         return true;
-    if (!d.backend)
-        return false;
     //don't return even if we can add buffer because we don't know when a buffer is processed and we have /to update dequeue index
     // openal need enqueue to a dequeued buffer! why sl crash
     bool no_wait = false;//d.canAddBuffer();
     const AudioOutputBackend::BufferControl f = d.backend->bufferControl();
     int remove = 0;
+    const AudioOutputPrivate::FrameInfo &fi(d.frame_infos.front());
     if (f & AudioOutputBackend::Blocking) {
         remove = 1;
     } else if (f & AudioOutputBackend::CountCallback) {
+        d.backend->acquireNextBuffer();
         remove = 1;
     } else if (f & AudioOutputBackend::BytesCallback) {
 #if AO_USE_TIMER
@@ -636,21 +633,21 @@ bool AudioOutput::waitForNextBuffer()
         d.processed_remain = d.backend->getWritableBytes();
         if (d.processed_remain < 0)
             return false;
-        const int next = d.frame_infos.front().data_size;
+        const int next = fi.data.size();
         //qDebug("remain: %d-%d, size: %d, next: %d", processed, d.processed_remain, d.data.size(), next);
         qint64 last_wait = 0LL;
-        while (d.processed_remain - processed < next || d.processed_remain < d.data.size()) { //implies next > 0
+        while (d.processed_remain - processed < next || d.processed_remain < fi.data.size()) { //implies next > 0
             const qint64 us = d.format.durationForBytes(next - (d.processed_remain - processed));
-            QMutexLocker lock(&d.mutex);
-            Q_UNUSED(lock);
-            d.cond.wait(&d.mutex, us/1000LL);
+            d.uwait(us);
             d.processed_remain = d.backend->getWritableBytes();
             if (d.processed_remain < 0)
                 return false;
+#if AO_USE_TIMER
             if (!d.timer.isValid()) {
                 qWarning("invalid timer. closed in another thread");
                 return false;
             }
+#endif
             if (us >= last_wait
 #if AO_USE_TIMER
                     && d.timer.elapsed() > 1000
@@ -661,13 +658,13 @@ bool AudioOutput::waitForNextBuffer()
             last_wait = us;
         }
         processed = d.processed_remain - processed;
-        d.processed_remain -= d.data.size(); //ensure d.processed_remain later is greater
+        d.processed_remain -= fi.data.size(); //ensure d.processed_remain later is greater
         remove = -processed; // processed_this_period
     } else if (f & AudioOutputBackend::PlayedBytes) {
         d.processed_remain = d.backend->getPlayedBytes();
-        const int next = d.frame_infos.front().data_size;
+        const int next = fi.data.size();
         // TODO: avoid always 0
-        // TODO: compare processed_remain with d.data.size because input chuncks can be in different sizes
+        // TODO: compare processed_remain with fi.data.size because input chuncks can be in different sizes
         while (!no_wait && d.processed_remain < next) {
             const qint64 us = d.format.durationForBytes(next - d.processed_remain);
             if (us < 1000LL)
@@ -689,7 +686,7 @@ bool AudioOutput::waitForNextBuffer()
         qint64 us = 0;
         while (!no_wait && c < 1) {
             if (us <= 0)
-                us = d.format.durationForBytes(d.frame_infos.front().data_size);
+                us = fi.duration;
 #if AO_USE_TIMER
             elapsed = d.timer.restart();
             if (elapsed > 0 && us > elapsed*1000LL)
@@ -709,9 +706,9 @@ bool AudioOutput::waitForNextBuffer()
         if (processed < 0)
             processed += bufferSizeTotal();
         d.play_pos = s;
-        const int next = d.frame_infos.front().data_size;
+        const int next = fi.data.size();
         int writable_size = d.processed_remain + processed;
-        while (!no_wait && (/*processed < next ||*/ writable_size < d.data.size()) && next > 0) {
+        while (!no_wait && (/*processed < next ||*/ writable_size < fi.data.size()) && next > 0) {
             const qint64 us = d.format.durationForBytes(next - writable_size);
             d.uwait(us);
             s = d.backend->getOffsetByBytes();
@@ -722,7 +719,7 @@ bool AudioOutput::waitForNextBuffer()
             d.play_pos = s;
         }
         d.processed_remain += processed;
-        d.processed_remain -= d.data.size(); //ensure d.processed_remain later is greater
+        d.processed_remain -= fi.data.size(); //ensure d.processed_remain later is greater
         remove = -processed;
     } else if (f & AudioOutputBackend::OffsetIndex) {
         int n = d.backend->getOffset();
@@ -733,7 +730,7 @@ bool AudioOutput::waitForNextBuffer()
         // TODO: timer
         // TODO: avoid always 0
         while (!no_wait && processed < 1) {
-            d.uwait(d.format.durationForBytes(d.frame_infos.front().data_size));
+            d.uwait(fi.duration);
             n = d.backend->getOffset();
             processed = n - d.play_pos;
             if (processed < 0)
@@ -746,7 +743,7 @@ bool AudioOutput::waitForNextBuffer()
         return false;
     }
     if (remove < 0) {
-        int next = d.frame_infos.front().data_size;
+        int next = fi.data.size();
         int free_bytes = -remove;//d.processed_remain;
         while (free_bytes >= next && next > 0) {
             free_bytes -= next;
@@ -755,7 +752,7 @@ bool AudioOutput::waitForNextBuffer()
                 break;
             }
             d.frame_infos.pop_front();
-            next = d.frame_infos.front().data_size;
+            next = d.frame_infos.front().data.size();
         }
         //qDebug("remove: %d, unremoved bytes < %d, writable_bytes: %d", remove, free_bytes, d.processed_remain);
         return true;

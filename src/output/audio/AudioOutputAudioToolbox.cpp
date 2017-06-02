@@ -1,6 +1,6 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2016-02-11)
 
@@ -18,7 +18,7 @@
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
-
+// FIXME: pause=>resume error
 #include "QtAV/private/AudioOutputBackend.h"
 #include <QtCore/QQueue>
 #include <QtCore/QSemaphore>
@@ -45,6 +45,7 @@ public:
     void onCallback() Q_DECL_OVERRIDE;
     bool write(const QByteArray& data) Q_DECL_OVERRIDE;
     bool play() Q_DECL_OVERRIDE;
+    bool setVolume(qreal value) override;
 private:
     static void outCallback(void* inUserData, AudioQueueRef inAQ, AudioQueueBufferRef inBuffer);
     void tryPauseTimeline();
@@ -64,20 +65,14 @@ typedef AudioOutputAudioToolbox AudioOutputBackendAudioToolbox;
 static const AudioOutputBackendId AudioOutputBackendId_AudioToolbox = mkid::id32base36_2<'A', 'T'>::value;
 FACTORY_REGISTER(AudioOutputBackend, AudioToolbox, kName)
 
-#define AT_ENSURE(FUNC, ...) \
+#define AT_ENSURE(FUNC, ...) AQ_RUN_CHECK(FUNC, return __VA_ARGS__)
+#define AT_WARN(FUNC, ...) AQ_RUN_CHECK(FUNC)
+#define AQ_RUN_CHECK(FUNC, ...) \
     do { \
         OSStatus ret = FUNC; \
         if (ret != noErr) { \
-            qWarning("AudioOutputAudioToolbox Error>>> " #FUNC " (%d)", (int)ret); \
-            return __VA_ARGS__; \
-        } \
-    } while(0)
-
-#define AT_WARN(FUNC, ...) \
-    do { \
-        OSStatus ret = FUNC; \
-        if (ret != noErr) { \
-            qWarning("AudioOutputAudioToolbox Error>>> " #FUNC " (%d)", ret); \
+            qWarning("AudioBackendAudioQueue Error>>> " #FUNC ": %#x", ret); \
+            __VA_ARGS__; \
         } \
     } while(0)
 
@@ -123,6 +118,7 @@ void AudioOutputAudioToolbox::outCallback(void* inUserData, AudioQueueRef inAQ, 
 
 AudioOutputAudioToolbox::AudioOutputAudioToolbox(QObject *parent)
     : AudioOutputBackend(AudioOutput::DeviceFeatures()
+                         |AudioOutput::SetVolume
                          , parent)
     , m_queue(NULL)
     , m_waiting(false)
@@ -155,7 +151,7 @@ void AudioOutputAudioToolbox::tryPauseTimeline()
 
 bool AudioOutputAudioToolbox::isSupported(AudioFormat::SampleFormat smpfmt) const
 {
-    return !AudioFormat::isPlanar(smpfmt);
+    return !IsPlanar(smpfmt);
 }
 
 bool AudioOutputAudioToolbox::open()
@@ -220,8 +216,24 @@ bool AudioOutputAudioToolbox::write(const QByteArray& data)
 
 bool AudioOutputAudioToolbox::play()
 {
-    // no running check is fine
-    AT_ENSURE(AudioQueueStart(m_queue, NULL), false);
+    OSType err = AudioQueueStart(m_queue, nullptr);
+    if (err == '!pla') { //AVAudioSessionErrorCodeCannotStartPlaying
+        qWarning("AudioQueueStart error: AVAudioSessionErrorCodeCannotStartPlaying. May play in background");
+        close();
+        open();
+        return false;
+    }
+    if (err != noErr) {
+        qWarning("AudioQueueStart error: %#x", noErr);
+        return false;
+    }
+    return true;
+}
+
+bool AudioOutputAudioToolbox::setVolume(qreal value)
+{
+    // iOS document says the range is [0,1]. But >1.0 works on macOS. So no manually check range here
+    AT_ENSURE(AudioQueueSetParameter(m_queue, kAudioQueueParam_Volume, value), false);
     return true;
 }
 } //namespace QtAV

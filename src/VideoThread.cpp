@@ -218,7 +218,12 @@ bool VideoThread::deliverVideoFrame(VideoFrame &frame)
     if (vo && (!vo->isSupported(frame.pixelFormat())
             || (vo->isPreferredPixelFormatForced() && vo->preferredPixelFormat() != frame.pixelFormat())
             )) {
-        VideoFrame outFrame(d.conv.convert(frame, vo->preferredPixelFormat()));
+        VideoFormat fmt(frame.format());
+        if (fmt.hasPalette() || fmt.isRGB())
+            fmt = VideoFormat::Format_RGB32;
+        else
+            fmt = vo->preferredPixelFormat();
+        VideoFrame outFrame(d.conv.convert(frame, fmt));
         if (!outFrame.isValid()) {
             d.outputSet->unlock();
             return false;
@@ -272,7 +277,7 @@ void VideoThread::run()
     const char* pkt_data = NULL; // workaround for libav9 decode fail but error code >= 0
     qint64 last_deliver_time = 0;
     int sync_id = 0;
-    while (true) {
+    while (!d.stop) {
         processNextTask();
         //TODO: why put it at the end of loop then stepForward() not work?
         //processNextTask tryPause(timeout) and  and continue outter loop
@@ -310,8 +315,6 @@ void VideoThread::run()
             wait_key_frame = false;
             qDebug("video thread gets an eof packet.");
         } else {
-            if (d.stop) // user stop
-                break;
             //qDebug() << pkt.position << " pts:" <<pkt.pts;
             //Compare to the clock
             if (!pkt.isValid()) {
@@ -321,7 +324,8 @@ void VideoThread::run()
                 d.dec->flush(); //d.dec instead of dec because d.dec maybe changed in processNextTask() but dec is not
                 d.render_pts0 = pkt.pts;
                 sync_id = pkt.position;
-                qDebug("video seek: %.3f, id: %d", d.render_pts0, sync_id);
+                if (pkt.pts >= 0)
+                    qDebug("video seek: %.3f, id: %d", d.render_pts0, sync_id);
                 d.pts_history = ring<qreal>(d.pts_history.capacity());
                 v_a = 0;
                 continue;
@@ -333,7 +337,7 @@ void VideoThread::run()
             nb_no_pts = 0;
         }
         if (nb_no_pts > 5) {
-            qDebug("the stream may have no pts. force fps to: %f", d.force_fps < 0 ? -d.force_fps : 24);
+            qDebug("the stream may have no pts. force fps to: %f/%f", d.force_fps < 0 ? -d.force_fps : 24, d.force_fps);
             d.clock->setClockAuto(false);
             d.clock->setClockType(AVClock::VideoClock);
             if (d.force_fps < 0)
@@ -613,6 +617,14 @@ void VideoThread::run()
             //qDebug("v_a:%.4f, v_a_: %.4f", v_a, v_a_);
         }
     }
+#if 0
+    if (d.stop) {// user stop
+        // decode eof?
+        qDebug("decoding eof...");
+
+        while (d.dec && d.dec->decode(Packet::createEOF())) {d.dec->flush();}
+    }
+#endif
     d.packets.clear();
     qDebug("Video thread stops running...");
 }

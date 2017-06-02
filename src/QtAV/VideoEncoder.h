@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2015)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -77,10 +77,13 @@ public:
     static qreal defaultFrameRate() { return 25;}
     /*!
      * \brief setPixelFormat
-     * If not set or set to an invalid format, a supported format will be used and pixelFormat() will be that format after open()
-     * \param format
+     * If not set or set to an unsupported format, a supported format will be used and pixelFormat() will be that format after open()
      */
     void setPixelFormat(const VideoFormat::PixelFormat format);
+    /*!
+     * \brief pixelFormat
+     * \return user requested format. may be different with actually used format
+     */
     VideoFormat::PixelFormat pixelFormat() const;
     // TODO: supportedPixelFormats() const;
 Q_SIGNALS:

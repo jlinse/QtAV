@@ -1,4 +1,4 @@
-VERSION = $$QTAV_VERSION
+!static:VERSION = $$QTAV_VERSION # vc: will create exp and lib, result in static build error
 QT += sql
 android {
   QT += androidextras
@@ -20,7 +20,7 @@ QML_IMPORT_PATH =
 
 RESOURCES += \
     qmlplayer.qrc
-TRANSLATIONS = i18n/QMLPlayer_zh_CN.ts
+TRANSLATIONS = i18n/QMLPlayer_zh_CN.ts i18n/QMLPlayer.ts
 
 # The .cpp file which was generated for your project. Feel free to hack it.
 SOURCES += main.cpp

@@ -36,10 +36,13 @@ extern "C" {
 #else
 #define PIXFMT_NE(B, L) VideoFormat::Format_##L
 #endif
-
+// ffmpeg3.0 151aa2e/ libav>11 2268db2
+#if AV_MODULE_CHECK(LIBAVUTIL, 55, 0, 0, 0, 100)
+#define DESC_VAL(X) (X)
+#else
+#define DESC_VAL(X) (X##_minus1 + 1)
+#endif
 namespace QtAV {
-
-// TODO: default ctor, dtor, copy ctor required by implicit sharing?
 class VideoFormatPrivate : public QSharedData
 {
 public:
@@ -149,18 +152,18 @@ private:
         bpp = 0;
         bpp_pad = 0;
         //libavutil55: depth, step, offset
-        bpc = pixdesc->comp[0].depth_minus1+1;
+        bpc = DESC_VAL(pixdesc->comp[0].depth);
         const int log2_pixels = pixdesc->log2_chroma_w + pixdesc->log2_chroma_h;
         int steps[4];
         memset(steps, 0, sizeof(steps));
         for (int c = 0; c < pixdesc->nb_components; c++) {
             const AVComponentDescriptor *comp = &pixdesc->comp[c];
             int s = c == 1 || c == 2 ? 0 : log2_pixels; //?
-            bpps[comp->plane] += (comp->depth_minus1 + 1);
-            steps[comp->plane] = (comp->step_minus1 + 1) << s;
+            bpps[comp->plane] += DESC_VAL(comp->depth);
+            steps[comp->plane] = DESC_VAL(comp->step) << s;
             channels[comp->plane] += 1;
-            bpp += (comp->depth_minus1 + 1) << s;
-            if (comp->depth_minus1+1 != bpc)
+            bpp += DESC_VAL(comp->depth) << s;
+            if (DESC_VAL(comp->depth) != bpc)
                 bpc = 0;
         }
         for (int i = 0; i < planes; ++i) {
@@ -370,6 +373,11 @@ static const struct {
     { VideoFormat::Format_VYUY, QTAV_PIX_FMT_C(UYVY422) }, // FIXME: hack for invalid ffmpeg formats
 
     { VideoFormat::Format_VYU, QTAV_PIX_FMT_C(RGB32) },
+#ifdef AV_PIX_FMT_XYZ12
+    { VideoFormat::Format_XYZ12, QTAV_PIX_FMT_C(XYZ12) },
+    { VideoFormat::Format_XYZ12LE, QTAV_PIX_FMT_C(XYZ12LE) },
+    { VideoFormat::Format_XYZ12BE, QTAV_PIX_FMT_C(XYZ12BE) },
+#endif
     { VideoFormat::Format_Invalid, QTAV_PIX_FMT_C(NONE) },
 };
 
@@ -715,6 +723,11 @@ bool VideoFormat::isPlanar() const
 bool VideoFormat::isRGB() const
 {
     return (d->flags() & AV_PIX_FMT_FLAG_RGB) == AV_PIX_FMT_FLAG_RGB && d->pixfmt != Format_VYU;
+}
+
+bool VideoFormat::isXYZ() const
+{
+    return d->pixfmt == Format_XYZ12 || d->pixfmt == Format_XYZ12LE || d->pixfmt == Format_XYZ12BE;
 }
 
 bool VideoFormat::hasAlpha() const

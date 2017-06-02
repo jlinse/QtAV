@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2014)
 
@@ -29,7 +29,7 @@
 #include "QtAV/SurfaceInterop.h"
 #include "QtAV/VideoShader.h"
 #include "ShaderManager.h"
-#include "opengl/GeometryRenderer.h"
+#include "QtAV/GeometryRenderer.h"
 #include "opengl/OpenGLHelper.h"
 #include "utils/Logger.h"
 
@@ -44,9 +44,12 @@ public:
         , manager(0)
         , material(new VideoMaterial())
         , material_type(0)
+        , norm_viewport(true)
         , update_geo(true)
         , tex_target(0)
         , valiad_tex_width(1.0)
+        , mesh_type(OpenGLVideo::RectMesh)
+        , geometry(NULL)
         , user_shader(NULL)
     {
     }
@@ -55,11 +58,12 @@ public:
             delete material;
             material = 0;
         }
+        delete geometry;
     }
 
     void resetGL() {
         ctx = 0;
-        gr.updateBuffers(NULL);
+        gr.updateGeometry(NULL);
         if (!manager)
             return;
         manager->setParent(0);
@@ -71,29 +75,29 @@ public:
         }
     }
     // update geometry(vertex array) set attributes or bind VAO/VBO.
-    void bindAttributes(VideoShader* shader, const QRectF& t, const QRectF& r);
-    void unbindAttributes(VideoShader*) {
-        gr.unbindBuffers(&geometry);
-    }
+    void updateGeometry(VideoShader* shader, const QRectF& t, const QRectF& r);
 public:
     QOpenGLContext *ctx;
     ShaderManager *manager;
     VideoMaterial *material;
     qint64 material_type;
+    bool norm_viewport;
+    bool has_a;
     bool update_geo;
     int tex_target;
     qreal valiad_tex_width;
     QSize video_size;
     QRectF target;
     QRectF roi; //including invalid padding width
-    TexturedGeometry geometry;
+    OpenGLVideo::MeshType mesh_type;
+    TexturedGeometry *geometry;
     GeometryRenderer gr;
     QRectF rect;
     QMatrix4x4 matrix;
     VideoShader *user_shader;
 };
 
-void OpenGLVideoPrivate::bindAttributes(VideoShader* shader, const QRectF &t, const QRectF &r)
+void OpenGLVideoPrivate::updateGeometry(VideoShader* shader, const QRectF &t, const QRectF &r)
 {
     // also check size change for normalizedROI computation if roi is not normalized
     const bool roi_changed = valiad_tex_width != material->validTextureWidth() || roi != r || video_size != material->frameSize();
@@ -107,7 +111,8 @@ void OpenGLVideoPrivate::bindAttributes(VideoShader* shader, const QRectF &t, co
         tex_target = shader->textureTarget();
         update_geo = true;
     }
-    QRectF& target_rect = rect;
+    // (-1, -1, 2, 2) must flip y
+    QRectF target_rect = norm_viewport ? QRectF(-1, 1, 2, -2) : rect;
     if (target.isValid()) {
         if (roi_changed || target != t) {
             target = t;
@@ -119,30 +124,36 @@ void OpenGLVideoPrivate::bindAttributes(VideoShader* shader, const QRectF &t, co
             update_geo = true;
         }
     }
-    if (!update_geo) {
-        gr.bindBuffers(&geometry);
+    if (!update_geo)
         return;
-    }
+    delete geometry;
+    geometry = NULL;
+    if (mesh_type == OpenGLVideo::SphereMesh)
+        geometry = new Sphere();
+    else
+        geometry = new TexturedGeometry();
     //qDebug("updating geometry...");
     // setTextureCount may change the vertex data. Call it before setRect()
-    geometry.setTextureCount(shader->textureTarget() == GL_TEXTURE_RECTANGLE ? tc : 1);
-    geometry.setRect(target_rect, material->mapToTexture(0, roi));
+    qDebug() << "target rect: " << target_rect ;
+    geometry->setTextureCount(shader->textureTarget() == GL_TEXTURE_RECTANGLE ? tc : 1);
+    geometry->setGeometryRect(target_rect);
+    geometry->setTextureRect(material->mapToTexture(0, roi));
     if (shader->textureTarget() == GL_TEXTURE_RECTANGLE) {
         for (int i = 1; i < tc; ++i) {
             // tc can > planes, but that will compute chroma plane
-            geometry.setTextureRect(material->mapToTexture(i, roi), i);
+            geometry->setTextureRect(material->mapToTexture(i, roi), i);
         }
     }
+    geometry->create();
     update_geo = false;
-    gr.updateBuffers(&geometry);
-    gr.bindBuffers(&geometry);
+    gr.updateGeometry(geometry);
 }
 
 OpenGLVideo::OpenGLVideo() {}
 
 bool OpenGLVideo::isSupported(VideoFormat::PixelFormat pixfmt)
 {
-    return pixfmt != VideoFormat::Format_RGB48BE;
+    return pixfmt != VideoFormat::Format_RGB48BE && pixfmt != VideoFormat::Format_Invalid;
 }
 
 void OpenGLVideo::setOpenGLContext(QOpenGLContext *ctx)
@@ -186,7 +197,7 @@ void OpenGLVideo::setOpenGLContext(QOpenGLContext *ctx)
     // TODO: what if ctx is delete?
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
     d.manager = new ShaderManager(ctx);
-    QObject::connect(ctx, SIGNAL(aboutToBeDestroyed()), this, SLOT(resetGL()), Qt::DirectConnection); //direct?
+    QObject::connect(ctx, SIGNAL(aboutToBeDestroyed()), this, SLOT(resetGL()), Qt::DirectConnection); // direct to make sure there is a valid context. makeCurrent in window.aboutToBeDestroyed()?
 #else
     d.manager = new ShaderManager(this);
 #endif
@@ -227,17 +238,29 @@ QOpenGLContext* OpenGLVideo::openGLContext()
 void OpenGLVideo::setCurrentFrame(const VideoFrame &frame)
 {
     d_func().material->setCurrentFrame(frame);
+    d_func().has_a = frame.format().hasAlpha();
 }
 
 void OpenGLVideo::setProjectionMatrixToRect(const QRectF &v)
 {
+    setViewport(v);
+}
+
+void OpenGLVideo::setViewport(const QRectF &r)
+{
     DPTR_D(OpenGLVideo);
-    d.rect = v;
-    d.matrix.setToIdentity();
-    d.matrix.ortho(v);
+    d.rect = r;
+    if (d.norm_viewport) {
+        d.matrix.setToIdentity();
+        if (d.mesh_type == SphereMesh)
+            d.matrix.perspective(45, 1, 0.1, 100); // for sphere
+    } else {
+        d.matrix.setToIdentity();
+        d.matrix.ortho(r);
+        d.update_geo = true; // even true for target_rect != d.rect
+    }
     // Mirrored relative to the usual Qt coordinate system with origin in the top left corner.
     //mirrored = mat(0, 0) * mat(1, 1) - mat(0, 1) * mat(1, 0) > 0;
-    d.update_geo = true; // even true for target_rect != d.rect
     if (d.ctx && d.ctx == QOpenGLContext::currentContext()) {
         DYGL(glViewport(d.rect.x(), d.rect.y(), d.rect.width(), d.rect.height()));
     }
@@ -273,9 +296,27 @@ VideoShader* OpenGLVideo::userShader() const
     return d_func().user_shader;
 }
 
+void OpenGLVideo::setMeshType(MeshType value)
+{
+    DPTR_D(OpenGLVideo);
+    if (d.mesh_type == value)
+        return;
+    d.mesh_type = value;
+    d.update_geo = true;
+    if (d.mesh_type == SphereMesh && d.norm_viewport) {
+        d.matrix.setToIdentity();
+        d.matrix.perspective(45, 1, 0.1, 100); // for sphere
+    }
+}
+
+OpenGLVideo::MeshType OpenGLVideo::meshType() const
+{
+    return d_func().mesh_type;
+}
+
 void OpenGLVideo::fill(const QColor &color)
 {
-    DYGL(glClearColor(color.red(), color.green(), color.blue(), color.alpha()));
+    DYGL(glClearColor(color.redF(), color.greenF(), color.blueF(), color.alphaF()));
     DYGL(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
 }
 
@@ -290,26 +331,27 @@ void OpenGLVideo::render(const QRectF &target, const QRectF& roi, const QMatrix4
         qDebug() << "material changed: " << VideoMaterial::typeName(d.material_type) << " => " << VideoMaterial::typeName(mt);
         d.material_type = mt;
     }
+    if (!d.material->bind()) // bind first because texture parameters(target) mapped from native buffer is unknown before it
+        return;
     VideoShader *shader = d.user_shader;
     if (!shader)
         shader = d.manager->prepareMaterial(d.material, mt); //TODO: print shader type name if changed. prepareMaterial(,sample_code, pp_code)
     shader->update(d.material);
-    d.material->setDirty(false); //
     shader->program()->setUniformValue(shader->matrixLocation(), transform*d.matrix);
-    d.gr.setShaderProgram(shader->program());
     // uniform end. attribute begin
-    d.bindAttributes(shader, target, roi);
+    d.updateGeometry(shader, target, roi);
     // normalize?
-    const bool blending = d.material->hasAlpha();
+    const bool blending = d.has_a;
     if (blending) {
         DYGL(glEnable(GL_BLEND));
-        DYGL(glBlendFunc(GL_SRC_ALPHA , GL_ONE_MINUS_SRC_ALPHA));
+        gl().BlendFuncSeparate(GL_SRC_ALPHA , GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA , GL_ONE_MINUS_SRC_ALPHA); //
     }
-    d.gr.render(&d.geometry);
+    //if (d.mesh_type == OpenGLVideo::SphereMesh)
+        //DYGL(glEnable(GL_CULL_FACE)); // required for sphere! FIXME: broken in qml and qgvf
+    d.gr.render();
     if (blending)
         DYGL(glDisable(GL_BLEND));
     // d.shader->program()->release(); //glUseProgram(0)
-    d.unbindAttributes(shader);
     d.material->unbind();
 
     Q_EMIT afterRendering();

@@ -1,9 +1,10 @@
 TARGET = Player
 TEMPLATE = app
-QT += sql
+contains(QT_CONFIG, opengl): QT += opengl
+QT += sql svg
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
-TRANSLATIONS = res/player_zh_CN.ts
-VERSION = $$QTAV_VERSION
+TRANSLATIONS = res/player_zh_CN.ts res/player.ts
+!static:VERSION = $$QTAV_VERSION # vc: will create exp and lib, result in static build error
 
 PROJECTROOT = $$PWD/../..
 include($$PROJECTROOT/src/libQtAV.pri)
@@ -20,7 +21,6 @@ unix:!android:!mac {
 #debian
 player_bins = Player QMLPlayer
 DEB_INSTALL_LIST = $$join(player_bins, \\n.$$[QT_INSTALL_BINS]/, .$$[QT_INSTALL_BINS]/)
-#TODO: rename Player.desktop
 DEB_INSTALL_LIST *= \
             usr/share/applications/Player.desktop \
             usr/share/applications/QMLPlayer.desktop \

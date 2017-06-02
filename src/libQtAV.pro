@@ -14,24 +14,24 @@ greaterThan(QT_MAJOR_VERSION, 4) {
   config_gl: QT += opengl
 }
 CONFIG *= qtav-buildlib
-staticlib: DEFINES += BUILD_QTAV_STATIC
 static: CONFIG *= static_ffmpeg
-INCLUDEPATH += $$[QT_INSTALL_HEADERS]
-icon.files = $$PWD/$${TARGET}.svg
-icon.path = /usr/share/icons/hicolor/scalable/apps
-!contains(QMAKE_HOST.os, Windows):INSTALLS += icon
+INCLUDEPATH += $$[QT_INSTALL_HEADERS] # TODO: ffmpeg dir
 
 #mac: simd.prf will load qt_build_config and the result is soname will prefixed with QT_INSTALL_LIBS and link flag will append soname after QMAKE_LFLAGS_SONAME
 config_libcedarv: CONFIG *= neon config_simd #need by qt4 addSimdCompiler(). neon or config_neon is required because tests/arch can not detect neon
 ## sse2 sse4_1 may be defined in Qt5 qmodule.pri but is not included. Qt4 defines sse and sse2
 sse4_1|config_sse4_1|contains(TARGET_ARCH_SUB, sse4.1): CONFIG *= sse4_1 config_simd
 sse2|config_sse2|contains(TARGET_ARCH_SUB, sse2): CONFIG *= sse2 config_simd
-
+CONFIG(debug, debug|release): DEFINES += DEBUG
 #release: DEFINES += QT_NO_DEBUG_OUTPUT
 #var with '_' can not pass to pri?
 PROJECTROOT = $$PWD/..
 !include(libQtAV.pri): error("could not find libQtAV.pri")
 preparePaths($$OUT_PWD/../out)
+exists($$PROJECTROOT/extra/qtLongName(include)): INCLUDEPATH += $$PROJECTROOT/extra/qtLongName(include)
+exists($$PROJECTROOT/extra/qtLongName(lib)): LIBS += -L$$PROJECTROOT/extra/qtLongName(lib)
+staticlib: DEFINES += BUILD_QTAV_STATIC
+
 config_uchardet {
   DEFINES += LINK_UCHARDET
   LIBS *= -luchardet
@@ -70,7 +70,7 @@ RESOURCES += QtAV.qrc \
 }
 
 OTHER_FILES += $$RC_FILE QtAV.svg
-TRANSLATIONS = i18n/QtAV_zh_CN.ts
+TRANSLATIONS = i18n/QtAV_zh_CN.ts i18n/QtAV.ts
 
 sse4_1 {
   CONFIG += sse2 #only sse4.1 is checked. sse2 now can be disabled if sse4.1 is disabled
@@ -90,11 +90,14 @@ win32 {
 }
 *msvc* {
 #link FFmpeg and portaudio which are built by gcc need /SAFESEH:NO
-win32-msvc2010|win32-msvc2008: QMAKE_LFLAGS *= /DEBUG #workaround for CoInitializeEx() and other symbols not found at runtime
+  win32-msvc2010|win32-msvc2008|win32-msvc2012 {
+    QMAKE_LFLAGS *= /DEBUG #workaround for CoInitializeEx() and other symbols not found at runtime
+    INCLUDEPATH *= compat/msvc # vs2012 only has stdint.h
+  }
     debug: QMAKE_LFLAGS += /SAFESEH:NO
 #CXXFLAGS debug: /MTd
-    QMAKE_LFLAGS *= /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib #for msbuild vs2013
-    INCLUDEPATH *= compat/msvc
+    !static:QMAKE_LFLAGS *= /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib #for msbuild vs2013
+
 }
 capi {
 contains(QT_CONFIG, egl)|contains(QT_CONFIG, dynamicgl)|contains(QT_CONFIG, opengles2) {
@@ -348,6 +351,8 @@ config_gl|config_opengl {
   }
   OTHER_FILES += shaders/planar.f.glsl shaders/rgb.f.glsl
   SDK_HEADERS *= \
+    QtAV/Geometry.h \
+    QtAV/GeometryRenderer.h \
     QtAV/GLSLFilter.h \
     QtAV/OpenGLRendererBase.h \
     QtAV/OpenGLTypes.h \
@@ -360,8 +365,6 @@ config_gl|config_opengl {
   HEADERS *= \
     opengl/gl_api.h \
     opengl/OpenGLHelper.h \
-    opengl/Geometry.h \
-    opengl/GeometryRenderer.h \
     opengl/SubImagesGeometry.h \
     opengl/SubImagesRenderer.h \
     opengl/ShaderManager.h
@@ -412,8 +415,8 @@ winrt {
 # use old libva.so to link against
 glibc_compat: *linux*: LIBS += -lrt  # do not use clock_gettime in libc, GLIBC_2.17 is not available on old system
 static_ffmpeg {
-# libs needed by mac static ffmpeg. corefoundation: vda, avdevice
-  mac|ios: LIBS += -liconv -lbz2 -llzma -lz -framework CoreFoundation  -Wl,-framework,Security
+# libs needed by mac static ffmpeg. corefoundation: vda, avdevice. coca: vf_coreimage
+  mac|ios: LIBS += -liconv -lbz2 -llzma -lz -framework CoreFoundation -framework Security # -framework Cocoa Cocoa is not available on ios10
   win32: LIBS *= -lws2_32 -lstrmiids -lvfw32 -luuid
   !mac:*g++* {
     LIBS *= -lz
@@ -610,7 +613,10 @@ mac {
    }
 }
 
-unix:!android:!mac {
+unix:!mac:!cross_compile {
+icon.files = $$PWD/$${TARGET}.svg
+icon.path = /usr/share/icons/hicolor/scalable/apps
+INSTALLS += icon
 #debian
 DEB_INSTALL_LIST = .$$[QT_INSTALL_LIBS]/libQt*AV.so.*
 libqtav.target = libqtav.install
@@ -620,14 +626,15 @@ target.depends *= $${libqtav.target}
 
 DEB_INSTALL_LIST = $$join(SDK_HEADERS, \\n.$$[QT_INSTALL_HEADERS]/, .$$[QT_INSTALL_HEADERS]/)
 DEB_INSTALL_LIST += .$$[QT_INSTALL_LIBS]/libQt*AV.prl .$$[QT_INSTALL_LIBS]/libQt*AV.so
-DEB_INSTALL_LIST += .$$[QT_INSTALL_BINS]/../mkspecs/features/av.prf .$$[QT_INSTALL_BINS]/../mkspecs/modules/qt_lib_av.pri
+MKSPECS_DIR=$$[QT_HOST_DATA]/mkspecs # we only build deb for qt5, so QT_HOST_DATA is fine. qt4 can use $$[QMAKE_MKSPECS]
+DEB_INSTALL_LIST += .$${MKSPECS_DIR}/features/av.prf .$${MKSPECS_DIR}/modules/qt_lib_av.pri
 qtav_dev.target = qtav-dev.install
 qtav_dev.commands = echo \"$$join(DEB_INSTALL_LIST, \\n)\" >$$PROJECTROOT/debian/$${qtav_dev.target}
 QMAKE_EXTRA_TARGETS += qtav_dev
 target.depends *= $${qtav_dev.target}
 
 DEB_INSTALL_LIST = $$join(SDK_PRIVATE_HEADERS, \\n.$$[QT_INSTALL_HEADERS]/QtAV/*/, .$$[QT_INSTALL_HEADERS]/QtAV/*/)
-DEB_INSTALL_LIST += .$$[QT_INSTALL_BINS]/../mkspecs/modules/qt_lib_av_private.pri
+DEB_INSTALL_LIST += .$${MKSPECS_DIR}/modules/qt_lib_av_private.pri
 qtav_private_dev.target = qtav-private-dev.install
 qtav_private_dev.commands = echo \"$$join(DEB_INSTALL_LIST, \\n)\" >$$PROJECTROOT/debian/$${qtav_private_dev.target}
 QMAKE_EXTRA_TARGETS += qtav_private_dev

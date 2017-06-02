@@ -26,12 +26,25 @@
 #ifdef Q_OS_ANDROID
 #include <SLES/OpenSLES_Android.h>
 #include <SLES/OpenSLES_AndroidConfiguration.h>
+#include <sys/system_properties.h>
 #endif
 #include "QtAV/private/mkid.h"
 #include "QtAV/private/factory.h"
 #include "utils/Logger.h"
 
+// TODO: native sample rate, so AUDIO_OUTPUT_FLAG_FAST is enabled
 namespace QtAV {
+
+// OpenSL 1.1, or __ANDROID_API__ >= 21
+#ifndef SL_DATAFORMAT_PCM_EX
+#define SL_PCM_REPRESENTATION_SIGNED_INT    ((SLuint32) 0x00000001)
+#define SL_PCM_REPRESENTATION_UNSIGNED_INT  ((SLuint32) 0x00000002)
+#define SL_PCM_REPRESENTATION_FLOAT         ((SLuint32) 0x00000003)
+#define SL_DATAFORMAT_PCM_EX                ((SLuint32) 0x00000004)
+struct SLDataFormat_PCM_EX : SLDataFormat_PCM {
+    SLuint32 representation;
+};
+#endif
 
 static const char kName[] = "OpenSL";
 class AudioOutputOpenSL Q_DECL_FINAL: public AudioOutputBackend
@@ -40,6 +53,7 @@ public:
     AudioOutputOpenSL(QObject *parent = 0);
     ~AudioOutputOpenSL();
 
+    int engineVersion() const { return m_sl_major*100+m_sl_minor*10+m_sl_step;}
     QString name() const Q_DECL_OVERRIDE { return QLatin1String(kName);}
     bool isSupported(const AudioFormat& format) const Q_DECL_OVERRIDE;
     bool isSupported(AudioFormat::SampleFormat sampleFormat) const Q_DECL_OVERRIDE;
@@ -48,6 +62,7 @@ public:
     bool close() Q_DECL_OVERRIDE;
     BufferControl bufferControl() const Q_DECL_OVERRIDE;
     void onCallback() Q_DECL_OVERRIDE;
+    void acquireNextBuffer() Q_DECL_OVERRIDE;
     bool write(const QByteArray& data) Q_DECL_OVERRIDE;
     bool play() Q_DECL_OVERRIDE;
     //default return -1. means not the control
@@ -62,17 +77,22 @@ public:
     static void bufferQueueCallback(SLBufferQueueItf bufferQueue, void *context);
     static void playCallback(SLPlayItf player, void *ctx, SLuint32 event);
 private:
+    SLDataFormat_PCM_EX audioFormatToSL(const AudioFormat &format);
+
     SLObjectItf engineObject;
     SLEngineItf engine;
+    SLEngineCapabilitiesItf m_cap;
     SLObjectItf m_outputMixObject;
     SLObjectItf m_playerObject;
     SLPlayItf m_playItf;
     SLVolumeItf m_volumeItf;
     SLBufferQueueItf m_bufferQueueItf;
 #ifdef Q_OS_ANDROID
-    SLAndroidSimpleBufferQueueItf m_bufferQueueItf_android;
+    SLAndroidSimpleBufferQueueItf m_bufferQueueItf_android; // supports decoding, recording
 #endif
     bool m_android;
+    int m_android_api_level;
+    SLint16 m_sl_major, m_sl_minor, m_sl_step;
     SLint32 m_streamType;
     quint32 buffers_queued;
     QSemaphore sem;
@@ -95,13 +115,21 @@ FACTORY_REGISTER(AudioOutputBackend, OpenSL, kName)
         } \
     } while(0)
 
-static SLDataFormat_PCM audioFormatToSL(const AudioFormat &format)
+SLDataFormat_PCM_EX AudioOutputOpenSL::audioFormatToSL(const AudioFormat &format)
 {
-    SLDataFormat_PCM format_pcm;
-    format_pcm.formatType = SL_DATAFORMAT_PCM;
+    SLDataFormat_PCM_EX format_pcm;
+    if (format.isFloat()) {
+        if (format.sampleSize() == sizeof(float))
+            format_pcm.representation = SL_PCM_REPRESENTATION_FLOAT;
+    } else if (format.isUnsigned()) {
+        format_pcm.representation = SL_PCM_REPRESENTATION_UNSIGNED_INT;
+    } else {
+        format_pcm.representation = SL_PCM_REPRESENTATION_SIGNED_INT;
+    }
+    format_pcm.formatType = m_android_api_level >= 21 || engineVersion() >= 110 ? SL_DATAFORMAT_PCM_EX : SL_DATAFORMAT_PCM;
     format_pcm.numChannels = format.channels();
     format_pcm.samplesPerSec = format.sampleRate() * 1000;
-    format_pcm.bitsPerSample = format.bytesPerSample()*8;
+    format_pcm.bitsPerSample = format.bytesPerSample()*8; //raw sample size, e.g. s24 is 24. currently we do not support such formats
     format_pcm.containerSize = format_pcm.bitsPerSample;
     // TODO: more layouts
     format_pcm.channelMask = format.channels() == 1 ? SL_SPEAKER_FRONT_CENTER : SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT;
@@ -161,15 +189,31 @@ AudioOutputOpenSL::AudioOutputOpenSL(QObject *parent)
     , m_bufferQueueItf(0)
     , m_bufferQueueItf_android(0)
     , m_android(false)
+    , m_android_api_level(0)
+    , m_sl_major(0)
+    , m_sl_minor(0)
+    , m_sl_step(0)
     , m_streamType(-1)
     , buffers_queued(0)
     , queue_data_write(0)
 {
+#ifdef Q_OS_ANDROID
+    char v[PROP_VALUE_MAX+1];
+    __system_property_get("ro.build.version.sdk", v);
+    m_android_api_level = atoi(v);
+#endif
     available = false;
-    SL_ENSURE(slCreateEngine(&engineObject, 0, 0, 0, 0, 0));
+    SLEngineOption opt[] = {(SLuint32) SL_ENGINEOPTION_THREADSAFE, (SLuint32) SL_BOOLEAN_TRUE};
+    SL_ENSURE(slCreateEngine(&engineObject, 1, opt, 0, NULL, NULL)); // SLEngineOption is ignored by android
     SL_ENSURE((*engineObject)->Realize(engineObject, SL_BOOLEAN_FALSE));
     SL_ENSURE((*engineObject)->GetInterface(engineObject, SL_IID_ENGINE, &engine));
     available = true;
+
+    if ((*engineObject)->GetInterface(engineObject, SL_IID_ENGINECAPABILITIES, &m_cap) == SL_RESULT_SUCCESS) { // SL_RESULT_FEATURE_UNSUPPORTED
+        if ((*m_cap)->QueryAPIVersion(m_cap, &m_sl_major, &m_sl_minor, &m_sl_step) == SL_RESULT_SUCCESS) {
+            printf("OpenSL version: %d.%d.%d\n", m_sl_major, m_sl_minor, m_sl_step);
+        }
+    }
 }
 
 AudioOutputOpenSL::~AudioOutputOpenSL()
@@ -185,7 +229,13 @@ bool AudioOutputOpenSL::isSupported(const AudioFormat& format) const
 
 bool AudioOutputOpenSL::isSupported(AudioFormat::SampleFormat sampleFormat) const
 {
-    return sampleFormat == AudioFormat::SampleFormat_Unsigned8 || sampleFormat == AudioFormat::SampleFormat_Signed16;
+    if (sampleFormat == AudioFormat::SampleFormat_Unsigned8 || sampleFormat == AudioFormat::SampleFormat_Signed16) // TODO: android api 21 supports s32?
+            return true;
+    if (m_android_api_level < 21 || (engineVersion() > 0 && engineVersion() < 110))
+        return false;
+    if (!IsFloat(sampleFormat) || IsPlanar(sampleFormat))
+        return false;
+    return RawSampleSize(sampleFormat) == sizeof(float); // TODO: test s32 etc
 }
 
 bool AudioOutputOpenSL::isSupported(AudioFormat::ChannelLayout channelLayout) const
@@ -204,11 +254,17 @@ void AudioOutputOpenSL::onCallback()
         sem.release();
 }
 
+void AudioOutputOpenSL::acquireNextBuffer()
+{
+    if (bufferControl() & CountCallback)
+        sem.acquire();
+}
+
 bool AudioOutputOpenSL::open()
 {
     queue_data.resize(buffer_size*buffer_count);
     SLDataLocator_BufferQueue bufferQueueLocator = { SL_DATALOCATOR_BUFFERQUEUE, (SLuint32)buffer_count };
-    SLDataFormat_PCM pcmFormat = audioFormatToSL(format);
+    SLDataFormat_PCM_EX pcmFormat = audioFormatToSL(format);
     SLDataSource audioSrc = { &bufferQueueLocator, &pcmFormat };
 #ifdef Q_OS_ANDROID
     SLDataLocator_AndroidSimpleBufferQueue bufferQueueLocator_android = { SL_DATALOCATOR_ANDROIDSIMPLEBUFFERQUEUE, (SLuint32)buffer_count };
@@ -222,9 +278,9 @@ bool AudioOutputOpenSL::open()
     SLDataSink audioSink = { &outputMixLocator, NULL };
 
     const SLInterfaceID ids[] = { SL_IID_BUFFERQUEUE, SL_IID_VOLUME
-  #ifdef Q_OS_ANDROID
+#ifdef Q_OS_ANDROID
                                   , SL_IID_ANDROIDCONFIGURATION
-  #endif
+#endif
                                 };
     const SLboolean req[] = { SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE
 #ifdef Q_OS_ANDROID
@@ -248,14 +304,12 @@ bool AudioOutputOpenSL::open()
     if (m_android) {
         SL_ENSURE((*m_playerObject)->GetInterface(m_playerObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE, &m_bufferQueueItf_android), false);
         SL_ENSURE((*m_bufferQueueItf_android)->RegisterCallback(m_bufferQueueItf_android, AudioOutputOpenSL::bufferQueueCallbackAndroid, this), false);
-    } else {
+    } else
+#endif
+    {
         SL_ENSURE((*m_playerObject)->GetInterface(m_playerObject, SL_IID_BUFFERQUEUE, &m_bufferQueueItf), false);
         SL_ENSURE((*m_bufferQueueItf)->RegisterCallback(m_bufferQueueItf, AudioOutputOpenSL::bufferQueueCallback, this), false);
     }
-#else
-    SL_ENSURE((*m_playerObject)->GetInterface(m_playerObject, SL_IID_BUFFERQUEUE, &m_bufferQueueItf), false);
-    SL_ENSURE((*m_bufferQueueItf)->RegisterCallback(m_bufferQueueItf, AudioOutputOpenSL::bufferQueueCallback, this), false);
-#endif
     // Play interface
     SL_ENSURE((*m_playerObject)->GetInterface(m_playerObject, SL_IID_PLAY, &m_playItf), false);
     // call when SL_PLAYSTATE_STOPPED
@@ -308,22 +362,19 @@ bool AudioOutputOpenSL::close()
 
 bool AudioOutputOpenSL::write(const QByteArray& data)
 {
-    if (bufferControl() & CountCallback)
-        sem.acquire();
+    // assume data.size() <= buffer_size. It's true in QtAV
     const int s = qMin(queue_data.size() - queue_data_write, data.size());
     // assume data.size() <= buffer_size. It's true in QtAV
     if (s < data.size())
         queue_data_write = 0;
     memcpy((char*)queue_data.constData() + queue_data_write, data.constData(), data.size());
-    //qDebug("enqueue %p, queue_data_write: %d", data.constData(), queue_data_write);
+    //qDebug("enqueue %p, queue_data_write: %d/%d available:%d", data.constData(), queue_data_write, queue_data.size(), sem.available());
 #ifdef Q_OS_ANDROID
     if (m_android)
         SL_ENSURE((*m_bufferQueueItf_android)->Enqueue(m_bufferQueueItf_android, queue_data.constData() + queue_data_write, data.size()), false);
     else
-        SL_ENSURE((*m_bufferQueueItf)->Enqueue(m_bufferQueueItf, queue_data.constData() + queue_data_write, data.size()), false);
-#else
-    SL_ENSURE((*m_bufferQueueItf)->Enqueue(m_bufferQueueItf, queue_data.constData() + queue_data_write, data.size()), false);
 #endif
+    SL_ENSURE((*m_bufferQueueItf)->Enqueue(m_bufferQueueItf, queue_data.constData() + queue_data_write, data.size()), false);
     buffers_queued++;
     queue_data_write += data.size();
     if (queue_data_write == queue_data.size())
@@ -350,16 +401,13 @@ int AudioOutputOpenSL::getPlayedCount()
         SLAndroidSimpleBufferQueueState state;
         (*m_bufferQueueItf_android)->GetState(m_bufferQueueItf_android, &state);
         count = state.count;
-    } else {
+    } else
+#endif
+    {
         SLBufferQueueState state;
         (*m_bufferQueueItf)->GetState(m_bufferQueueItf, &state);
         count = state.count;
     }
-#else
-    SLBufferQueueState state;
-    (*m_bufferQueueItf)->GetState(m_bufferQueueItf, &state);
-    count = state.count;
-#endif
     buffers_queued = count;
     processed -= count;
     return processed;

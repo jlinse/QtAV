@@ -1,5 +1,5 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
+    QtAV:  Multimedia framework based on Qt and FFmpeg
     Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2014)
@@ -52,9 +52,14 @@ static void SetColorDetailsByFFmpeg(VideoFrame *f, AVFrame* frame, AVCodecContex
     }
     if (cr == ColorRange_Unknown) {
         cr = colorRangeFromFFmpeg(codec_ctx->color_range);
-        if (cr == ColorRange_Unknown && !f->format().isRGB()) {
-            //qDebug("prefer limited yuv range");
-            cr = ColorRange_Limited;
+        if (cr == ColorRange_Unknown) {
+            if (f->format().isXYZ()){
+                cr = ColorRange_Full;
+                cs = ColorSpace_XYZ; // not here
+            } else if (!f->format().isRGB()) {
+                qDebug("prefer limited yuv range");
+                cr = ColorRange_Limited;
+            }
         }
     }
     f->setColorRange(cr);

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2013)
 
@@ -63,6 +63,7 @@ QmlAVPlayer::QmlAVPlayer(QObject *parent) :
   , m_timeout(30000)
   , m_abort_timeout(true)
   , m_audio_track(0)
+  , m_video_track(0)
   , m_sub_track(0)
   , m_ao(AudioOutput::backendsAvailable())
 {
@@ -76,6 +77,7 @@ void QmlAVPlayer::classBegin()
     mpPlayer = new AVPlayer(this);
     connect(mpPlayer, SIGNAL(internalSubtitleTracksChanged(QVariantList)), SIGNAL(internalSubtitleTracksChanged()));
     connect(mpPlayer, SIGNAL(internalAudioTracksChanged(QVariantList)), SIGNAL(internalAudioTracksChanged()));
+    connect(mpPlayer, SIGNAL(internalVideoTracksChanged(QVariantList)), SIGNAL(internalVideoTracksChanged()));
     connect(mpPlayer, SIGNAL(externalAudioTracksChanged(QVariantList)), SIGNAL(externalAudioTracksChanged()));
     connect(mpPlayer, SIGNAL(durationChanged(qint64)), SIGNAL(durationChanged()));
     connect(mpPlayer, SIGNAL(mediaStatusChanged(QtAV::MediaStatus)), SLOT(_q_statusChanged()));
@@ -103,7 +105,6 @@ void QmlAVPlayer::componentComplete()
 {
     // TODO: set player parameters
     if (mSource.isValid() && (mAutoLoad || mAutoPlay)) {
-        mpPlayer->setFile(QUrl::fromPercentEncoding(mSource.toEncoded()));
         if (mAutoLoad)
             mpPlayer->load();
         if (mAutoPlay) {
@@ -139,7 +140,14 @@ void QmlAVPlayer::setSource(const QUrl &url)
     if (mSource == url)
         return;
     mSource = url;
-    mpPlayer->setFile(QUrl::fromPercentEncoding(mSource.toEncoded()));
+    if (url.isLocalFile() || url.scheme().isEmpty()
+            || url.scheme().startsWith("qrc")
+            || url.scheme().startsWith("avdevice")
+            // TODO: what about custom io?
+            )
+        mpPlayer->setFile(QUrl::fromPercentEncoding(url.toEncoded()));
+    else
+        mpPlayer->setFile(url.toEncoded());
     Q_EMIT sourceChanged(); //TODO: Q_EMIT only when player loaded a new source
 
     if (mHasAudio) {
@@ -264,6 +272,29 @@ void QmlAVPlayer::setVideoCodecOptions(const QVariantMap &value)
     mpPlayer->setVideoDecoderPriority(videoCodecPriority());
 }
 
+QVariantMap QmlAVPlayer::avFormatOptions() const
+{
+    return avfmt_opt;
+}
+
+void QmlAVPlayer::setAVFormatOptions(const QVariantMap &value)
+{
+    if (value == avfmt_opt)
+        return;
+    avfmt_opt = value;
+    Q_EMIT avFormatOptionsChanged();
+    if (!mpPlayer) {
+        qWarning("player not ready");
+        return;
+    }
+    QVariantHash avfopt;
+    for (QVariantMap::const_iterator cit = avfmt_opt.cbegin(); cit != avfmt_opt.cend(); ++cit) {
+        avfopt[cit.key()] = cit.value();
+    }
+    if (!avfopt.isEmpty())
+        mpPlayer->setOptionsForFormat(avfopt);
+}
+
 bool QmlAVPlayer::useWallclockAsTimestamps() const
 {
     return mUseWallclockAsTimestamps;
@@ -366,6 +397,36 @@ void QmlAVPlayer::setAudioTrack(int value)
         mpPlayer->setAudioStream(value);
 }
 
+int QmlAVPlayer::videoTrack() const
+{
+    return m_video_track;
+}
+
+void QmlAVPlayer::setVideoTrack(int value)
+{
+    if (m_video_track == value)
+        return;
+    m_video_track = value;
+    Q_EMIT videoTrackChanged();
+    if (mpPlayer)
+        mpPlayer->setVideoStream(value);
+}
+
+int QmlAVPlayer::bufferSize() const
+{
+    return mpPlayer->bufferValue();
+}
+
+void QmlAVPlayer::setBufferSize(int value)
+{
+    if (mpPlayer->bufferValue() == value)
+        return;
+    if (mpPlayer) {
+        mpPlayer->setBufferValue(value);
+        Q_EMIT bufferSizeChanged();
+    }
+}
+
 QUrl QmlAVPlayer::externalAudio() const
 {
     return m_audio;
@@ -388,6 +449,11 @@ QVariantList QmlAVPlayer::externalAudioTracks() const
 QVariantList QmlAVPlayer::internalAudioTracks() const
 {
     return mpPlayer ? mpPlayer->internalAudioTracks() : QVariantList();
+}
+
+QVariantList QmlAVPlayer::internalVideoTracks() const
+{
+    return mpPlayer ? mpPlayer->internalVideoTracks() : QVariantList();
 }
 
 int QmlAVPlayer::internalSubtitleTrack() const
@@ -661,6 +727,7 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
             mpPlayer->setInterruptOnTimeout(m_abort_timeout);
             mpPlayer->setRepeat(mLoopCount - 1);
             mpPlayer->setAudioStream(m_audio_track);
+            mpPlayer->setVideoStream(m_video_track); // will check in case of error
             mpPlayer->setSubtitleStream(m_sub_track);
             if (!vcodec_opt.isEmpty()) {
                 QVariantHash vcopt;
@@ -670,6 +737,15 @@ void QmlAVPlayer::setPlaybackState(PlaybackState playbackState)
                 if (!vcopt.isEmpty())
                     mpPlayer->setOptionsForVideoCodec(vcopt);
             }
+            if (!avfmt_opt.isEmpty()) {
+                QVariantHash avfopt;
+                for (QVariantMap::const_iterator cit = avfmt_opt.cbegin(); cit != avfmt_opt.cend(); ++cit) {
+                    avfopt[cit.key()] = cit.value();
+                }
+                if (!avfopt.isEmpty())
+                    mpPlayer->setOptionsForFormat(avfopt);
+            }
+
             mpPlayer->setStartPosition(startPosition());
             if (stopPosition() == PositionMax)
                 mpPlayer->setStopPosition();

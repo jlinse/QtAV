@@ -51,7 +51,7 @@ eval(LIB$$upper($$NAME)_PRI_INCLUDED = 1)
 LIB_VERSION = $$QTAV_VERSION #0.x.y may be wrong for dll
 # If user haven't supplied STATICLINK, then auto-detect
 isEmpty(STATICLINK) {
-  contains(CONFIG, staticlib) {
+  static|contains(CONFIG, staticlib) {
     STATICLINK = 1
   } else {
     STATICLINK = 0
@@ -60,6 +60,8 @@ isEmpty(STATICLINK) {
   # in iOS 8.1.
   ios:STATICLINK = 1
 }
+isEqual(STATICLINK, 1):DEFINES += BUILD_$$upper($$NAME)_STATIC
+
 TEMPLATE += fakelib
 PROJECT_TARGETNAME = $$qtLibraryTarget($$NAME)
 TEMPLATE -= fakelib
@@ -109,7 +111,7 @@ DEPENDPATH *= $$PROJECT_SRCPATH
         isEqual(STATICLINK, 1) {
 		CONFIG -= shared dll ##otherwise the following shared is true, why?
 		CONFIG *= staticlib
-	} else {
+        } else {
 		CONFIG *= shared #shared includes dll
 	}
 
@@ -117,7 +119,7 @@ DEPENDPATH *= $$PROJECT_SRCPATH
         !CONFIG(plugin) {
             !isEqual(DESTDIR, $$BUILD_DIR/bin): DLLDESTDIR = $$BUILD_DIR/bin #copy shared lib there
         }
-		CONFIG(release, debug|release): !isEmpty(QMAKE_STRIP): QMAKE_POST_LINK = -$$QMAKE_STRIP $$PROJECT_LIBDIR/$$qtSharedLib($$NAME)
+                CONFIG(release, debug|release): !isEmpty(QMAKE_STRIP):!mac_framework: QMAKE_POST_LINK = -$$QMAKE_STRIP $$PROJECT_LIBDIR/$$qtSharedLib($$NAME)
 		#copy from the pro creator creates.
 		symbian {
 			MMP_RULES += EXPORTUNFROZEN

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -50,6 +50,7 @@ public:
     //AVDemuxer* demuxer
     bool isPaused() const;
     bool isEnd() const;
+    bool atEndOfMedia() const;
     PacketBuffer* buffer();
     void updateBufferState();
     void stop(); //TODO: remove it?

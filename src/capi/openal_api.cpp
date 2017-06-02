@@ -22,7 +22,7 @@
 
 #define OPENAL_CAPI_BUILD
 //#define DEBUG_RESOLVE
-#define DEBUG_LOAD
+//#define DEBUG_LOAD // why affects other xxx_api.cpp?
 //#define CAPI_IS_LAZY_RESOLVE 0
 #ifndef CAPI_LINK_OPENAL
 #include "capi.h"
@@ -40,8 +40,8 @@ static const char* names[] = {
 #ifdef CAPI_TARGET_OS_WIN
     "OpenAL32",
 #endif
-#ifdef CAPI_TARGET_OS_MAC
-    "/System/Library/Frameworks/OpenAL.framework/Versions/A/OpenAL",
+#ifdef __APPLE__
+    "/System/Library/Frameworks/OpenAL.framework/OpenAL", // iOS and macOS
 #endif
     "OpenAL", //blackberry
     NULL

@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -184,6 +184,7 @@ void AVPlayer::setSpeed(qreal speed)
 {
     if (speed == d->speed)
         return;
+    setFrameRate(0); // will set clock to default
     d->speed = speed;
     //TODO: check clock type?
     if (d->ao && d->ao->isAvailable()) {
@@ -233,6 +234,9 @@ void AVPlayer::setFrameRate(qreal value)
     d->force_fps = value;
     // clock set here will be reset in playInternal()
     // also we can't change user's setting of ClockType and autoClock here if force frame rate is disabled.
+    if (!isPlaying())
+        return;
+    d->applyFrameRate();
 }
 
 qreal AVPlayer::forcedFrameRate() const
@@ -576,6 +580,7 @@ void AVPlayer::pause(bool p)
         return;
     if (isPaused() == p)
         return;
+    audio()->pause(p);
     //pause thread. check pause state?
     d->read_thread->pause(p);
     if (d->athread)
@@ -661,6 +666,8 @@ void AVPlayer::loadInternal()
         qWarning("Load failed!");
         d->audio_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::AudioStream);
         Q_EMIT internalAudioTracksChanged(d->audio_tracks);
+        d->video_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::VideoStream);
+        Q_EMIT internalVideoTracksChanged(d->video_tracks);
         d->subtitle_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::SubtitleStream);
         Q_EMIT internalSubtitleTracksChanged(d->subtitle_tracks);
         return;
@@ -670,6 +677,8 @@ void AVPlayer::loadInternal()
     d->applySubtitleStream(d->subtitle_track, this);
     d->audio_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::AudioStream);
     Q_EMIT internalAudioTracksChanged(d->audio_tracks);
+    d->video_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::VideoStream);
+    Q_EMIT internalVideoTracksChanged(d->video_tracks);
     Q_EMIT durationChanged(duration());
     // setup parameters from loaded media
     d->media_start_pts = d->demuxer.startTime();
@@ -706,10 +715,12 @@ void AVPlayer::unload()
         d->vdec = 0;
     }
     d->demuxer.unload();
-    Q_EMIT durationChanged(0LL);
+    Q_EMIT durationChanged(0LL); // for ui, slider is invalid. use stopped instead, and remove this signal here?
     // ??
     d->audio_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::AudioStream);
     Q_EMIT internalAudioTracksChanged(d->audio_tracks);
+    d->video_tracks = d->getTracksInfo(&d->demuxer, AVDemuxer::VideoStream);
+    Q_EMIT internalVideoTracksChanged(d->video_tracks);
 }
 
 void AVPlayer::setRelativeTimeMode(bool value)
@@ -896,6 +907,11 @@ const QVariantList &AVPlayer::internalAudioTracks() const
     return d->audio_tracks;
 }
 
+const QVariantList &AVPlayer::internalVideoTracks() const
+{
+    return d->video_tracks;
+}
+
 bool AVPlayer::setAudioStream(const QString &file, int n)
 {
     QString path(file);
@@ -1009,17 +1025,20 @@ bool AVPlayer::setVideoStream(int n)
             return false;
     }
     d->video_track = n;
-    if (!isPlaying())
-        return true;
-    // pause demuxer, clear queues, set demuxer stream, set decoder, set ao, resume
-    bool p = isPaused();
-    pause(true);
-    if (!d->setupVideoThread(this)) {
-        stop();
-        return false;
-    }
-    if (!p)
-        pause(false);
+    d->demuxer.setStreamIndex(AVDemuxer::VideoStream, n);
+//    if (!isPlaying())
+//        return true;
+//    // pause demuxer, clear queues, set demuxer stream, set decoder, set ao, resume
+//    bool p = isPaused();
+//    //int bv = bufferValue();
+//    setBufferMode(BufferTime);
+//    pause(true);
+//    if (!d->setupVideoThread(this)) {
+//        stop();
+//        return false;
+//    }
+//    if (!p) pause(false);
+//    //QTimer::singleShot(10000, this, SLOT(setBufferValue(bv)));
     return true;
 }
 
@@ -1192,27 +1211,6 @@ void AVPlayer::playInternal()
     // setup clock before avthread.start() becuase avthreads use clock. after avthreads setup because of ao check
     masterClock()->reset();
     // TODO: add isVideo() or hasVideo()?
-    qreal vfps = d->force_fps;
-    bool force_fps = vfps > 0;
-    const bool ao_null = d->ao && d->ao->backend().toLower() == QLatin1String("null");
-    if (d->athread && !ao_null) { // TODO: no null ao check. null ao block internally
-        force_fps = vfps > 0 && !!d->vthread;
-    } else if (!force_fps) {
-        force_fps = !!d->vthread;
-        vfps = d->statistics.video.frame_rate > 0 ? d->statistics.video.frame_rate : 25;
-        // vfps<0: try to use pts (ExternalClock). if no pts (raw codec), try the default fps(VideoClock)
-        vfps = -vfps;
-    }
-    if (force_fps) {
-        masterClock()->setClockAuto(false);
-        // vfps>0: force video fps to vfps. clock must be external
-        masterClock()->setClockType(vfps > 0 ? AVClock::VideoClock : AVClock::ExternalClock);
-        d->vthread->setFrameRate(vfps);
-    } else {
-        masterClock()->setClockAuto(true);
-        if (d->vthread)
-            d->vthread->setFrameRate(0.0);
-    }
     if (masterClock()->isClockAuto()) {
         qDebug("auto select clock: audio > external");
         if (!d->demuxer.audioCodecContext() || !d->ao || !d->ao->isOpen() || !d->athread) {
@@ -1233,12 +1231,7 @@ void AVPlayer::playInternal()
         qDebug("Starting video thread...");
         d->vthread->start();
     }
-    if (d->start_position_norm > 0) {
-        if (relativeTimeMode())
-            d->demuxer.seek(qint64((d->start_position_norm + absoluteMediaStartPosition())));
-        else
-            d->demuxer.seek((qint64)(d->start_position_norm));
-    }
+
     d->read_thread->setMediaEndAction(mediaEndAction());
     d->read_thread->start();
 
@@ -1253,22 +1246,31 @@ void AVPlayer::playInternal()
         QMetaObject::invokeMethod(this, "startNotifyTimer", Qt::AutoConnection);
     }
     d->state = PlayingState;
+    if (d->repeat_current < 0)
+        d->repeat_current = 0;
     } //end lock scoped here to avoid dead lock if connect started() to a slot that call unload()/play()
+    if (d->start_position_norm > 0) {
+        if (relativeTimeMode())
+            setPosition(qint64((d->start_position_norm + absoluteMediaStartPosition())));
+        else
+            setPosition((qint64)(d->start_position_norm));
+    }
     Q_EMIT stateChanged(PlayingState);
     Q_EMIT started(); //we called stop(), so must emit started()
 }
 
 void AVPlayer::stopFromDemuxerThread()
 {
-    qDebug("demuxer thread emit finished. repeat=%d force_stop=%d", repeat(), d->force_stop);
+    qDebug("demuxer thread emit finished. currentRepeat=%d repeat=%d force_stop=%d", currentRepeat(), repeat(), d->force_stop);
     d->seeking = false;
-    if (currentRepeat() >= repeat() && repeat() >= 0) {
+    if (currentRepeat() < 0 || (currentRepeat() >= repeat() && repeat() >= 0)) {
         qreal stop_pts = masterClock()->videoTime();
         if (stop_pts <= 0)
             stop_pts = masterClock()->value();
         masterClock()->reset();
-        stopNotifyTimer();
+        QMetaObject::invokeMethod(this, "stopNotifyTimer");
         // vars not set by user can be reset
+        d->repeat_current = -1;
         d->start_position_norm = 0;
         d->stop_position_norm = kInvalidPosition; // already stopped. so not 0 but invalid. 0 can stop the playback in timerEvent
         d->media_end = kInvalidPosition;
@@ -1345,11 +1347,15 @@ void AVPlayer::stopNotifyTimer()
 
 void AVPlayer::onStarted()
 {
-    //TODO: check clock type?
-    if (d->ao && d->ao->isAvailable()) {
-        d->ao->setSpeed(d->speed);
+    if (d->speed != 1.0) {
+        //TODO: check clock type?
+        if (d->ao && d->ao->isAvailable()) {
+            d->ao->setSpeed(d->speed);
+        }
+        masterClock()->setSpeed(d->speed);
+    } else {
+        d->applyFrameRate();
     }
-    masterClock()->setSpeed(d->speed);
 }
 
 void AVPlayer::updateMediaStatus(QtAV::MediaStatus status)
@@ -1412,7 +1418,7 @@ void AVPlayer::stop()
     }
     d->seeking = false;
     d->reset_state = true;
-
+    d->repeat_current = -1;
     if (!isPlaying()) {
         qDebug("Not playing~");
         if (mediaStatus() == LoadingMedia || mediaStatus() == LoadedMedia) {

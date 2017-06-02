@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -84,6 +84,10 @@ class Q_AV_EXPORT AVPlayer : public QObject
     Q_PROPERTY(QtAV::MediaEndAction mediaEndAction READ mediaEndAction WRITE setMediaEndAction NOTIFY mediaEndActionChanged)
     Q_ENUMS(State)
 public:
+    /*!
+     * \brief The State enum
+     * The playback state. It's different from MediaStatus. MediaStatus indicates media stream state
+     */
     enum State {
         StoppedState,
         PlayingState, /// Start to play if it was stopped, or resume if it was paused
@@ -175,6 +179,10 @@ public:
     qint64 position() const; //unit: ms
     //0: play once. N: play N+1 times. <0: infinity
     int repeat() const; //or repeatMax()?
+    /*!
+     * \brief currentRepeat
+     * \return -1 if not playback is stopped, otherwise (Playback times - 1)
+     */
     int currentRepeat() const;
     /*!
      * \brief setExternalAudio
@@ -197,9 +205,10 @@ public:
      */
     const QVariantList& externalAudioTracks() const;
     const QVariantList& internalAudioTracks() const;
+    const QVariantList& internalVideoTracks() const;
     /*!
      * \brief setAudioStream
-     * set an external audio file and stream number as audio track
+     * set an external audio file and stream number as audio track. It will be reset if setFile()/setIODevice()/setInput() is called
      * \param file external audio file. set empty to use internal audio tracks
      * \param n audio stream number n=0, 1, .... n<0: disable audio thread
      * \return false if fail
@@ -218,7 +227,7 @@ public:
      * Set audio stream number in current media or external audio file
      */
     bool setAudioStream(int n);
-    //TODO: n<0, no video thread
+    //TODO: n<0, no video thread. It will be reset if setFile()/setIODevice()/setInput() is called
     bool setVideoStream(int n);
     /*!
      * \brief internalAudioTracks
@@ -274,7 +283,8 @@ public:
      */
     AudioOutput* audio();
     /*!
-     * \brief setSpeed set playback speed.
+     * \brief setSpeed
+     * Set playback speed.
      * \param speed  speed > 0. 1.0: normal speed
      * TODO: playbackRate
      */
@@ -299,10 +309,8 @@ public:
     /*!
      * \brief setFrameRate
      * Force the (video) frame rate to a given value.
-     * Call it before playback start.
-     * If frame rate is set to a valid value(>0), the clock type will be set to
-     * User configuration of AVClock::ClockType and autoClock will be ignored.
-     * \param value <=0: ignore the value. normal playback ClockType and AVCloc
+     * AVClock::ClockType and autoClock will be changed internally.
+     * \param value <=0: use previous playback speed.
      * >0: force to a given (video) frame rate
      */
     void setFrameRate(qreal value);
@@ -333,7 +341,7 @@ public:
     /*!
      * \brief setVideoDecoderPriority
      * also can set in opt.priority
-     * \param names the video decoder name list in priority order. Name can be "FFmpeg", "CUDA", "DXVA", "D3D11", "VAAPI", "VDA", "VideoToolbox", case insensitive
+     * \param names the video decoder name list in priority order. Name can be "FFmpeg", "CUDA", "DXVA", "D3D11", "VAAPI", "VDA", "VideoToolbox", "MediaCodec", "MMAL", "QSV", "CrystalHD", case insensitive
      */
     void setVideoDecoderPriority(const QStringList& names);
     QStringList videoDecoderPriority() const;
@@ -384,7 +392,7 @@ public:
     MediaEndAction mediaEndAction() const;
     void setMediaEndAction(MediaEndAction value);
 
-public slots:
+public Q_SLOTS:
     /*!
      * \brief load
      * Load the current media set by setFile(); Can be used to reload a media and call play() later. If already loaded, does nothing and return true.
@@ -525,6 +533,10 @@ Q_SIGNALS:
     void durationChanged(qint64);
     void error(const QtAV::AVError& e); //explictly use QtAV::AVError in connection for Qt4 syntax
     void paused(bool p);
+    /*!
+     * \brief started
+     * Emitted when playback is started. Some functions that control playback should be called after playback is started, otherwise they won't work, e.g. setPosition(), pause(). stop() can be called at any time.
+     */
     void started();
     void stopped();
     void stoppedAt(qint64 position);
@@ -555,6 +567,11 @@ Q_SIGNALS:
      * Emitted when media is loaded. \sa internalAudioTracks
      */
     void internalAudioTracksChanged(const QVariantList& tracks);
+    /*!
+     * \brief internalVideoTracksChanged
+     * Emitted when media is loaded. \sa internalVideoTracks
+     */
+    void internalVideoTracksChanged(const QVariantList& tracks);
     void externalAudioTracksChanged(const QVariantList& tracks);
     void internalSubtitleTracksChanged(const QVariantList& tracks);
     /*!

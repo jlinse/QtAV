@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2013)
 
@@ -74,11 +74,15 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(QStringList videoCodecs READ videoCodecs)
     Q_PROPERTY(QStringList videoCodecPriority READ videoCodecPriority WRITE setVideoCodecPriority NOTIFY videoCodecPriorityChanged)
     Q_PROPERTY(QVariantMap videoCodecOptions READ videoCodecOptions WRITE setVideoCodecOptions NOTIFY videoCodecOptionsChanged)
+    Q_PROPERTY(QVariantMap avFormatOptions READ avFormatOptions WRITE setAVFormatOptions NOTIFY avFormatOptionsChanged)
     Q_PROPERTY(bool useWallclockAsTimestamps READ useWallclockAsTimestamps WRITE setWallclockAsTimestamps NOTIFY useWallclockAsTimestampsChanged)
     Q_PROPERTY(QtAV::VideoCapture *videoCapture READ videoCapture CONSTANT)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
+    Q_PROPERTY(int videoTrack READ videoTrack WRITE setVideoTrack NOTIFY videoTrackChanged)
+    Q_PROPERTY(int bufferSize READ bufferSize WRITE setBufferSize NOTIFY bufferSizeChanged)
     Q_PROPERTY(QUrl externalAudio READ externalAudio WRITE setExternalAudio NOTIFY externalAudioChanged)
     Q_PROPERTY(QVariantList internalAudioTracks READ internalAudioTracks NOTIFY internalAudioTracksChanged)
+    Q_PROPERTY(QVariantList internalVideoTracks READ internalVideoTracks NOTIFY internalVideoTracksChanged)
     Q_PROPERTY(QVariantList externalAudioTracks READ externalAudioTracks NOTIFY externalAudioTracksChanged)
     Q_PROPERTY(QVariantList internalSubtitleTracks READ internalSubtitleTracks NOTIFY internalSubtitleTracksChanged)
     // internal subtitle, e.g. mkv embedded subtitles
@@ -196,6 +200,8 @@ public:
     void setVideoCodecPriority(const QStringList& p);
     QVariantMap videoCodecOptions() const;
     void setVideoCodecOptions(const QVariantMap& value);
+    QVariantMap avFormatOptions() const;
+    void setAVFormatOptions(const QVariantMap& value);
 
     bool useWallclockAsTimestamps() const;
     void setWallclockAsTimestamps(bool use_wallclock_as_timestamps);
@@ -218,6 +224,18 @@ public:
     int audioTrack() const;
     void setAudioTrack(int value);
     QVariantList internalAudioTracks() const;
+    /*!
+    /*!
+     * \brief videoTrack
+     * The video stream number in current media.
+     * Value can be: 0, 1, 2.... 0 means the 1st video stream in current media
+     */
+    int videoTrack() const;
+    void setVideoTrack(int value);
+    QVariantList internalVideoTracks() const;
+
+    int bufferSize() const;
+    void setBufferSize(int value);
     /*!
      * \brief externalAudio
      * If externalAudio url is valid, player will use audioTrack of external audio as audio source.
@@ -275,16 +293,20 @@ Q_SIGNALS:
     void bufferProgressChanged();
     void videoCodecPriorityChanged();
     void videoCodecOptionsChanged();
+    void avFormatOptionsChanged();
     void useWallclockAsTimestampsChanged();
     void channelLayoutChanged();
     void timeoutChanged();
     void abortOnTimeoutChanged();
     void audioTrackChanged();
     void internalAudioTracksChanged();
+    void videoTrackChanged();
+    void internalVideoTracksChanged();
     void externalAudioChanged();
     void externalAudioTracksChanged();
     void internalSubtitleTrackChanged();
     void internalSubtitleTracksChanged();
+    void bufferSizeChanged();
 
     void errorChanged();
     void error(Error error, const QString &errorString);
@@ -337,11 +359,13 @@ private:
     int m_timeout;
     bool m_abort_timeout;
     int m_audio_track;
+    int m_video_track;
     QUrl m_audio;
     int m_sub_track;
 
     QScopedPointer<MediaMetaData> m_metaData;
     QVariantMap vcodec_opt;
+    QVariantMap avfmt_opt;
 
     QList<QuickAudioFilter*> m_afilters;
     QList<QuickVideoFilter*> m_vfilters;

@@ -53,6 +53,10 @@ class Q_AV_EXPORT OpenGLVideo : public QObject
     Q_OBJECT
     DPTR_DECLARE_PRIVATE(OpenGLVideo)
 public:
+    enum MeshType {
+        RectMesh,
+        SphereMesh
+    };
     static bool isSupported(VideoFormat::PixelFormat pixfmt);
     OpenGLVideo();
     /*!
@@ -83,6 +87,7 @@ public:
      * the rect will be viewport
      */
     void setProjectionMatrixToRect(const QRectF& v);
+    void setViewport(const QRectF& r);
 
     void setBrightness(qreal value);
     void setContrast(qreal value);
@@ -91,6 +96,9 @@ public:
 
     void setUserShader(VideoShader* shader);
     VideoShader* userShader() const;
+
+    void setMeshType(MeshType value);
+    MeshType meshType() const;
 Q_SIGNALS:
     void beforeRendering();
     /*!
@@ -102,7 +110,7 @@ Q_SIGNALS:
 protected:
     DPTR_DECLARE(OpenGLVideo)
 
-private slots:
+private Q_SLOTS:
     /* used by Qt5 whose QOpenGLContext is QObject and we can call this when context is about to destroy.
      * shader manager and material will be reset
      */

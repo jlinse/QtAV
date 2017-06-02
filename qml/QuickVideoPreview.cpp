@@ -1,8 +1,8 @@
 /******************************************************************************
-    QtAV:  Media play library based on Qt and FFmpeg
-    Copyright (C) 2014-2015 Wang Bin <wbsecg1@gmail.com>
+    QtAV:  Multimedia framework based on Qt and FFmpeg
+    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
 
-*   This file is part of QtAV
+*   This file is part of QtAV (from 2014)
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
@@ -24,12 +24,7 @@
 
 namespace QtAV {
 
-QuickVideoPreview::QuickVideoPreview(QQuickItem *parent) :
-#if CONFIG_FBO_ITEM
-    QuickFBORenderer(parent)
-#else
-    QQuickItemRenderer(parent)
-#endif
+QuickVideoPreview::QuickVideoPreview(QQuickItem *parent) : BaseQuickRenderer(parent)
 {
     connect(&m_extractor, SIGNAL(positionChanged()), this, SIGNAL(timestampChanged()));
     connect(&m_extractor, SIGNAL(frameExtracted(QtAV::VideoFrame)), SLOT(displayFrame(QtAV::VideoFrame)));
