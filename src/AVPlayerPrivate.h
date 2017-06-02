@@ -143,7 +143,6 @@ public:
 
     QVariantHash ac_opt, vc_opt;
 
-    bool force_stop;
     bool seeking;
     SeekType seek_type;
     qint64 interrupt_timeout;

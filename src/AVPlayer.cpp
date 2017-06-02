@@ -1157,7 +1157,6 @@ bool AVPlayer::load()
 
 void AVPlayer::play()
 {
-    d->force_stop = false;
     //FIXME: bad delay after play from here
     if (isPlaying()) {
         qDebug("play() when playing");
@@ -1261,7 +1260,7 @@ void AVPlayer::playInternal()
 
 void AVPlayer::stopFromDemuxerThread()
 {
-    qDebug("demuxer thread emit finished. currentRepeat=%d repeat=%d force_stop=%d", currentRepeat(), repeat(), d->force_stop);
+    qDebug("demuxer thread emit finished. currentRepeat=%d repeat=%d", currentRepeat(), repeat());
     d->seeking = false;
     if (currentRepeat() < 0 || (currentRepeat() >= repeat() && repeat() >= 0)) {
         qreal stop_pts = masterClock()->videoTime();
@@ -1288,10 +1287,8 @@ void AVPlayer::stopFromDemuxerThread()
          */
         unload(); //TODO: invoke?
     } else {
-        if(!d->force_stop) {
-            d->repeat_current++;
-            QMetaObject::invokeMethod(this, "play"); //ensure play() is called from player thread
-        }
+        d->repeat_current++;
+        QMetaObject::invokeMethod(this, "play"); //ensure play() is called from player thread
     }
 }
 
@@ -1390,7 +1387,6 @@ void AVPlayer::tryClearVideoRenderers()
 
 void AVPlayer::stop()
 {
-    d->force_stop = true;
     // check d->timer_id, <0 return?
     if (d->reset_state) {
         /*
