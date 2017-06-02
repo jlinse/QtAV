@@ -1434,6 +1434,12 @@ void AVPlayer::stop()
         // interrupt to quit av_read_frame quickly.
         d->demuxer.setInterruptStatus(-1);
     }
+    if(d->athread) {
+      d->athread->stop();
+    }
+    if(d->vthread) {
+      d->vthread->stop();
+    }
     qDebug("all audio/video threads stopped... state: %d", d->state);
 }
 
