@@ -53,7 +53,7 @@ RESOURCES += QtAV.qrc \
     RC_ICONS = QtAV.ico
     QMAKE_TARGET_COMPANY = "Shanghai University->S3 Graphics->Deepin | wbsecg1@gmail.com"
     QMAKE_TARGET_DESCRIPTION = "QtAV Multimedia framework. http://qtav.org"
-    QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2012-2016 WangBin, wbsecg1@gmail.com"
+    QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2012-2017 WangBin, wbsecg1@gmail.com"
     QMAKE_TARGET_PRODUCT = "QtAV"
 } else:win32 {
     RC_FILE = QtAV.rc
@@ -88,7 +88,7 @@ win32 {
 # cross build, old vc etc.
   !config_dx: INCLUDEPATH += $$PROJECTROOT/contrib/dxsdk
 }
-*msvc* {
+*msvc*:!winrt {
 #link FFmpeg and portaudio which are built by gcc need /SAFESEH:NO
   win32-msvc2010|win32-msvc2008|win32-msvc2012 {
     QMAKE_LFLAGS *= /DEBUG #workaround for CoInitializeEx() and other symbols not found at runtime
@@ -97,7 +97,6 @@ win32 {
     debug: QMAKE_LFLAGS += /SAFESEH:NO
 #CXXFLAGS debug: /MTd
     !static:QMAKE_LFLAGS *= /NODEFAULTLIB:libcmt.lib /NODEFAULTLIB:libcmtd.lib #for msbuild vs2013
-
 }
 capi {
 contains(QT_CONFIG, egl)|contains(QT_CONFIG, dynamicgl)|contains(QT_CONFIG, opengles2) {
@@ -119,10 +118,15 @@ config_gl|config_opengl {
 DEFINES += __STDC_CONSTANT_MACROS
 android {
   CONFIG *= config_opensl
-  !no_gui_private:qtHaveModule(androidextras) { #qt5.2 has QAndroidJniObject
-    QT *= androidextras gui-private #QPlatformNativeInterface get "QtActivity"
+  SOURCES *= jmi/jmi.cpp
+  qtHaveModule(androidextras) { #qt5.2 has QAndroidJniObject
+    QT *= androidextras #QPlatformNativeInterface get "QtActivity"
     SOURCES *= io/AndroidIO.cpp
     SOURCES *= codec/video/VideoDecoderMediaCodec.cpp
+    exists($$[QT_INSTALL_HEADERS]/MediaCodecTextureStandalone.h) {
+      DEFINES *= MEDIACODEC_TEXTURE
+      LIBS *= -lqtav-mediacodec
+    }
   }
 }
 config_x11 {
@@ -163,6 +167,7 @@ config_avdevice { #may depends on avfilter
 config_avfilter {
     DEFINES += QTAV_HAVE_AVFILTER=1
     LIBS += -lavfilter
+    mac:!ios:static_ffmpeg: LIBS += -framework AppKit
 }
 config_ipp {
     DEFINES += QTAV_HAVE_IPP=1
@@ -183,6 +188,9 @@ mac|ios {
   CONFIG *= config_openal
   SOURCES += output/audio/AudioOutputAudioToolbox.cpp
   LIBS += -framework AudioToolbox
+  LIBS += -Wl,-unexported_symbols_list,$$PWD/unexport.list
+} else:!win32 {
+  #LIBS += -Wl,--exclude-libs,ALL
 }
 win32: {
   HEADERS += output/audio/xaudio2_compat.h
@@ -322,14 +330,13 @@ config_libcedarv {
 }
 mac {
   HEADERS *= codec/video/SurfaceInteropCV.h
-  SOURCES *= codec/video/SurfaceInteropCV.cpp
+  SOURCES *= codec/video/SurfaceInteropCV.cpp \
+             codec/video/SurfaceInteropIOSurface.mm
   ios {
     OBJECTIVE_SOURCES *= codec/video/SurfaceInteropCVOpenGLES.mm
   } else {
-    CONFIG += config_vda
-    SOURCES *= codec/video/SurfaceInteropIOSurface.cpp
+    #CONFIG += config_vda
     #SOURCES *= codec/video/SurfaceInteropCVOpenGL.cpp
-    LIBS += -framework IOSurface
   }
   LIBS += -framework CoreVideo -framework CoreFoundation
 }

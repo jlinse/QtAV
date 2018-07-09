@@ -1,7 +1,7 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
 	solve the version problem and diffirent api in FFmpeg and libav
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2018 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -59,6 +59,10 @@ extern "C"
 #include <libavutil/parseutils.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/avstring.h>
+#include <libavfilter/version.h>
+
+#define AVCODEC_STATIC_REGISTER FFMPEG_MODULE_CHECK(LIBAVCODEC, 58, 10, 100)
+#define AVFORMAT_STATIC_REGISTER FFMPEG_MODULE_CHECK(LIBAVFORMAT, 58, 9, 100)
 
 #if !FFMPEG_MODULE_CHECK(LIBAVUTIL, 51, 73, 101)
 #include <libavutil/channel_layout.h>
@@ -79,8 +83,11 @@ extern "C"
 #endif //QTAV_HAVE(AVRESAMPLE)
 
 #if QTAV_HAVE(AVFILTER)
+#if LIBAVFILTER_VERSION_INT < AV_VERSION_INT(3,8,0)
 #include <libavfilter/avfiltergraph.h> /*code is here for old version*/
+#else
 #include <libavfilter/avfilter.h>
+#endif
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #endif //QTAV_HAVE(AVFILTER)
@@ -456,3 +463,15 @@ const char *get_codec_long_name(AVCodecID id);
      } } while(0)
 
 #endif //QTAV_COMPAT_H
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,33,0)
+#define AV_CODEC_FLAG_GLOBAL_HEADER CODEC_FLAG_GLOBAL_HEADER
+#endif
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,56,100)
+#define AV_INPUT_BUFFER_MIN_SIZE FF_MIN_BUFFER_SIZE
+#endif
+
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,56,100)
+#define AV_INPUT_BUFFER_PADDING_SIZE FF_INPUT_BUFFER_PADDING_SIZE
+#endif

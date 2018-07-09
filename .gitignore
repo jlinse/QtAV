@@ -1,9 +1,18 @@
 CVS
 .#*
 
+*.patch
+*.diff
+*.orig
+#*.rej
+contrib/include
+*~
+*.mak
+
 # Hidden files are ignored by default with exceptions
 .*
 !/.gitignore
+!/.github
 !/.gitmodules
 !/.qmake.conf
 !/.travis.yml
@@ -60,6 +69,14 @@ Debug
 Release
 *.Debug
 *.Release
+
+# Ignore temporary Python files
+python/PyQtAV.api
+python/PyQtAV.pro
+python/QtAV.pyi
+python/QtAVWidgets.pyi
+python/QtAV
+python/QtAVWidgets
 
 *.fuse*
 

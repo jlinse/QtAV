@@ -13,10 +13,17 @@ PROJECTROOT = $$PWD/..
 preparePaths($$OUT_PWD/../out)
 #https://github.com/wang-bin/QtAV/issues/368#issuecomment-73246253
 #http://qt-project.org/forums/viewthread/38438
-# mkspecs/features/qml_plugin.prf
-URI = QtAV #uri used in QtAVQmlPlugin::registerTypes(uri)
-qtAtLeast(5, 3): QMAKE_MOC_OPTIONS += -Muri=$$URI # not sure what moc does
-#DESTDIR = $$BUILD_DIR/bin/QtAV
+# mkspecs/features/qml_plugin.prf mkspecs/features/qml_module.prf
+TARGETPATH = QtAV
+URI = $$replace(TARGETPATH, "/", ".")
+qtAtLeast(5, 3): QMAKE_MOC_OPTIONS += -Muri=$$URI
+
+static: CONFIG += builtin_resources
+
+builtin_resources {
+    RESOURCES += libQmlAV.qrc
+}
+
 qtav_qml.files = qmldir Video.qml plugins.qmltypes
 !static { #static lib copy error before ranlib. copy only in sdk_install
   plugin.files = $$DESTDIR/$$qtSharedLib($$NAME)
@@ -65,7 +72,7 @@ EXTRA_COPY_FILES = $$qtav_qml.files
 QMAKE_WRITE_DEFAULT_RC = 1
 QMAKE_TARGET_COMPANY = "Shanghai University->S3 Graphics->Deepin | wbsecg1@gmail.com"
 QMAKE_TARGET_DESCRIPTION = "QtAV QML module. QtAV Multimedia framework. http://qtav.org"
-QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2012-2016 WangBin, wbsecg1@gmail.com"
+QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2012-2017 WangBin, wbsecg1@gmail.com"
 QMAKE_TARGET_PRODUCT = "QtAV QML"
 
 SOURCES += \

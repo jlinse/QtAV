@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2018 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -63,7 +63,9 @@ public:
         : AudioDecoderPrivate()
         , frame(av_frame_alloc())
     {
+#if !AVCODEC_STATIC_REGISTER
         avcodec_register_all();
+#endif
     }
     ~AudioDecoderFFmpegPrivate() {
         if (frame) {
@@ -112,7 +114,7 @@ bool AudioDecoderFFmpeg::decode(const Packet &packet)
         return false;
     }
     if (!got_frame_ptr) {
-        qWarning("[AudioDecoder] got_frame_ptr=false. decoded: %d, un: %d", ret, d.undecoded_size);
+        qWarning("[AudioDecoder] got_frame_ptr=false. decoded: %d, un: %d %s", ret, d.undecoded_size, av_err2str(ret));
         return !packet.isEOF();
     }
 #if USE_AUDIO_FRAME

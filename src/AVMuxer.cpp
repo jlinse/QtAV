@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2018 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2015)
 
@@ -43,6 +43,7 @@ public:
         , started(false)
         , eof(false)
         , media_changed(true)
+        , open(false)
         , format_ctx(0)
         , format(0)
         , io(0)
@@ -50,7 +51,9 @@ public:
         , aenc(0)
         , venc(0)
     {
+#if !AVFORMAT_STATIC_REGISTER
         av_register_all();
+#endif
     }
     ~Private() {
         //delete interrupt_hanlder;
@@ -73,6 +76,7 @@ public:
     bool started;
     bool eof;
     bool media_changed;
+    bool open;
     AVFormatContext *format_ctx;
     //copy the info, not parse the file when constructed, then need member vars
     QString file;
@@ -122,7 +126,7 @@ AVStream *AVMuxer::Private::addStream(AVFormatContext* ctx, const QString &codec
     c->time_base = s->time_base;
     /* Some formats want stream headers to be separate. */
     if (ctx->oformat->flags & AVFMT_GLOBALHEADER)
-        c->flags |= CODEC_FLAG_GLOBAL_HEADER;
+        c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     // expose avctx to encoder and set properties in encoder?
     // list codecs for a given format in ui
     return s;
@@ -143,6 +147,10 @@ bool AVMuxer::Private::prepareStreams()
             c->height = venc->height();
             /// MUST set after encoder is open to ensure format is valid and the same
             c->pix_fmt = (AVPixelFormat)VideoFormat::pixelFormatToFFmpeg(venc->pixelFormat());
+
+            // Set avg_frame_rate based on encoder frame_rate
+            s->avg_frame_rate = av_d2q(venc->frameRate(), venc->frameRate()*1001.0+2);
+
             video_streams.push_back(s->id);
         }
     }
@@ -157,6 +165,18 @@ bool AVMuxer::Private::prepareStreams()
             c->channel_layout = aenc->audioFormat().channelLayoutFFmpeg();
             c->channels = aenc->audioFormat().channels();
             c->bits_per_raw_sample = aenc->audioFormat().bytesPerSample()*8; // need??
+
+            AVCodecContext *avctx = (AVCodecContext *) aenc->codecContext();
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,5,100)
+            c->initial_padding = avctx->initial_padding;
+#else
+            c->delay = avctx->delay;
+#endif
+            if (avctx->extradata_size) {
+                c->extradata = avctx->extradata;
+                c->extradata_size = avctx->extradata_size;
+            }
+
             audio_streams.push_back(s->id);
         }
     }
@@ -168,10 +188,16 @@ static void getFFmpegOutputFormats(QStringList* formats, QStringList* extensions
     static QStringList exts;
     static QStringList fmts;
     if (exts.isEmpty() && fmts.isEmpty()) {
+        QStringList e, f;
+#if AVFORMAT_STATIC_REGISTER
+        const AVOutputFormat *o = NULL;
+        void* it = NULL;
+        while ((o = av_muxer_iterate(&it))) {
+#else
         av_register_all(); // MUST register all input/output formats
         AVOutputFormat *o = NULL;
-        QStringList e, f;
         while ((o = av_oformat_next(o))) {
+#endif
             if (o->extensions)
                 e << QString::fromLatin1(o->extensions).split(QLatin1Char(','), QString::SkipEmptyParts);
             if (o->name)
@@ -221,7 +247,9 @@ const QStringList &AVMuxer::supportedProtocols()
 #if QTAV_HAVE(AVDEVICE)
     protocols << QStringLiteral("avdevice");
 #endif
+#if !AVFORMAT_STATIC_REGISTER
     av_register_all(); // MUST register all input/output formats
+#endif
     void* opq = 0;
     const char* protocol = avio_enum_protocols(&opq, 1);
     while (protocol) {
@@ -323,6 +351,11 @@ bool AVMuxer::setMedia(QIODevice* device)
         d->format_forced.clear();
     }
     d->io->setProperty("device", QVariant::fromValue(device)); //open outside?
+
+    if (device->isWritable()) {
+        d->io->setAccessMode(MediaIO::Write);
+    }
+
     return d->media_changed;
 }
 
@@ -392,6 +425,7 @@ bool AVMuxer::open()
     // d->format_ctx->start_time_realtime
     AV_ENSURE_OK(avformat_write_header(d->format_ctx, &d->dict), false);
     d->started = false;
+    d->open = true;
 
     return true;
 }
@@ -400,6 +434,7 @@ bool AVMuxer::close()
 {
     if (!isOpen())
         return true;
+    d->open = false;
     av_write_trailer(d->format_ctx);
     // close AVCodecContext* in encoder
     // custom io will call avio_close in ~MediaIO()
@@ -421,7 +456,7 @@ bool AVMuxer::close()
 
 bool AVMuxer::isOpen() const
 {
-    return d->format_ctx;
+    return d->open;
 }
 
 bool AVMuxer::writeAudio(const QtAV::Packet& packet)
