@@ -185,7 +185,8 @@ config_ipp {
     #omp for static link. _t is multi-thread static link
 }
 mac|ios {
-  CONFIG *= config_openal
+  #CONFIG *= config_openal
+  CONFIG *= no-openal
   SOURCES += output/audio/AudioOutputAudioToolbox.cpp
   LIBS += -framework AudioToolbox
   LIBS += -Wl,-unexported_symbols_list,$$PWD/unexport.list
