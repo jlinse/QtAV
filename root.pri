@@ -11,7 +11,6 @@ isEmpty(SOURCE_ROOT):SOURCE_ROOT = $$PWD
 SOURCE_ROOT ~= s,\\\\,/,g #avoid warning for '\'. qmake knows how to deal with '/'
 isEmpty(BUILD_DIR):BUILD_DIR=$$out_dir
 message("BUILD_DIR=$$BUILD_DIR")
-
 greaterThan(QT_MAJOR_VERSION, 4) {
     mkspecs_build = $$[QMAKE_SPEC]
     #recheck:write_file($$BUILD_DIR/.qmake.cache) #FIXME: empty_file result in no qtCompileTest result in cache
