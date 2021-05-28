@@ -408,7 +408,14 @@ config_libass {
 }
 # mac is -FQTDIR we need -LQTDIR
 LIBS *= -L$$[QT_INSTALL_LIBS] -lavcodec -lavformat -lswscale -lavutil
- LIBS += -L$$PWD/../../../ffmpeg/android/lib/arm64-v8a/
+android {
+  equals(ANDROID_TARGET_ARCH, armeabi-v7a) {
+    LIBS += -L$$PWD/../../../ffmpeg/android/lib/armeabi-v7a/
+  }
+  equals(ANDROID_TARGET_ARCH, arm64-v8a) {
+    LIBS += -L$$PWD/../../../ffmpeg/android/lib/arm64-v8a/
+  }
+}
 win32 {
   HEADERS *= utils/DirectXHelper.h
   SOURCES *= utils/DirectXHelper.cpp
