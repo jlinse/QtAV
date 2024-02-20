@@ -192,6 +192,11 @@ mac|ios {
 } else:!win32 {
   #LIBS += -Wl,--exclude-libs,ALL
 }
+unix: {
+  CONFIG *= no-openal
+  CONFIG -= config_openal
+  message("CONFIG NO OPENAL")
+}
 win32: {
   HEADERS += output/audio/xaudio2_compat.h
   SOURCES += output/audio/AudioOutputXAudio2.cpp
@@ -213,6 +218,7 @@ config_portaudio {
     #win32: LIBS *= -lwinmm #-lksguid #-luuid
 }
 config_openal {
+    message("CONFIGURE WITH OPENAL")
     SOURCES *= output/audio/AudioOutputOpenAL.cpp
     HEADERS *= capi/openal_api.h
     SOURCES *= capi/openal_api.cpp
