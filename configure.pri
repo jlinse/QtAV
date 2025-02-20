@@ -91,13 +91,13 @@ defineTest(qtRunLoggedCommand) {
 defineTest(qtCompileTest) {
     positive = config_$$1
     done = done_config_$$1
-
+    message("qtCompleTest ")
     $$done:!recheck {
         $$positive:return(true)
         return(false)
     }
 
-    log("Checking for $${1}... ")
+    log("OK Checking for $${1}... ")
     msg = "executing config test $$1"
     write_file($$QMAKE_CONFIG_LOG, msg, append)
     test_dir = $$QMAKE_CONFIG_TESTS_DIR/$$1
