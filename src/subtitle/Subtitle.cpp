@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2014)
 
@@ -27,13 +27,20 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QIODevice>
-#include <QtCore/QLinkedList>
-#include <QtCore/QRegExp>
+#include <QtCore/QList>
 #include <QtCore/QRunnable>
 #include <QtCore/QThreadPool>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QtCore/QTextCodec>
+#endif
 #include <QtCore/QTextStream>
 #include <QtCore/QMutexLocker>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QtCore/QRegularExpression>
+using QRegExp = QRegularExpression;
+#else
+#include <QtCore/QRegExp>
+#endif
 #include "subtitle/CharsetDetector.h"
 #include "utils/Logger.h"
 
@@ -98,7 +105,7 @@ public:
     QList<SubtitleProcessor*> processors;
     QByteArray codec;
     QStringList engine_names;
-    QLinkedList<SubtitleFrame> frames;
+    QList<SubtitleFrame> frames;
     QUrl url;
     QByteArray raw_data;
     QString file_name;
@@ -113,7 +120,7 @@ public:
     QString current_text;
     QImage current_image;
     SubImageSet current_ass;
-    QLinkedList<SubtitleFrame>::iterator itf;
+    QList<SubtitleFrame>::iterator itf;
     /* number of subtitle frames at current time.
      * <0 means itf is the last. >0 means itf is the 1st
      */
@@ -500,7 +507,7 @@ QString Subtitle::getText() const
     priv->update_text = false;
     priv->current_text.clear();
     const int count = qAbs(priv->current_count);
-    QLinkedList<SubtitleFrame>::iterator it = priv->current_count > 0 ? priv->itf : priv->itf + (priv->current_count+1);
+    QList<SubtitleFrame>::iterator it = priv->current_count > 0 ? priv->itf : priv->itf + (priv->current_count+1);
     for (int i = 0; i < count; ++i) {
         priv->current_text.append(it->text).append(QStringLiteral("\n"));
         ++it;
@@ -595,7 +602,7 @@ bool Subtitle::processLine(const QByteArray &data, qreal pts, qreal duration)
         return true;
     }
     // usually add to the end. TODO: test
-    QLinkedList<SubtitleFrame>::iterator it = priv->frames.end();
+    QList<SubtitleFrame>::iterator it = priv->frames.end();
     if (it != priv->frames.begin())
         --it;
     while (it != priv->frames.begin() && f < (*it)) {--it;}
@@ -613,7 +620,7 @@ bool Subtitle::Private::prepareCurrentFrame()
 {
     if (frames.isEmpty())
         return false;
-    QLinkedList<SubtitleFrame>::iterator it = itf;
+    QList<SubtitleFrame>::iterator it = itf;
     int found = 0;
     const int old_current_count = current_count;
     const qreal t = this->t - delay;
@@ -724,15 +731,23 @@ QStringList Subtitle::Private::find()
     foreach (const QString& suf, sfx) {
         if (list.isEmpty())
             break;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        auto rx = QRegularExpression::fromWildcard(QStringLiteral("*.") + suf);
+#else
         QRegExp rx(QStringLiteral("*.") + suf);
         rx.setPatternSyntax(QRegExp::Wildcard);
+#endif
         QFileInfoList::iterator it = list.begin();
         while (it != list.end()) {
             if (!it->fileName().startsWith(name) && !it->fileName().startsWith(base_name)) {// why it happens?
                 it = list.erase(it);
                 continue;
             }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            if (!rx.match(it->fileName()).hasMatch()) {
+#else
             if (!rx.exactMatch(it->fileName())) {
+#endif
                 ++it;
                 continue;
             }
@@ -761,6 +776,7 @@ QByteArray Subtitle::Private::readFromFile(const QString &path)
     }
     QTextStream ts(&f);
     ts.setAutoDetectUnicode(true);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     if (!codec.isEmpty()) {
         if (codec.toLower() == "system") {
             ts.setCodec(QTextCodec::codecForLocale());
@@ -777,6 +793,7 @@ QByteArray Subtitle::Private::readFromFile(const QString &path)
             ts.setCodec(QTextCodec::codecForName(codec));
         }
     }
+#endif
     return ts.readAll().toUtf8();
 }
 
