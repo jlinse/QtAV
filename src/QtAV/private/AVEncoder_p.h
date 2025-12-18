@@ -27,6 +27,7 @@
 #include "QtAV/Packet.h"
 #include "QtAV/VideoFormat.h"
 #include "QtAV/private/AVCompat.h"
+#include "AVWrapper.h"
 
 namespace QtAV {
 
@@ -34,8 +35,7 @@ class Q_AV_PRIVATE_EXPORT AVEncoderPrivate : public DPtrPrivate<AVEncoder>
 {
 public:
     AVEncoderPrivate():
-        avctx(0)
-      , is_open(false)
+        is_open(false)
       , bit_rate(0)
       , timestamp_mode(0)
       , dict(0)
@@ -45,9 +45,6 @@ public:
         if (dict) {
             av_dict_free(&dict);
         }
-        if (avctx) {
-            avcodec_free_context(&avctx);
-        }
     }
     virtual bool open() {return true;}
     virtual bool close() {return true;}
@@ -55,7 +52,7 @@ public:
     void applyOptionsForDict();
     void applyOptionsForContext();
 
-    AVCodecContext *avctx; // null if not avcodec. allocated in ffmpeg based encoders
+    Wrapper::AVCodecContextWrapper avctx; // null if not avcodec. allocated in ffmpeg based encoders
     bool is_open;
     int bit_rate;
     int timestamp_mode;

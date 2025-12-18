@@ -91,7 +91,7 @@ bool FrameReader::Private::tryLoad()
         VideoDecoder *vd = VideoDecoder::create("FFmpeg");
         if (vd) {
             decoder.reset(vd);
-            decoder->setCodecContext(demuxer.videoCodecContext());
+            decoder->setCodecContext(demuxer.playAudioCodecContext());
             if (!decoder->open())
                 decoder.reset(0);
         }
@@ -101,7 +101,7 @@ bool FrameReader::Private::tryLoad()
             if (!vd)
                 continue;
             decoder.reset(vd);
-            decoder->setCodecContext(demuxer.videoCodecContext());
+            decoder->setCodecContext(demuxer.playAudioCodecContext());
             decoder->setProperty("copyMode", "OptimizedCopy");
             if (!decoder->open()) {
                 decoder.reset(0);

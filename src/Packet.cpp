@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -22,6 +22,7 @@
 #include "QtAV/Packet.h"
 #include "QtAV/private/AVCompat.h"
 #include "utils/Logger.h"
+#include "AVWrapper.h"
 
 namespace QtAV {
 namespace {
@@ -39,20 +40,19 @@ public:
         : QSharedData()
         , initialized(false)
     {
-        av_init_packet(&avpkt);
+        
     }
     PacketPrivate(const PacketPrivate& o)
         : QSharedData(o)
         , initialized(o.initialized)
     { //used by QSharedDataPointer.detach()
-        av_init_packet(&avpkt);
-        av_packet_ref(&avpkt, (AVPacket*)&o.avpkt);
+        avpkt = o.avpkt;
     }
      ~PacketPrivate() {
-        av_packet_unref(&avpkt);
+        
     }
     bool initialized;
-    AVPacket avpkt;
+    Wrapper::AVPacketWrapper avpkt;
 };
 
 Packet Packet::createEOF()
@@ -182,8 +182,8 @@ const AVPacket *Packet::asAVPacket() const
 {
     if (d.constData()) { //why d->initialized (ref==1) result in detach?
         if (d.constData()->initialized) {//d.data() was 0 if d has not been accessed. now only contains avpkt, check d.constData() is engough
-            d->avpkt.data = (uint8_t*)data.constData();
-            d->avpkt.size = data.size();
+            d->avpkt->data = (uint8_t*)data.constData();
+            d->avpkt->size = data.size();
             return &d->avpkt;
         }
     } else {
@@ -222,6 +222,10 @@ void Packet::skip(int bytes)
 #ifndef QT_NO_DEBUG_STREAM
 QDebug operator<<(QDebug dbg, const Packet &pkt)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    using Qt::hex;
+    using Qt::dec;
+#endif
     dbg.nospace() << "QtAV::Packet.data " << hex << (qptrdiff)pkt.data.constData() << "+" << dec << pkt.data.size();
     dbg.nospace() << ", dts: " << pkt.dts;
     dbg.nospace() << ", pts: " << pkt.pts;

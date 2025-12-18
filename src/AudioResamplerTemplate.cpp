@@ -18,7 +18,17 @@
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
+#include "QtAV/QtAV_Global.h"
+
+#if QTAV_HAVE(SWRESAMPLE)
 #define BUILD_SWR
+#endif
+
+#if QTAV_HAVE(AVRESAMPLE)
+#define QTAV_HAVE_SWR_AVR_MAP 1
+#define BUILD_AVR
+#endif
+
 #if defined(BUILD_AVR) || defined(BUILD_SWR) // no this macro is fine too for qmake
 #include "QtAV/AudioResampler.h"
 #include "QtAV/private/AudioResampler_p.h"

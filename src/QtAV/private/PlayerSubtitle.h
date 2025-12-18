@@ -65,6 +65,7 @@ private Q_SLOTS:
     void onPlayerSourceChanged();
     void onPlayerPositionChanged();
     void onPlayerStart();
+    void onPlayerStopped();
     void tryReload();
     void tryReloadInternalSub();
     void updateInternalSubtitleTracks(const QVariantList& tracks);

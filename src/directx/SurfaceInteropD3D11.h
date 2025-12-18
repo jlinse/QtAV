@@ -36,12 +36,15 @@ enum InteropType {
     InteropEGL,
     InteropGL //NOT IMPLEMENTED
 };
+class InteropResource;
+typedef QSharedPointer<InteropResource> InteropResourcePtr;
 
-class InteropResource
+class InteropResource : public QObject
 {
+    Q_OBJECT
 public:
     typedef unsigned int GLuint;
-    static InteropResource* create(InteropType type = InteropAuto);
+    static InteropResourcePtr create(InteropType type = InteropAuto);
     /*!
      * \brief isSupported
      * \return true if support 0-copy interop. Currently only d3d11+egl, i.e. check egl build environment and runtime egl support.
@@ -67,8 +70,6 @@ protected:
     ComPtr<ID3D11Device> d3ddev;
     int width, height; // video frame width and dx_surface width without alignment, not dxva decoded surface width
 };
-typedef QSharedPointer<InteropResource> InteropResourcePtr;
-
 
 class SurfaceInterop Q_DECL_FINAL: public VideoSurfaceInterop
 {

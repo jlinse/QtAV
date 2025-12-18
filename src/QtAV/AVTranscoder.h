@@ -104,13 +104,6 @@ public:
     qreal startTimestamp() const;
     qreal encodedDuration() const;
 
-    /*!
-     * \brief startTime
-     * Start to encode after startTime(). To decode from a given time, call sourcePlayer()->setPosition()
-     */
-    qint64 startTime() const;
-    void setStartTime(qint64 ms);
-
 Q_SIGNALS:
     void videoFrameEncoded(qreal timestamp);
     void audioFrameEncoded(qreal timestamp);

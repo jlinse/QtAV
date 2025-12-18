@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2018 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV
 
@@ -23,6 +23,7 @@
 #include "QtAV/private/AVCompat.h"
 #include <QtCore/QMutex>
 #include <QtCore/QStringList>
+#include <QtCore/QIODevice>
 #if QT_VERSION >= QT_VERSION_CHECK(4, 7, 0)
 #include <QtCore/QElapsedTimer>
 #else
@@ -31,6 +32,9 @@ typedef QTime QElapsedTimer;
 #endif
 #include "utils/internal.h"
 #include "utils/Logger.h"
+#include "AVWrapper.h"
+#include <QUrl>
+#include <set>
 
 namespace QtAV {
 static const char kFileScheme[] = "file:";
@@ -45,7 +49,7 @@ public:
         Read
     };
     //default network timeout: 30000
-    InterruptHandler(AVDemuxer* demuxer, int timeout = 30000)
+    InterruptHandler(AVDemuxer* demuxer, int timeout = 5000)
       : mStatus(0)
       , mTimeout(timeout)
       , mTimeoutAbort(true)
@@ -211,7 +215,9 @@ public:
         , seek_type(AccurateSeek)
         , dict(0)
         , interrupt_hanlder(0)
-    {}
+    {
+        
+    }
     ~Private() {
         delete interrupt_hanlder;
         if (dict) {
@@ -230,7 +236,11 @@ public:
         if (media_changed)
             astream = vstream = sstream = StreamInfo();
         else
-            astream.avctx = vstream.avctx = sstream.avctx = 0;
+		{
+			astream.avctx.reset();
+            vstream.avctx.reset();
+            sstream.avctx.reset();
+        }
         audio_streams.clear();
         video_streams.clear();
         subtitle_streams.clear();
@@ -290,7 +300,7 @@ public:
     //copy the info, not parse the file when constructed, then need member vars
     QString file;
     QString file_orig;
-    AVInputFormat *input_format;
+    ff_const59 AVInputFormat *input_format;
     QString format_forced;
     MediaIO *input;
 
@@ -305,17 +315,35 @@ public:
             , wanted_stream(-1)
             , index(-1)
             , wanted_index(-1)
-            , avctx(0)
         {}
         // wanted_stream is REQUIRED. e.g. always set -1 to indicate the default stream, -2 to disable
         int stream, wanted_stream; // -1 default, selected by ff
         int index, wanted_index; // index in a kind of streams
-        AVCodecContext *avctx;
+        Wrapper::AVCodecContextWrapper avctx;
     } StreamInfo;
     StreamInfo astream, vstream, sstream;
 
     AVDemuxer::InterruptHandler *interrupt_hanlder;
     QMutex mutex; //TODO: remove if load, read, seek is called in 1 thread
+
+    // for recording stream
+    std::map<QString,AVFormatContext*> oc;
+    std::map<QString,AVStream*> ostreamVideo;
+    std::map<QString,AVStream*> ostreamAudio;
+    std::map<QString,int64_t> videoFirstPts;
+    std::map<QString,int64_t> audioFirstPts;
+    std::map<QString,QElapsedTimer> elapsed;
+    std::map<QString,quint64> recordPacketCount;
+    std::map<QString,quint64> recordTryCount;
+    std::map<QString,QString> recordFormat;
+    std::map<QString,int> records; // <path, duration>
+    std::map<QString,bool> restream;
+    QMutex recordMutex;
+    Wrapper::AVPacketWrapper lastKeyFrame;
+    QList<Wrapper::AVPacketWrapper> lastNonKeyFrames;
+
+    qint64 lastPts = -1;
+    qreal averagePtsDiff = 0;
 };
 
 AVDemuxer::AVDemuxer(QObject *parent)
@@ -366,10 +394,18 @@ static void getFFmpegInputFormats(QStringList* formats, QStringList* extensions)
         av_register_all(); // MUST register all input/output formats
         while ((i = av_iformat_next(i))) {
 #endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+            if (i->extensions)
+                e << QString::fromLatin1(i->extensions).split(QLatin1Char(','), Qt::SkipEmptyParts);
+            if (i->name)
+                f << QString::fromLatin1(i->name).split(QLatin1Char(','), Qt::SkipEmptyParts);
+#else
             if (i->extensions)
                 e << QString::fromLatin1(i->extensions).split(QLatin1Char(','), QString::SkipEmptyParts);
             if (i->name)
                 f << QString::fromLatin1(i->name).split(QLatin1Char(','), QString::SkipEmptyParts);
+#endif
         }
         foreach (const QString& v, e) {
             exts.append(v.trimmed());
@@ -436,8 +472,8 @@ bool AVDemuxer::readFrame()
         return false;
     d->pkt = Packet();
     // no lock required because in AVDemuxThread read and seek are in the same thread
-    AVPacket packet;
-    av_init_packet(&packet);
+    QtAV::Wrapper::AVPacketWrapper packet;
+
     d->interrupt_hanlder->begin(InterruptHandler::Read);
     int ret = av_read_frame(d->format_ctx, &packet); //0: ok, <0: error/end
     d->interrupt_hanlder->end();
@@ -463,35 +499,262 @@ bool AVDemuxer::readFrame()
                     qDebug("End of file. erreof=%d feof=%d", ret == AVERROR_EOF, avio_feof(d->format_ctx->pb));
                 }
             }
-            av_packet_unref(&packet); //important!
             return false;
         }
         if (ret == AVERROR(EAGAIN)) {
             qWarning("demuxer EAGAIN :%s", av_err2str(ret));
-            av_packet_unref(&packet); //important!
             return false;
         }
         AVError::ErrorCode ec(AVError::ReadError);
         QString msg(tr("error reading stream data"));
         handleError(ret, &ec, msg);
         qWarning("[AVDemuxer] error: %s", av_err2str(ret));
-        av_packet_unref(&packet); //important!
         return false;
     }
-    d->stream = packet.stream_index;
+
+    if(resetValues.load()) {
+        mutex.lock();
+        totalBandwidth = 0;
+        totalVideoBandwidth = 0;
+        totalAudioBandwidth = 0;
+        totalKeyFrameSize = 0;
+        totalPFrameSize = 0;
+        totalPackets = 0;
+        totalVideoPackets = 0;
+        totalAudioPackets = 0;
+        lostFrames = 0;
+        d->averagePtsDiff = 0;
+        mutex.unlock();
+        resetValues.store(false);
+    }
+
+    auto packetSize = packet.calculatePacketSize();
+
+    mutex.lock();
+    totalBandwidth+=static_cast<quint64>(packetSize);
+    totalPackets++;
+    mutex.unlock();
+    if( packet->stream_index==videoStream())
+    {
+        mutex.lock();
+        totalVideoBandwidth+=static_cast<quint64>(packetSize);
+        totalVideoPackets++;
+
+        if(packet->flags & AV_PKT_FLAG_KEY)
+            totalKeyFrameSize += static_cast<quint64>(packetSize);
+        else
+            totalPFrameSize += static_cast<quint64>(packetSize);
+
+        //auto time = packet.pts* av_q2d(d->format_ctx->streams[videoStream()]->time_base);
+        if(packet->pts > d->lastPts) {
+            qint64 ptsDiff = packet->pts-d->lastPts;
+            if(totalVideoPackets>1000 && ptsDiff>(10*d->averagePtsDiff)
+                    && d->averagePtsDiff>0 && (ptsDiff/d->averagePtsDiff)<10000 )
+                lostFrames+=(ptsDiff/d->averagePtsDiff);
+            else
+                d->averagePtsDiff += static_cast<double>(ptsDiff-d->averagePtsDiff)/totalVideoPackets;
+        }
+        mutex.unlock();
+
+        d->lastPts = packet->pts;
+    }
+    else if( packet->stream_index==audioStream() || packet->stream_index==audioStreamIndex)
+    {
+        mutex.lock();
+        totalAudioBandwidth+=static_cast<quint64>(packetSize);
+        totalAudioPackets++;
+        mutex.unlock();
+    }
+
+    d->recordMutex.lock();
+    if(d->records.size()!=d->oc.size()) {
+        for(const auto& [k,v]: d->records)
+            if(d->oc.find(k)==d->oc.end()) {
+                d->oc.insert({k, nullptr});
+                d->ostreamVideo.insert({k, nullptr});
+                d->ostreamAudio.insert({k, nullptr});
+                d->restream.insert({k, (QUrl(k).scheme().toLower()=="udp")});
+                d->elapsed.insert({k, QElapsedTimer{}});
+                d->recordPacketCount.insert({k, 0});
+                d->recordTryCount.insert({k, 0});
+                d->recordFormat.insert({k,videoStream()>=0 ?"mkv":"wav"});
+                d->videoFirstPts.insert({k, -1});
+                d->audioFirstPts.insert({k, -1});
+            }
+        for(auto it =  d->oc.cbegin(); it!=d->oc.cend();) {
+            auto k = it->first;
+            if(d->records.find(k)==d->records.end()) {
+                if(d->ostreamVideo[k] != nullptr || d->ostreamAudio[k] != nullptr) {
+                    if(d->elapsed[k].isValid())
+                        av_write_trailer(d->oc[k]);
+                    avio_close(d->oc[k]->pb);
+                    d->oc[k]->pb = nullptr;
+                }
+                if(d->oc[k]!=nullptr)
+                    avformat_free_context(d->oc[k]);
+
+                emit recordFinished(true, d->recordFormat[k]);
+
+                d->ostreamVideo.erase(k);
+                d->ostreamAudio.erase(k);
+                d->videoFirstPts.erase(k);
+                d->audioFirstPts.erase(k);
+                d->restream.erase(k);
+                d->elapsed.erase(k);
+                d->recordPacketCount.erase(k);
+                d->recordTryCount.erase(k);
+                d->recordFormat.erase(k);
+                it = d->oc.erase(it);
+            }
+            else
+                ++it;
+        }
+    }
+    d->recordMutex.unlock();
+
+    for(const auto& [k,v]: d->oc) {
+        if(!d->elapsed[k].isValid()){
+            if(!d->restream[k] && d->recordTryCount[k]>20) {
+                if(d->oc[k]!=nullptr)
+                    avformat_free_context(d->oc[k]);
+                d->oc[k] = nullptr;
+                d->ostreamVideo[k] = nullptr;
+                d->ostreamAudio[k] = nullptr;
+                if(d->recordFormat[k]=="mkv")
+                    d->recordFormat[k]="mp4";
+                else if(d->recordFormat[k]=="mp4")
+                    d->recordFormat[k]="avi";
+                else if(d->recordFormat[k]=="avi")
+                    d->recordFormat[k]="mov";
+                else if(d->recordFormat[k]=="mov")
+                    d->recordFormat[k]="flv";
+                else {
+                    emit recordFinished(false, "");
+                    d->recordMutex.lock();
+                    stopRecording(k);
+                    d->recordMutex.unlock();
+                }
+                d->recordTryCount[k] = 0;
+            }
+            if(d->oc[k]==nullptr) {
+                auto ret = -1;
+                if(d->restream[k])
+                    ret = avformat_alloc_output_context2(&d->oc[k],nullptr,/*d->format_ctx->iformat->name*/"mpegts",nullptr);
+                else
+                    ret = avformat_alloc_output_context2(&d->oc[k],nullptr,nullptr,(k+"."+d->recordFormat[k]).toLatin1());
+                if(ret>=0 && d->oc[k]!=nullptr && !(d->oc[k]->oformat->flags & AVFMT_NOFILE))
+                    avio_open(&d->oc[k]->pb, (k+(d->restream[k] ? "" : "."+d->recordFormat[k])).toLatin1(), AVIO_FLAG_WRITE);
+            }
+            if(d->oc[k]!=nullptr && d->ostreamVideo[k] == nullptr && videoStream()>=0) {
+                d->ostreamVideo[k] = avformat_new_stream(d->oc[k], nullptr);
+                if(d->ostreamVideo[k]!=nullptr) {
+                    avcodec_parameters_copy(d->ostreamVideo[k]->codecpar, d->format_ctx->streams[videoStream()]->codecpar);
+                    d->ostreamVideo[k]->codecpar->codec_tag = 0;
+                    d->ostreamVideo[k]->start_time          = 0;
+                }
+            }
+            if(d->oc[k]!=nullptr && d->ostreamAudio[k] == nullptr && audioStream()>=0) {
+                d->ostreamAudio[k] = avformat_new_stream(d->oc[k], nullptr);
+                if(d->ostreamAudio[k]!=nullptr) {
+                    avcodec_parameters_copy(d->ostreamAudio[k]->codecpar, d->format_ctx->streams[audioStream()]->codecpar);
+                    d->ostreamAudio[k]->codecpar->codec_tag = 0;
+                    d->ostreamAudio[k]->start_time          = 0;
+                }
+            }
+            if((d->ostreamVideo[k]!=nullptr || videoStream()<0) && (d->ostreamAudio[k]!=nullptr || audioStream()<0) && !d->elapsed[k].isValid()) {
+                auto ret = avformat_write_header(d->oc[k],nullptr);
+                if(ret>=0)
+                    d->elapsed[k].start();
+            }
+            if(!d->elapsed[k].isValid())
+                ++(d->recordTryCount[k]);
+        }
+        auto & is = d->format_ctx->streams[packet->stream_index];
+        auto & os = packet->stream_index==videoStream() ? d->ostreamVideo[k] : d->ostreamAudio[k];
+        if(os != nullptr && d->elapsed[k].isValid()){
+            QList<Wrapper::AVPacketWrapper> packets = {packet};
+            auto writePrevFrames = d->recordPacketCount[k]==0 && !(packet->flags & AV_PKT_FLAG_KEY) && d->lastKeyFrame->data!=nullptr;
+            if(writePrevFrames) {
+                packets = {d->lastKeyFrame};
+                packets.append(d->lastNonKeyFrames);
+                packets.append(packet);
+                auto i = 0;
+                for(auto& p: packets) {
+                    if(i<packets.length()-1) {
+                        p->pts = AV_NOPTS_VALUE;
+                        p->dts = AV_NOPTS_VALUE;
+                        p->duration = 0;
+                    }
+                    ++i;
+                }
+            }
+            for(auto & p: packets) {
+                auto t1 = p->pts;
+                auto t2 = p->dts;
+                auto t3 = p->duration;
+                if(p->pts!=AV_NOPTS_VALUE) {
+                    av_packet_rescale_ts(&p, is->time_base, os->time_base);
+                    if(p->stream_index==videoStream()) {
+                        if(d->videoFirstPts[k]<0)
+                            d->videoFirstPts[k] = p->pts;
+                        p->pts -= d->videoFirstPts[k];
+                    }
+                    else {
+                        if(d->audioFirstPts[k]<0)
+                            d->audioFirstPts[k] = p->pts;
+                        p->pts -= d->audioFirstPts[k];
+                    }
+                }
+                else {
+                    auto elapsed = writePrevFrames ? 0 : d->elapsed[k].nsecsElapsed();
+                    p->pts = av_rescale_q(elapsed, {1,1000000000} , os->time_base);
+                    p->duration = 0;
+                }
+                p->dts = AV_NOPTS_VALUE;
+                av_write_frame(d->oc[k],&p);
+                p->pts = t1;
+                p->dts = t2;
+                p->duration = t3;
+                ++(d->recordPacketCount[k]);
+            }
+        }
+        d->recordMutex.lock();
+        auto stop = (d->records[k]>0 && (d->elapsed[k].elapsed()/1000)>=d->records[k]);
+        d->recordMutex.unlock();
+        if(stop)
+            stopRecording(k);
+    }
+
+    d->stream = packet->stream_index;
     //check whether the 1st frame is alreay got. emit only once
     if (!d->started) {
+        mutex.lock();
+        if(d->format_ctx && d->format_ctx->iformat && d->format_ctx->iformat->name) {
+            containerFormat =  d->format_ctx->iformat->name;
+        }
+        else
+            containerFormat = "";
+        mutex.unlock();
+
         d->started = true;
         Q_EMIT started();
     }
     if (d->stream != videoStream() && d->stream != audioStream() && d->stream != subtitleStream()) {
         //qWarning("[AVDemuxer] unknown stream index: %d", stream);
-        av_packet_unref(&packet); //important!
         return false;
     }
     // TODO: v4l2 copy
     d->pkt = Packet::fromAVPacket(&packet, av_q2d(d->format_ctx->streams[d->stream]->time_base));
-    av_packet_unref(&packet); //important!
+    if(packet->flags & AV_PKT_FLAG_KEY) {
+        if(d->lastKeyFrame->data!=nullptr) {
+            d->lastNonKeyFrames.clear();
+        }
+        d->lastKeyFrame = packet;
+    }
+    else if(d->lastKeyFrame->data!=nullptr) {
+        d->lastNonKeyFrames.append(packet);
+    }
+
     d->eof = false;
     if (d->pkt.pts > qreal(duration())/1000.0) {
         d->max_pts = d->pkt.pts;
@@ -778,7 +1041,7 @@ bool AVDemuxer::load()
     //alloc av format context
     if (!d->format_ctx)
         d->format_ctx = avformat_alloc_context();
-    d->format_ctx->flags |= AVFMT_FLAG_GENPTS;
+    d->format_ctx->flags |= AVFMT_FLAG_GENPTS  | AVFMT_FLAG_FLUSH_PACKETS;
     //install interrupt callback
     d->format_ctx->interrupt_callback = *d->interrupt_hanlder;
 
@@ -886,7 +1149,11 @@ bool AVDemuxer::unload()
         d->input_format = 0;
         // no delete. may be used in next load
         if (d->input)
-            d->input->release();
+        {
+			d->input->setProperty("device", QVariant());        
+			d->input->release();
+        }
+            
         Q_EMIT unloaded();
     }
     return true;
@@ -1062,42 +1329,6 @@ QList<int> AVDemuxer::subtitleStreams() const
     return d->subtitle_streams;
 }
 
-AVCodecContext* AVDemuxer::audioCodecContext(int stream) const
-{
-    if (stream < 0)
-        return d->astream.avctx;
-    if (stream > (int)d->format_ctx->nb_streams)
-        return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO)
-        return avctx;
-    return 0;
-}
-
-AVCodecContext* AVDemuxer::videoCodecContext(int stream) const
-{
-    if (stream < 0)
-        return d->vstream.avctx;
-    if (stream > (int)d->format_ctx->nb_streams)
-        return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_VIDEO)
-        return avctx;
-    return 0;
-}
-
-AVCodecContext* AVDemuxer::subtitleCodecContext(int stream) const
-{
-    if (stream < 0)
-        return d->sstream.avctx;
-    if (stream > (int)d->format_ctx->nb_streams)
-        return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_SUBTITLE)
-        return avctx;
-    return 0;
-}
-
 /**
  * @brief getInterruptTimeout return the interrupt timeout
  * @return
@@ -1239,12 +1470,49 @@ void AVDemuxer::handleError(int averr, AVError::ErrorCode *errorCode, QString &m
             ec = AVError::FormatError;
     } else {
         // Input/output error etc.
-        if (d->network)
-            ec = AVError::NetworkError;
+//        if (d->network)
+//            ec = AVError::NetworkError;
     }
     AVError err(ec, err_msg, averr);
-    Q_EMIT error(err);
+    Q_EMIT error(err, ec, av_err2str(averr));
     *errorCode = ec;
+}
+
+bool AVDemuxer::startRecording(const QString &filePath, int duration)
+{
+    QMutexLocker(&d->recordMutex);
+    if(d->records.find(filePath)!=d->records.end())
+        return false;
+    d->records.insert({filePath, duration});
+    return true;
+}
+
+bool AVDemuxer::stopRecording(const QString &filePath)
+{
+    QMutexLocker(&d->recordMutex);
+    if(d->records.find(filePath)==d->records.end() && filePath!="")
+        return false;
+    std::set<QString> stops;
+    if(filePath!="")
+        d->records.erase(filePath);
+    else
+        d->records.clear();
+    return true;
+}
+
+AVCodecContext* AVDemuxer::playAudioCodecContext() const
+{
+    return &d->astream.avctx;
+}
+
+AVCodecContext* AVDemuxer::playVideoCodecContext() const
+{
+    return &d->vstream.avctx;
+}
+
+AVCodecContext* AVDemuxer::playSubtitleCodecContext() const
+{
+    return &d->sstream.avctx;
 }
 
 bool AVDemuxer::Private::setStream(AVDemuxer::StreamType st, int streamValue)
@@ -1289,7 +1557,7 @@ bool AVDemuxer::Private::setStream(AVDemuxer::StreamType st, int streamValue)
     // don't touch wanted index
     si->stream = s;
     si->wanted_stream = streamValue;
-    si->avctx = format_ctx->streams[s]->codec;
+    si->avctx = format_ctx->streams[s]->codecpar;
     has_attached_pic = !!(format_ctx->streams[s]->disposition & AV_DISPOSITION_ATTACHED_PIC);
     return true;
 }
@@ -1302,7 +1570,7 @@ bool AVDemuxer::Private::prepareStreams()
         return false;
     AVMediaType type = AVMEDIA_TYPE_UNKNOWN;
     for (unsigned int i = 0; i < format_ctx->nb_streams; ++i) {
-        type = format_ctx->streams[i]->codec->codec_type;
+        type = format_ctx->streams[i]->codecpar->codec_type;
         if (type == AVMEDIA_TYPE_VIDEO) {
             video_streams.push_back(i);
         } else if (type == AVMEDIA_TYPE_AUDIO) {

@@ -32,6 +32,7 @@ VideoFormat::PixelFormat format_from_cv(int cv);
 // https://www.opengl.org/registry/specs/APPLE/rgb_422.txt
 class InteropResourceCVOpenGLES Q_DECL_FINAL : public InteropResource
 {
+    Q_OBJECT
 public:
     InteropResourceCVOpenGLES() : InteropResource()
       , texture_cache(NULL)
@@ -59,9 +60,9 @@ private:
     CVOpenGLESTextureRef textures[4];
 };
 
-InteropResource* CreateInteropCVOpenGLES()
+InteropResourcePtr CreateInteropCVOpenGLES()
 {
-    return new InteropResourceCVOpenGLES();
+    return InteropResourcePtr(new InteropResourceCVOpenGLES(),&QObject::deleteLater);
 }
 
 bool InteropResourceCVOpenGLES::stridesForWidth(int cvfmt, int width, int *strides, VideoFormat::PixelFormat* outFmt)

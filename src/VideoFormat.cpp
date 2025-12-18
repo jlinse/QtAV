@@ -700,11 +700,6 @@ bool VideoFormat::hasPalette() const
     return (d->flags() & AV_PIX_FMT_FLAG_PAL) == AV_PIX_FMT_FLAG_PAL;
 }
 
-bool VideoFormat::isPseudoPaletted() const
-{
-    return (d->flags() & AV_PIX_FMT_FLAG_PSEUDOPAL) == AV_PIX_FMT_FLAG_PSEUDOPAL;
-}
-
 bool VideoFormat::isBitStream() const
 {
     return (d->flags() & AV_PIX_FMT_FLAG_BITSTREAM) == AV_PIX_FMT_FLAG_BITSTREAM;

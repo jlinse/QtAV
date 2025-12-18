@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV Player Demo:  this file is part of QtAV examples
-    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2014)
 
@@ -105,7 +105,6 @@ public:
         settings.beginGroup(QString::fromLatin1("subtitle"));
         settings.setValue(QString::fromLatin1("enabled"), subtitle_enabled);
         settings.setValue(QString::fromLatin1("autoLoad"), subtitle_autoload);
-        settings.setValue(QString::fromLatin1("engines"), subtitle_engines);
         settings.setValue(QString::fromLatin1("delay"), subtitle_delay);
         settings.setValue(QString::fromLatin1("font"), subtitle_font);
         settings.setValue(QString::fromLatin1("color"), subtitle_color);
@@ -180,7 +179,6 @@ public:
     bool avfilterAudio_on;
     QString avfilterAudio;
 
-    QStringList subtitle_engines;
     bool subtitle_autoload;
     bool subtitle_enabled;
     QFont subtitle_font;
@@ -305,7 +303,11 @@ void Config::reload()
     settings.beginGroup(QString::fromLatin1("decoder"));
     settings.beginGroup(QString::fromLatin1("video"));
     QString decs_default(QString::fromLatin1("HW FFmpeg")); // HW is ignored
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    setDecoderPriorityNames(settings.value(QString::fromLatin1("priority"), decs_default).toString().split(QString::fromLatin1(" "), Qt::SkipEmptyParts));
+#else
     setDecoderPriorityNames(settings.value(QString::fromLatin1("priority"), decs_default).toString().split(QString::fromLatin1(" "), QString::SkipEmptyParts));
+#endif
     setZeroCopy(settings.value(QString::fromLatin1("zeroCopy"), true).toBool());
     settings.endGroup(); //video
     settings.endGroup(); //decoder
@@ -325,7 +327,6 @@ void Config::reload()
     settings.beginGroup(QString::fromLatin1("subtitle"));
     setSubtitleAutoLoad(settings.value(QString::fromLatin1("autoLoad"), true).toBool());
     setSubtitleEnabled(settings.value(QString::fromLatin1("enabled"), true).toBool());
-    setSubtitleEngines(settings.value(QString::fromLatin1("engines"), QStringList() << QString::fromLatin1("FFmpeg") << QString::fromLatin1("LibASS")).toStringList());
     setSubtitleDelay(settings.value(QString::fromLatin1("delay"), 0.0).toInt());
     QFont f;
     f.setPointSize(20);
@@ -479,21 +480,6 @@ Config& Config::setCaptureQuality(int quality)
         return *this;
     mpData->capture_quality = quality;
     Q_EMIT captureQualityChanged(quality);
-    Q_EMIT changed();
-    return *this;
-}
-
-QStringList Config::subtitleEngines() const
-{
-    return mpData->subtitle_engines;
-}
-
-Config& Config::setSubtitleEngines(const QStringList &value)
-{
-    if (mpData->subtitle_engines == value)
-        return *this;
-    mpData->subtitle_engines = value;
-    Q_EMIT subtitleEnginesChanged();
     Q_EMIT changed();
     return *this;
 }

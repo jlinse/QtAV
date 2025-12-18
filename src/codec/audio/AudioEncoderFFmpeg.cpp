@@ -26,6 +26,7 @@
 #include "QtAV/private/factory.h"
 #include "QtAV/version.h"
 #include "utils/Logger.h"
+#include "AVWrapper.h"
 
 /*!
  * options (properties) are from libavcodec/options_table.h
@@ -54,7 +55,7 @@ public:
     AudioEncoderFFmpegPrivate()
         : AudioEncoderPrivate()
     {
-        avcodec_register_all();
+        //avcodec_register_all();
         // NULL: codec-specific defaults won't be initialized, which may result in suboptimal default settings (this is important mainly for encoders, e.g. libx264).
         avctx = avcodec_alloc_context3(NULL);
     }
@@ -68,11 +69,13 @@ bool AudioEncoderFFmpegPrivate::open()
 {
     if (codec_name.isEmpty()) {
         // copy ctx from muxer by copyAVCodecContext
-        AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
-        AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
-        return true;
+        const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_AC3);
+        if (!codec)
+            return false;
+
+        codec_name = codec->name;
     }
-    AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    const AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
     if (!codec) {
         const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
         if (cd) {
@@ -83,11 +86,7 @@ bool AudioEncoderFFmpegPrivate::open()
         qWarning() << "Can not find encoder for codec " << codec_name;
         return false;
     }
-    if (avctx) {
-        avcodec_free_context(&avctx);
-        avctx = 0;
-    }
-    avctx = avcodec_alloc_context3(codec);
+    avctx.assign(codec);
 
     // reset format_used to user defined format. important to update default format if format is invalid
     format_used = format;
@@ -177,12 +176,13 @@ AudioEncoderId AudioEncoderFFmpeg::id() const
 bool AudioEncoderFFmpeg::encode(const AudioFrame &frame)
 {
     DPTR_D(AudioEncoderFFmpeg);
-    AVFrame *f = NULL;
+    Wrapper::AVFrameWapper f;
     if (frame.isValid()) {
-        f = av_frame_alloc();
         const AudioFormat fmt(frame.format());
         f->format = fmt.sampleFormatFFmpeg();
         f->channel_layout = fmt.channelLayoutFFmpeg();
+        //f->ch_layout.nb_channels = fmt.channels();
+        //f->ch_layout.u.mask = fmt.channelLayoutFFmpeg();
         // f->channels = fmt.channels(); //remove? not availale in libav9
         // must be (not the last frame) exactly frame_size unless CODEC_CAP_VARIABLE_FRAME_SIZE is set (frame_size==0)
         // TODO: mpv use pcmhack for avctx.frame_size==0. can we use input frame.samplesPerChannel?
@@ -199,16 +199,15 @@ bool AudioEncoderFFmpeg::encode(const AudioFrame &frame)
             f->extended_data[i] = (uint8_t*)frame.constBits(i);
         }
     }
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = (uint8_t*)d.buffer.constData(); //NULL
-    pkt.size = d.buffer.size(); //0
+    Wrapper::AVPacketWrapper pkt;
+
+    pkt->data = (uint8_t*)d.buffer.constData(); //NULL
+    pkt->size = d.buffer.size(); //0
     int got_packet = 0;
-    int ret = avcodec_encode_audio2(d.avctx, &pkt, f, &got_packet);
-    av_frame_free(&f);
+    int ret = compat_encode(d.avctx, &pkt, &got_packet, &f);
+  
     if (ret < 0) {
-        //qWarning("error avcodec_encode_audio2: %s" ,av_err2str(ret));
-        //av_packet_unref(&pkt); //FIXME
+        qWarning("error avcodec_encode_audio2: %s" ,av_err2str(ret));
         return false; //false
     }
     if (!got_packet) {

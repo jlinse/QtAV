@@ -33,7 +33,7 @@ int avio_feof(AVIOContext *s)
 }
 #endif
 #if QTAV_USE_LIBAV(LIBAVFORMAT)
-int avformat_alloc_output_context2(AVFormatContext **avctx, AVOutputFormat *oformat, const char *format, const char *filename)
+int avformat_alloc_output_context2(AVFormatContext **avctx, ff_const59 AVOutputFormat *oformat, const char *format, const char *filename)
 {
     AVFormatContext *s = avformat_alloc_context();
     int ret = 0;
@@ -391,7 +391,7 @@ const char *get_codec_long_name(enum AVCodecID id)
     if (cd)
         return cd->long_name;
     av_log(NULL, AV_LOG_WARNING, "Codec 0x%x is not in the full list.\n", id);
-    AVCodec *codec = avcodec_find_decoder(id);
+    const AVCodec *codec = avcodec_find_decoder(id);
     if (codec)
         return codec->long_name;
     codec = avcodec_find_encoder(id);
@@ -413,3 +413,70 @@ enum AVMediaType avfilter_pad_get_type(const AVFilterPad *pads, int pad_idx)
 }
 #endif
 #endif //QTAV_HAVE(AVFILTER)
+
+int compat_decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, const AVPacket* pkt)
+{
+    int ret = 0;
+    *got_frame = 0;
+
+    ret = avcodec_send_packet(avctx, pkt);
+    if (ret == AVERROR_EOF)
+        ret = 0;
+    else if (ret == AVERROR(EAGAIN)) {
+        /* we fully drain all the output in each decode call, so this should not
+         * ever happen */
+        ret = AVERROR_BUG;
+        return ret;
+    }
+    else if (ret < 0)
+        return ret;
+
+
+    ret = avcodec_receive_frame(avctx, frame);
+    if (ret == 0) {
+        *got_frame = 1;
+        return pkt->size;
+    }
+    else {
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+        {
+            ret = 0;
+            return pkt->size;
+        }
+        return ret;
+    }
+
+}
+
+int compat_encode(AVCodecContext* avctx, AVPacket* avpkt,
+    int* got_packet, const AVFrame* frame)
+{
+    //AVPacket user_pkt;
+	int ret = 0;
+	*got_packet = 0;
+
+    ret = avcodec_send_frame(avctx, frame);
+    if (ret == AVERROR_EOF)
+        ret = 0;
+    else if (ret == AVERROR(EAGAIN)) {
+        /* we fully drain all the output in each encode call, so this should not
+         * ever happen */
+        return AVERROR_BUG;
+    }
+    else if (ret < 0)
+        return ret;
+
+    //av_packet_move_ref(&user_pkt, avpkt);
+
+	ret = avcodec_receive_packet(avctx, avpkt);
+	if (ret == 0) {
+        *got_packet = 1;
+        return ret;	
+	}
+    else
+    {
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            ret = 0;    
+        return ret;
+    }
+}

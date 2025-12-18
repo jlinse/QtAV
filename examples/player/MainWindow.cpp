@@ -19,7 +19,10 @@
 ******************************************************************************/
 #include "MainWindow.h"
 #include "EventFilter.h"
+#include "common/powermanagement/powermanagement.h"
 #include <QtAV>
+#include <QtAV/OpenGLVideo.h>
+#include <QtAV/VideoShaderObject.h>
 #include <QtAVWidgets>
 #include <QtCore/QtDebug>
 #include <QtCore/QLocale>
@@ -64,6 +67,8 @@
 #ifndef QT_NO_OPENGL
 #include "QtAV/GLSLFilter.h"
 #endif
+#include "QtAV/VUMeterFilter.h"
+#include "QtAV/AVTranscoder.h"
 /*
  *TODO:
  * disable a/v actions if player is 0;
@@ -117,9 +122,12 @@ MainWindow::MainWindow(QWidget *parent) :
         QApplication::setStyle(QStyleFactory::create("Fusion"));
     #endif
 
+    mpPowerManagement = new PowerManagement(this);
+
     setWindowIcon(QIcon(QString::fromLatin1(":/QtAV.svg")));
     mpOSD = new OSDFilter(this);
     mpSubtitle = new SubtitleFilter(this);
+
     mpChannelAction = 0;
     mpChannelMenu = 0;
     mpAudioTrackAction = 0;
@@ -203,6 +211,21 @@ void MainWindow::initPlayer()
 
     connect(mpCaptureBtn, SIGNAL(clicked()), mpPlayer->videoCapture(), SLOT(capture()));
 
+
+    mpTranscoder = new QtAV::AVTranscoder(this);
+    mpTranscoder->setMediaSource(mpPlayer);
+    mpTranscoder->setOutputMedia(QStandardPaths::writableLocation(QStandardPaths::MoviesLocation)
+                                 + "/1.mp4");
+    mpTranscoder->createVideoEncoder();
+    mpTranscoder->createAudioEncoder();
+
+    connect(mpVedioRecordBtn, &QToolButton::toggled, this, [this](bool checked) {
+        if (checked)
+            mpTranscoder->start();
+        else
+            mpTranscoder->stop();
+    });
+
     emit ready(); //emit this signal after connection. otherwise the slots may not be called for the first time
 }
 
@@ -226,8 +249,6 @@ void MainWindow::setupUi()
     mpPlayerLayout = new QVBoxLayout();
     mpControl = new QWidget(this);
     mpControl->setMaximumHeight(30);
-
-    //mpPreview = new QLable(this);
 
     mpTimeSlider = new Slider(mpControl);
     mpTimeSlider->setDisabled(true);
@@ -268,6 +289,12 @@ void MainWindow::setupUi()
     mpCaptureBtn = new QToolButton();
     mpCaptureBtn->setToolTip(tr("Capture"));
     mpCaptureBtn->setIcon(QIcon(QString::fromLatin1(":/theme/dark/capture.svg")));
+
+    mpVedioRecordBtn = new QToolButton();
+    mpVedioRecordBtn->setText(tr("VedioRecord"));
+    mpVedioRecordBtn->setToolTip(tr("VedioRecord"));
+    mpVedioRecordBtn->setCheckable(true);
+
     mpVolumeBtn = new QToolButton();
     mpVolumeBtn->setIcon(QIcon(QString::fromLatin1(":/theme/dark/sound.svg")));
 
@@ -415,23 +442,8 @@ void MainWindow::setupUi()
     wgt = new QWidget();
     hb = new QHBoxLayout();
     wgt->setLayout(hb);
-    hb->addWidget(new QLabel(tr("Engine")));
-    QComboBox *box = new QComboBox();
-    hb->addWidget(box);
-    pWA = new QWidgetAction(0);
-    pWA->setDefaultWidget(wgt);
-    subMenu->addAction(pWA); //must add action after the widget action is ready. is it a Qt bug?
-    box->addItem(QString::fromLatin1("FFmpeg"), QString::fromLatin1("FFmpeg"));
-    box->addItem(QString::fromLatin1("LibASS"), QString::fromLatin1("LibASS"));
-    connect(box, SIGNAL(activated(QString)), SLOT(setSubtitleEngine(QString)));
-    mpSubtitle->setEngines(QStringList() << box->itemData(box->currentIndex()).toString());
-    box->setToolTip(tr("FFmpeg supports more subtitles but only render plain text") + QString::fromLatin1("\n") + tr("LibASS supports ass styles"));
-
-    wgt = new QWidget();
-    hb = new QHBoxLayout();
-    wgt->setLayout(hb);
     hb->addWidget(new QLabel(tr("Charset")));
-    box = new QComboBox();
+    QComboBox* box = new QComboBox();
     hb->addWidget(box);
     pWA = new QWidgetAction(0);
     pWA->setDefaultWidget(wgt);
@@ -529,6 +541,7 @@ void MainWindow::setupUi()
     controlLayout->addWidget(mpVolumeSlider);
     controlLayout->addWidget(mpVolumeBtn);
     controlLayout->addWidget(mpCaptureBtn);
+    controlLayout->addWidget(mpVedioRecordBtn);
     controlLayout->addWidget(mpPlayPauseBtn);
     controlLayout->addWidget(mpStopBtn);
     controlLayout->addWidget(mpBackwardBtn);
@@ -612,7 +625,7 @@ void MainWindow::changeAudioTrack(QAction *action)
     mpAudioTrackAction = action;
     mpAudioTrackAction->setChecked(true);
     if (mpStatisticsView && mpStatisticsView->isVisible())
-        mpStatisticsView->setStatistics(mpPlayer->statistics());
+        mpStatisticsView->setStatistics();
 }
 
 void MainWindow::changeVO(QAction *action)
@@ -849,7 +862,7 @@ void MainWindow::onStartPlay()
     setVolume();
     mShowControl = 0;
     QTimer::singleShot(3000, this, SLOT(tryHideControlBar()));
-    ScreenSaver::instance().disable();
+    mpPowerManagement->setActivityState(true);
     initAudioTrackMenu();
     mpRepeatA->setMinimumTime(QTime(0, 0, 0).addMSecs(mpPlayer->mediaStartPosition()));
     mpRepeatA->setMaximumTime(QTime(0, 0, 0).addMSecs(mpPlayer->mediaStopPosition()));
@@ -866,7 +879,7 @@ void MainWindow::onStartPlay()
     updateChannelMenu();
 
     if (mpStatisticsView && mpStatisticsView->isVisible())
-        mpStatisticsView->setStatistics(mpPlayer->statistics());
+        mpStatisticsView->setStatistics();
 }
 
 void MainWindow::onStopPlay()
@@ -890,7 +903,7 @@ void MainWindow::onStopPlay()
     mpCurrent->setText(QString::fromLatin1("00:00:00"));
     mpEnd->setText(QString::fromLatin1("00:00:00"));
     tryShowControlBar();
-    ScreenSaver::instance().enable();
+    mpPowerManagement->setActivityState(false);
     toggleRepeat(false);
     //mRepeateMax = 0;
     killTimer(mCursorTimer);
@@ -1065,7 +1078,7 @@ void MainWindow::wheelEvent(QWheelEvent *e)
         return;
     }
 #endif //WHEEL_SPEED
-    QPointF p = mpRenderer->widget()->mapFrom(this, e->pos());
+    QPointF p = mpRenderer->widget()->mapFrom(this, e->position().toPoint());
     QPointF fp = mpRenderer->mapToFrame(p);
     //qDebug() <<  p << fp;
     if (fp.x() < 0)
@@ -1169,6 +1182,7 @@ void MainWindow::initAudioTrackMenu()
         mpAudioTrackAction = 0;
         goto end;
     }
+    mpAudioTrackAction = 0;
     track = mpPlayer->currentAudioStream();
     as = mpAudioTrackMenu->actions();
     tracks = mpPlayer->audioStreamCount();
@@ -1308,9 +1322,9 @@ void MainWindow::tryShowControlBar()
 void MainWindow::showInfo()
 {
     if (!mpStatisticsView)
-        mpStatisticsView = new StatisticsView();
+        mpStatisticsView = new StatisticsView(*mpPlayer,this);
     if (mpPlayer)
-        mpStatisticsView->setStatistics(mpPlayer->statistics());
+        mpStatisticsView->setStatistics();
     mpStatisticsView->show();
 }
 
@@ -1604,15 +1618,6 @@ void MainWindow::setSubtitleCharset(const QString &charSet)
     if (!box)
         return;
     mpSubtitle->setCodec(box->itemData(box->currentIndex()).toByteArray());
-}
-
-void MainWindow::setSubtitleEngine(const QString &value)
-{
-    Q_UNUSED(value)
-    QComboBox *box = qobject_cast<QComboBox*>(sender());
-    if (!box)
-        return;
-    mpSubtitle->setEngines(QStringList() << box->itemData(box->currentIndex()).toString());
 }
 
 void MainWindow::changeClockType(QAction *action)

@@ -56,6 +56,7 @@ typedef int VideoDecoderId;
 class VideoDecoderPrivate;
 class Q_AV_EXPORT VideoDecoder : public AVDecoder
 {
+    Q_OBJECT
     Q_DISABLE_COPY(VideoDecoder)
     DPTR_DECLARE_PRIVATE(VideoDecoder)
 public:

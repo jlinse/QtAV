@@ -144,7 +144,7 @@ public:
     ColorRange color_range;
     float displayAspectRatio;
     VideoFormat format;
-    QScopedPointer<QImage> qt_image;
+    QImage qt_image;
 
     VideoSurfaceInteropPtr surface_interop;
 };
@@ -167,7 +167,7 @@ VideoFrame::VideoFrame(const QImage& image)
 {
     setBits((uchar*)image.constBits(), 0);
     setBytesPerLine(image.bytesPerLine(), 0);
-    d_func()->qt_image.reset(new QImage(image));
+    d_func()->qt_image = image;
 }
 
 /*!
@@ -346,10 +346,10 @@ QImage VideoFrame::toImage(QImage::Format fmt, const QSize& dstSize, const QRect
 {
     Q_D(const VideoFrame);
     if (!d->qt_image.isNull()
-            && fmt == d->qt_image->format()
-            && dstSize == d->qt_image->size()
-            && (!roi.isValid() || roi == d->qt_image->rect())) {
-        return *d->qt_image.data();
+            && fmt == d->qt_image.format()
+            && dstSize == d->qt_image.size()
+            && (!roi.isValid() || roi == d->qt_image.rect())) {
+        return d->qt_image;
     }
     VideoFrame f(to(VideoFormat(VideoFormat::pixelFormatFromImageFormat(fmt)), dstSize, roi));
     if (!f)
@@ -456,7 +456,6 @@ void* VideoFrame::createInteropHandle(void* handle, SurfaceType type, int plane)
         return 0;
     return d->surface_interop->createHandle(handle, type, format(), plane, planeWidth(plane), planeHeight(plane));
 }
-
 VideoFrameConverter::VideoFrameConverter()
     : m_cvt(0)
 {

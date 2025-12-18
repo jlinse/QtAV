@@ -28,6 +28,8 @@
 #include <QtCore/QVariant>
 #include <QtCore/QObject>
 
+struct AVCodecContext;
+
 namespace QtAV {
 class AVEncoderPrivate;
 class Q_AV_EXPORT AVEncoder : public QObject
@@ -62,8 +64,8 @@ public:
     /*!
      * used by ff muxer. Be sure all parameters are set. (open?)
      */
-    virtual void copyAVCodecContext(void* ctx);
-    void* codecContext() const; // TODO: always have a avctx like decoder?
+    virtual void copyAVCodecContext(const AVCodecContext* ctx);
+    AVCodecContext* codecContext() const; // TODO: always have a avctx like decoder?
     /*!
      * \brief setBitRate
      * Higher bit rate result in better quality.

@@ -82,6 +82,10 @@ class Q_AV_EXPORT AVPlayer : public QObject
     Q_PROPERTY(State state READ state WRITE setState NOTIFY stateChanged)
     Q_PROPERTY(QtAV::MediaStatus mediaStatus READ mediaStatus NOTIFY mediaStatusChanged)
     Q_PROPERTY(QtAV::MediaEndAction mediaEndAction READ mediaEndAction WRITE setMediaEndAction NOTIFY mediaEndActionChanged)
+    Q_PROPERTY(QVariantMap mediaData READ mediaData NOTIFY mediaDataTimerTriggered)
+    Q_PROPERTY(int mediaDataTimerInterval READ mediaDataTimerInterval WRITE setMediaDataTimerInterval NOTIFY mediaDataTimerIntervalChanged)
+    Q_PROPERTY(int disconnectTimeout READ disconnectTimeout WRITE setDisconnectTimeout NOTIFY disconnectTimeoutChanged)
+    Q_PROPERTY(bool receivingFrames READ receivingFrames NOTIFY receivingFramesChanged)
     Q_PROPERTY(unsigned int chapters READ chapters NOTIFY chaptersChanged)
     Q_ENUMS(State)
 public:
@@ -335,6 +339,8 @@ public:
      */
     void setFrameRate(qreal value);
     qreal forcedFrameRate() const;
+    void setRealtimeDecode(bool value);
+    bool realtimeDecode() const;
     //Statistics& statistics();
     const Statistics& statistics() const;
     /*!
@@ -412,6 +418,21 @@ public:
      */
     MediaEndAction mediaEndAction() const;
     void setMediaEndAction(MediaEndAction value);
+
+    QVariantMap mediaData() const;
+
+    int mediaDataTimerInterval() const;
+    void setMediaDataTimerInterval(int value);
+
+    int disconnectTimeout() const;
+    void setDisconnectTimeout(int value);
+
+    bool receivingFrames() const;
+
+    void resetMediaData();
+
+    bool startRecording(const QString &filePath, int duration = -1);
+    bool stopRecording();
 
 public Q_SLOTS:
     /*!
@@ -550,11 +571,18 @@ Q_SIGNALS:
     void loaded(); // == mediaStatusChanged(QtAV::LoadedMedia)
     void mediaStatusChanged(QtAV::MediaStatus status); //explictly use QtAV::MediaStatus
     void mediaEndActionChanged(QtAV::MediaEndAction action);
+    void firstKeyFrameReceived();
+    void mediaDataTimerTriggered(QVariantMap);
+    void mediaDataTimerStarted();
+    void mediaDataTimerIntervalChanged(int);
+    void disconnectTimeoutChanged(int);
+    void receivingFramesChanged(bool);
+    void recordFinished(bool success, const QString& format);
     /*!
      * \brief durationChanged emit when media is loaded/unloaded
      */
     void durationChanged(qint64);
-    void error(const QtAV::AVError& e); //explictly use QtAV::AVError in connection for Qt4 syntax
+    void error(const QtAV::AVError& e, int ffmpegError = 0, const QString& ffmpegErrorStr=""); //explictly use QtAV::AVError in connection for Qt4 syntax
     void paused(bool p);
     /*!
      * \brief started
@@ -616,9 +644,11 @@ private Q_SLOTS:
     void stopNotifyTimer();
     void onStarted();
     void updateMediaStatus(QtAV::MediaStatus status);
+    void onMediaEndActionPauseTriggered();
     void onSeekFinished(qint64 value);
     void onStepFinished();
     void tryClearVideoRenderers();
+    void onMediaStatusChanged(QtAV::MediaStatus status);
     void seekChapter(int incr);
 protected:
     // TODO: set position check timer interval

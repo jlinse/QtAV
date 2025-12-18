@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     QScopedPointer<AudioDecoder> dec(AudioDecoder::create()); // delete by user
-    dec->setCodecContext(demuxer.audioCodecContext());
+    dec->setCodecContext(demuxer.playAudioCodecContext());
     //dec->prepare();
     if (!dec->open())
         qFatal("open decoder error");

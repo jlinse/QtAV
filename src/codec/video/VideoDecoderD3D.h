@@ -70,6 +70,7 @@ class VideoDecoderD3DPrivate : public VideoDecoderFFmpegHWPrivate
 {
 public:
     VideoDecoderD3DPrivate();
+    ~VideoDecoderD3DPrivate();
 
     bool open() Q_DECL_OVERRIDE;
     void close() Q_DECL_OVERRIDE;

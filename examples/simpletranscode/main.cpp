@@ -84,8 +84,7 @@ int main(int argc, char *argv[])
     player.setFrameRate(10000.0); // as fast as possible. FIXME: why 1000 may block source player?
     player.audio()->setBackends(QStringList() << QString::fromLatin1("null"));
     AVTranscoder avt;
-    if (ss > 0)
-        avt.setStartTime(ss);
+
     avt.setMediaSource(&player);
     avt.setOutputMedia(outFile);
     avt.setOutputOptions(muxopt);

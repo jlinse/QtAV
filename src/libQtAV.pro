@@ -1,8 +1,11 @@
 TEMPLATE = lib
+#CONFIG += staticlib
 MODULE_INCNAME = QtAV # for mac framework. also used in install_sdk.pro
 TARGET = QtAV
-QT += core gui
+QT += core gui quick qml
+CONFIG += c++17
 #CONFIG *= ltcg
+greaterThan(QT_MAJOR_VERSION, 5): QT += opengl
 greaterThan(QT_MAJOR_VERSION, 4) {
   contains(QT_CONFIG, opengl) {
       CONFIG *= config_opengl
@@ -16,6 +19,8 @@ greaterThan(QT_MAJOR_VERSION, 4) {
 CONFIG *= qtav-buildlib
 static: CONFIG *= static_ffmpeg
 INCLUDEPATH += $$[QT_INSTALL_HEADERS] # TODO: ffmpeg dir
+
+#include(../runSdkInstall.pri)
 
 #mac: simd.prf will load qt_build_config and the result is soname will prefixed with QT_INSTALL_LIBS and link flag will append soname after QMAKE_LFLAGS_SONAME
 config_libcedarv: CONFIG *= neon config_simd #need by qt4 addSimdCompiler(). neon or config_neon is required because tests/arch can not detect neon
@@ -136,7 +141,7 @@ config_x11 {
 }
 config_swresample {
     DEFINES += QTAV_HAVE_SWRESAMPLE=1
-    SOURCES += AudioResamplerFF.cpp
+    #SOURCES += AudioResamplerFF.cpp
     LIBS += -lswresample
 }
 config_avresample {
@@ -404,7 +409,7 @@ config_libass {
   DEFINES *= QTAV_HAVE_LIBASS=1
   HEADERS *= capi/ass_api.h
   SOURCES *= capi/ass_api.cpp
-  SOURCES *= subtitle/SubtitleProcessorLibASS.cpp
+  #SOURCES *= subtitle/SubtitleProcessorLibASS.cpp
 }
 # mac is -FQTDIR we need -LQTDIR
 LIBS *= -L$$[QT_INSTALL_LIBS] -lavcodec -lavformat -lswscale -lavutil
@@ -447,7 +452,7 @@ SOURCES += \
     subtitle/PlayerSubtitle.cpp \
     subtitle/Subtitle.cpp \
     subtitle/SubtitleProcessor.cpp \
-    subtitle/SubtitleProcessorFFmpeg.cpp \
+#    subtitle/SubtitleProcessorFFmpeg.cpp \
     utils/GPUMemCopy.cpp \
     utils/Logger.cpp \
     AudioThread.cpp \
@@ -505,7 +510,8 @@ SOURCES += \
     codec/video/VideoEncoder.cpp \
     codec/video/VideoEncoderFFmpeg.cpp \
     VideoThread.cpp \
-    VideoFrameExtractor.cpp
+    VideoFrameExtractor.cpp \
+    AVWrapper.cpp
 
 SDK_HEADERS *= \
     QtAV/QtAV \
@@ -599,7 +605,8 @@ HEADERS *= \
     utils/ring.h \
     utils/internal.h \
     output/OutputSet.h \
-    ColorTransform.h
+    ColorTransform.h \
+    AVWrapper.h
 # from mkspecs/features/qt_module.prf
 # OS X and iOS frameworks
 mac_framework { # from common.pri
@@ -668,4 +675,37 @@ MODULE_VERSION = $$VERSION
 #use Qt version. limited by qmake
 # windows: Qt5AV.dll, not Qt1AV.dll
 !mac_framework: MODULE_VERSION = $${QT_MAJOR_VERSION}.$${QT_MINOR_VERSION}.$${QT_PATCH_VERSION}
-!contains(QMAKE_HOST.os, Windows):include($$PROJECTROOT/deploy.pri)
+#!contains(QMAKE_HOST.os, Windows):include($$PROJECTROOT/deploy.pri)
+
+
+SOURCES += \
+    ../qml/plugin.cpp \
+    ../qml/QQuickItemRenderer.cpp \
+    ../qml/SGVideoNode.cpp \
+    ../qml/QmlAVPlayer.cpp \
+    ../qml/QuickFilter.cpp \
+    ../qml/QuickSubtitle.cpp \
+    ../qml/MediaMetaData.cpp \
+    ../qml/QuickSubtitleItem.cpp \
+    ../qml/QuickVideoPreview.cpp
+
+HEADERS += \
+    ../qml/QmlAV/QuickSubtitle.h \
+    ../qml/QmlAV/QuickSubtitleItem.h \
+    ../qml/QmlAV/QuickVideoPreview.h \
+    ../qml/QmlAV/QmlAVPlayer.h \
+    ../qml/QmlAV/Export.h \
+    ../qml/QmlAV/MediaMetaData.h \
+    ../qml/QmlAV/QQuickItemRenderer.h \
+    ../qml/QmlAV/QuickFilter.h \
+    ../qml/QmlAV/SGVideoNode.h \
+
+greaterThan(QT_MINOR_VERSION, 1) {
+  HEADERS += ../qml/QmlAV/QuickFBORenderer.h
+  SOURCES += ../qml/QuickFBORenderer.cpp
+}
+
+INCLUDEPATH += $$PWD/../qml
+DEPENDPATH += $$PWD/../qml
+INCLUDEPATH += $$PWD/../qml/QmlAV
+DEPENDPATH += $$PWD/../qml/QmlAV

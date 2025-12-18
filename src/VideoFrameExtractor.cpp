@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2016 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2014)
 
@@ -55,7 +55,7 @@ public:
         if (!isRunning())
             return;
         scheduleStop();
-        wait();
+        wait(10000);
     }
 
     unsigned long timeout_ms;
@@ -97,6 +97,7 @@ public:
 
 protected:
     virtual void run() {
+        setTerminationEnabled(true);
         while (!stop) {
             QRunnable *task = tasks.take();
             if (task) {
@@ -157,7 +158,9 @@ public:
     }
     ~VideoFrameExtractorPrivate() {
         // stop first before demuxer and decoder close to avoid running new seek task after demuxer is closed.
+        abort_seek = true;
         thread.waitStop();
+        thread.terminate();
         releaseResourceInternal();
     }
     bool checkAndOpen() {
@@ -192,8 +195,8 @@ public:
             if (!vd)
                 continue;
             decoder.reset(vd);
-            AVCodecContext *cctx = demuxer.videoCodecContext();
-            if (cctx) decoder->setCodecContext(demuxer.videoCodecContext());
+            AVCodecContext *cctx = demuxer.playVideoCodecContext();
+            if (cctx) decoder->setCodecContext(demuxer.playVideoCodecContext());
             if (!cctx || !decoder->open()) {
                 decoder.reset(0);
                 continue;
@@ -260,7 +263,7 @@ public:
         }
         if (!pkt.isValid()) {
             qWarning("VideoFrameExtractor failed to get a packet at %lld", value);
-            err = QString().sprintf("failed to get a packet at %lld",value);
+            err = QString().asprintf("failed to get a packet at %lld",value);
             return false;
         }
         decoder->flush(); //must flush otherwise old frames will be decoded at the beginning
@@ -350,7 +353,7 @@ public:
             if (diff > range && t > pts) {
                 qWarning("out pts out of range. diff=%lld, range=%d", diff, range);
                 frame = VideoFrame();
-                err = QString().sprintf("out pts out of range. diff=%lld, range=%d", diff, range);
+                err = QString().asprintf("out pts out of range. diff=%lld, range=%d", diff, range);
                 return false;
             }
         }
@@ -521,6 +524,12 @@ void VideoFrameExtractor::extract()
     d.thread.addTask(new ExtractTask(this, position()));
 }
 
+void VideoFrameExtractor::abort()
+{
+    DPTR_D(VideoFrameExtractor);
+    d.abort_seek = true;
+}
+
 void VideoFrameExtractor::extractInternal(qint64 pos)
 {
     DPTR_D(VideoFrameExtractor);
@@ -538,9 +547,9 @@ void VideoFrameExtractor::extractInternal(qint64 pos)
     extractOk = d.extractInPrecision(pos, precision(), err, isAborted);
     if (!extractOk) {
         if (isAborted)
-            Q_EMIT aborted(QString().sprintf("Abort at position %lld: %s",pos,err.toLatin1().constData()));
+            Q_EMIT aborted(QString().asprintf("Abort at position %lld: %s",pos,err.toLatin1().constData()));
         else
-            Q_EMIT error(QString().sprintf("Cannot extract frame at position %lld: %s",pos,err.toLatin1().constData()));
+            Q_EMIT error(QString().asprintf("Cannot extract frame at position %lld: %s",pos,err.toLatin1().constData()));
         return;
     }
     Q_EMIT frameExtracted(d.frame);

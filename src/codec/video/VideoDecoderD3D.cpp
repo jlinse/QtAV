@@ -32,28 +32,6 @@
 
 namespace QtAV {
 
-static bool check_ffmpeg_hevc_dxva2()
-{
-#if !AVCODEC_STATIC_REGISTER
-    avcodec_register_all();
-#endif
-    AVHWAccel *hwa = av_hwaccel_next(0);
-    while (hwa) {
-        if (strncmp("hevc_dxva2", hwa->name, 10) == 0)
-            return true;
-        if (strncmp("hevc_d3d11va", hwa->name, 12) == 0)
-            return true;
-        hwa = av_hwaccel_next(hwa);
-    }
-    return false;
-}
-
-bool isHEVCSupported()
-{
-    static const bool support_hevc = check_ffmpeg_hevc_dxva2();
-    return support_hevc;
-}
-
 // some MS_GUID are defined in mingw but some are not. move to namespace and define all is ok
 #define MS_GUID(name, l, w1, w2, b1, b2, b3, b4, b5, b6, b7, b8) \
     static const GUID name = { l, w1, w2, {b1, b2, b3, b4, b5, b6, b7, b8}}
@@ -343,17 +321,16 @@ VideoDecoderD3DPrivate::VideoDecoderD3DPrivate()
 {
 }
 
+VideoDecoderD3DPrivate::~VideoDecoderD3DPrivate()
+{
+    
+}
+
 bool VideoDecoderD3DPrivate::open()
 {
     if (!prepare())
         return false;
-    if (codec_ctx->codec_id == QTAV_CODEC_ID(HEVC)) {
-        // runtime hevc check
-        if (!isHEVCSupported()) {
-            qWarning("HEVC DXVA2/D3D11VA is not supported by current FFmpeg runtime.");
-            return false;
-        }
-    }
+
     if (!createDevice())
         return false;
     format_fcc = 0;
@@ -369,6 +346,7 @@ bool VideoDecoderD3DPrivate::open()
 
 void VideoDecoderD3DPrivate::close()
 {
+    this->frame.reset();
     qDeleteAll(surfaces);
     surfaces.clear();
     restore();
@@ -455,6 +433,7 @@ void VideoDecoderD3DPrivate::releaseBuffer(void *opaque, uint8_t *data)
     Q_UNUSED(data);
     va_surface_t *surface = (va_surface_t*)opaque;
     surface->ref--;
+    Q_ASSERT(surface->ref == 0);
 }
 
 int VideoDecoderD3DPrivate::aligned(int x)

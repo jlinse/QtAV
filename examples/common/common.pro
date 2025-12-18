@@ -42,17 +42,17 @@ RESOURCES += \
 HEADERS = common.h \
     Config.h \
     qoptions.h \
-    ScreenSaver.h \
+    #ScreenSaver.h \
     common_export.h
 
 SOURCES = common.cpp \
     Config.cpp \
     qoptions.cpp
 
-!macx: SOURCES += ScreenSaver.cpp
+#!macx: SOURCES += ScreenSaver.cpp
 macx:!ios {
 #SOURCE is ok
-    OBJECTIVE_SOURCES += ScreenSaver.cpp
+    #OBJECTIVE_SOURCES += ScreenSaver.cpp
     LIBS += -framework CoreServices #-framework ScreenSaver
 }
 # don't install. was set in libcommon.pri

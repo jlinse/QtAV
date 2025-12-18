@@ -133,20 +133,19 @@ Packet AVEncoder::encoded() const
     return d_func().packet;
 }
 
-void* AVEncoder::codecContext() const
+AVCodecContext* AVEncoder::codecContext() const
 {
     return d_func().avctx;
 }
 
-void AVEncoder::copyAVCodecContext(void* ctx)
+void AVEncoder::copyAVCodecContext(const AVCodecContext* ctx)
 {
     if (!ctx)
         return;
     DPTR_D(AVEncoder);
-    AVCodecContext* c = static_cast<AVCodecContext*>(ctx);
     if (d.avctx) {
         // dest should be avcodec_alloc_context3(NULL)
-        AV_ENSURE_OK(avcodec_copy_context(d.avctx, c));
+        d.avctx = ctx;
         d.is_open = false;
         return;
     }

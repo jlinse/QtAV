@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2018 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2015)
 
@@ -26,6 +26,7 @@
 #include "QtAV/AudioEncoder.h"
 #include "utils/internal.h"
 #include "utils/Logger.h"
+#include "AVWrapper.h"
 
 namespace QtAV {
 static const char kFileScheme[] = "file:";
@@ -81,7 +82,7 @@ public:
     //copy the info, not parse the file when constructed, then need member vars
     QString file;
     QString file_orig;
-    AVOutputFormat *format;
+    ff_const59 AVOutputFormat *format;
     QString format_forced;
     MediaIO *io;
 
@@ -94,7 +95,7 @@ public:
 
 AVStream *AVMuxer::Private::addStream(AVFormatContext* ctx, const QString &codecName, AVCodecID codecId)
 {
-    AVCodec *codec = NULL;
+   const AVCodec *codec = NULL;
     if (!codecName.isEmpty()) {
         codec = avcodec_find_encoder_by_name(codecName.toUtf8().constData());
         if (!codec) {
@@ -120,15 +121,18 @@ AVStream *AVMuxer::Private::addStream(AVFormatContext* ctx, const QString &codec
     // set by avformat if unset
     s->id = ctx->nb_streams - 1;
     s->time_base = kTB;
-    AVCodecContext *c = s->codec;
-    c->codec_id = codec->id;
-    // Using codec->time_base is deprecated, but needed for older lavf.
-    c->time_base = s->time_base;
-    /* Some formats want stream headers to be separate. */
-    if (ctx->oformat->flags & AVFMT_GLOBALHEADER)
-        c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    // expose avctx to encoder and set properties in encoder?
-    // list codecs for a given format in ui
+
+    Wrapper::AVCodecContextWrapper c(s->codecpar);
+    
+	c->codec_id = codec->id;
+	// Using codec->time_base is deprecated, but needed for older lavf.
+	c->time_base = s->time_base;
+	/* Some formats want stream headers to be separate. */
+	if (ctx->oformat->flags & AVFMT_GLOBALHEADER)
+		c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+	// expose avctx to encoder and set properties in encoder?
+	// list codecs for a given format in ui
+    c.to_avcodec_parameters(s->codecpar);
     return s;
 }
 
@@ -137,16 +141,21 @@ bool AVMuxer::Private::prepareStreams()
     audio_streams.clear();
     video_streams.clear();
     subtitle_streams.clear();
-    AVOutputFormat* fmt = format_ctx->oformat;
+    const AVOutputFormat* fmt = format_ctx->oformat;
     if (venc) {
         AVStream *s = addStream(format_ctx, venc->codecName(), fmt->video_codec);
         if (s) {
-            AVCodecContext *c = s->codec;
+            s->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+
+            Wrapper::AVCodecContextWrapper c(s->codecpar);
+
             c->bit_rate = venc->bitRate();
             c->width = venc->width();
             c->height = venc->height();
             /// MUST set after encoder is open to ensure format is valid and the same
             c->pix_fmt = (AVPixelFormat)VideoFormat::pixelFormatToFFmpeg(venc->pixelFormat());
+
+			c.to_avcodec_parameters(s->codecpar);
 
             // Set avg_frame_rate based on encoder frame_rate
             s->avg_frame_rate = av_d2q(venc->frameRate(), venc->frameRate()*1001.0+2);
@@ -157,7 +166,9 @@ bool AVMuxer::Private::prepareStreams()
     if (aenc) {
         AVStream *s = addStream(format_ctx, aenc->codecName(), fmt->audio_codec);
         if (s) {
-            AVCodecContext *c = s->codec;
+            s->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+            Wrapper::AVCodecContextWrapper c(s->codecpar);
+
             c->bit_rate = aenc->bitRate();
             /// MUST set after encoder is open to ensure format is valid and the same
             c->sample_rate = aenc->audioFormat().sampleRate();
@@ -166,7 +177,7 @@ bool AVMuxer::Private::prepareStreams()
             c->channels = aenc->audioFormat().channels();
             c->bits_per_raw_sample = aenc->audioFormat().bytesPerSample()*8; // need??
 
-            AVCodecContext *avctx = (AVCodecContext *) aenc->codecContext();
+            AVCodecContext *avctx = aenc->codecContext();
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,5,100)
             c->initial_padding = avctx->initial_padding;
 #else
@@ -176,7 +187,7 @@ bool AVMuxer::Private::prepareStreams()
                 c->extradata = avctx->extradata;
                 c->extradata_size = avctx->extradata_size;
             }
-
+            c.to_avcodec_parameters(s->codecpar);
             audio_streams.push_back(s->id);
         }
     }
@@ -198,10 +209,17 @@ static void getFFmpegOutputFormats(QStringList* formats, QStringList* extensions
         AVOutputFormat *o = NULL;
         while ((o = av_oformat_next(o))) {
 #endif
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+            if (o->extensions)
+                e << QString::fromLatin1(o->extensions).split(QLatin1Char(','), Qt::SkipEmptyParts);
+            if (o->name)
+                f << QString::fromLatin1(o->name).split(QLatin1Char(','), Qt::SkipEmptyParts);
+#else
             if (o->extensions)
                 e << QString::fromLatin1(o->extensions).split(QLatin1Char(','), QString::SkipEmptyParts);
             if (o->name)
                 f << QString::fromLatin1(o->name).split(QLatin1Char(','), QString::SkipEmptyParts);
+#endif
         }
         foreach (const QString& v, e) {
             exts.append(v.trimmed());
@@ -528,15 +546,15 @@ void AVMuxer::Private::applyOptionsForDict()
     if (options.contains(QStringLiteral("avformat")))
         opt = options.value(QStringLiteral("avformat"));
     Internal::setOptionsToDict(opt, &dict);
-
-    if (opt.type() == QVariant::Map) {
+    const auto type = opt.type();
+    if (type == QVariant::Map) {
         QVariantMap avformat_dict(opt.toMap());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());
             if (!fmts.contains(QLatin1Char(',')) && !fmts.isEmpty())
                 format_forced = fmts; // reset when media changed
         }
-    } else if (opt.type() == QVariant::Hash) {
+    } else if (type == QVariant::Hash) {
         QVariantHash avformat_dict(opt.toHash());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());

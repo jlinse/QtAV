@@ -48,11 +48,11 @@ class Filter;
 class OpenGLVideo;
 class VideoFormat;
 class VideoRendererPrivate;
+
 class Q_AV_EXPORT VideoRenderer : public AVOutput
 {
-    DPTR_DECLARE_PRIVATE(VideoRenderer)
 public:
-    //TODO: original video size mode
+    DPTR_DECLARE_PRIVATE(VideoRenderer)
     // fillmode: keepsize
     enum OutAspectRatioMode {
         RendererAspectRatio //Use renderer's aspect ratio, i.e. stretch to fit the renderer rect

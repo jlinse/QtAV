@@ -48,7 +48,7 @@ class COMMON_EXPORT Config : public QObject
     Q_PROPERTY(QString captureDir READ captureDir WRITE setCaptureDir NOTIFY captureDirChanged)
     Q_PROPERTY(QString captureFormat READ captureFormat WRITE setCaptureFormat NOTIFY captureFormatChanged)
     Q_PROPERTY(int captureQuality READ captureQuality WRITE setCaptureQuality NOTIFY captureQualityChanged)
-    Q_PROPERTY(QStringList subtitleEngines READ subtitleEngines WRITE setSubtitleEngines NOTIFY subtitleEnginesChanged)
+
     Q_PROPERTY(bool subtitleAutoLoad READ subtitleAutoLoad WRITE setSubtitleAutoLoad NOTIFY subtitleAutoLoadChanged)
     Q_PROPERTY(bool subtitleEnabled READ subtitleEnabled WRITE setSubtitleEnabled NOTIFY subtitleEnabledChanged)
     Q_PROPERTY(QFont subtitleFont READ subtitleFont WRITE setSubtitleFont NOTIFY subtitleFontChanged)
@@ -128,8 +128,6 @@ public:
     int captureQuality() const;
     Config& setCaptureQuality(int quality);
 
-    QStringList subtitleEngines() const;
-    Config& setSubtitleEngines(const QStringList& value);
     bool subtitleAutoLoad() const;
     Config& setSubtitleAutoLoad(bool value);
     bool subtitleEnabled() const;
@@ -255,7 +253,7 @@ public:
     Q_SIGNAL void avfilterAudioChanged();
     Q_SIGNAL void subtitleEnabledChanged();
     Q_SIGNAL void subtitleAutoLoadChanged();
-    Q_SIGNAL void subtitleEnginesChanged();
+
     Q_SIGNAL void subtitleFontChanged();
     Q_SIGNAL void subtitleColorChanged();
     Q_SIGNAL void subtitleOutlineChanged();

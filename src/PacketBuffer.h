@@ -26,7 +26,7 @@
 #include <QtAV/Packet.h>
 #include "utils/BlockingQueue.h"
 #include "utils/ring.h"
-
+#include <mutex>
 namespace QtAV {
 
 /*
@@ -104,6 +104,8 @@ private:
         qint64 t;
     } BufferInfo;
     ring<BufferInfo> m_history;
+
+    mutable std::mutex m_mtx;
 };
 
 } //namespace QtAV

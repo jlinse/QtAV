@@ -41,7 +41,6 @@ static const cv_format cv_formats[] = {
     { 'yuvs', VideoFormat::Format_YUYV }, //kCVPixelFormatType_422YpCbCr8_yuvs
 //#endif
     { 'BGRA', VideoFormat::Format_BGRA32 },
-    { kCVPixelFormatType_24RGB, VideoFormat::Format_RGB24 },
     { 0, VideoFormat::Format_Invalid }
 };
 namespace cv {
@@ -54,11 +53,11 @@ VideoFormat::PixelFormat format_from_cv(int cv)
     return VideoFormat::Format_Invalid;
 }
 
-extern InteropResource* CreateInteropCVPixelbuffer();
-extern InteropResource* CreateInteropIOSurface();
-extern InteropResource* CreateInteropCVOpenGL();
-extern InteropResource* CreateInteropCVOpenGLES();
-InteropResource* InteropResource::create(InteropType type)
+extern InteropResourcePtr CreateInteropCVPixelbuffer();
+extern InteropResourcePtr CreateInteropIOSurface();
+extern InteropResourcePtr CreateInteropCVOpenGL();
+extern InteropResourcePtr CreateInteropCVOpenGLES();
+InteropResourcePtr InteropResource::create(InteropType type)
 {
     if (type == InteropAuto) {
         type = InteropCVOpenGLES;
@@ -222,9 +221,9 @@ public:
     bool map(CVPixelBufferRef buf, GLuint *tex, int w, int h, int plane) Q_DECL_OVERRIDE;
 };
 
-InteropResource* CreateInteropCVPixelbuffer()
+InteropResourcePtr CreateInteropCVPixelbuffer()
 {
-    return new InteropResourceCVPixelBuffer();
+    return InteropResourcePtr(new InteropResourceCVPixelBuffer(), &QObject::deleteLater);
 }
 
 bool InteropResourceCVPixelBuffer::map(CVPixelBufferRef buf, GLuint *tex, int w, int h, int plane)

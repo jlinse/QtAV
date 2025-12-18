@@ -47,6 +47,7 @@ extern "C"
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
+#include <libavcodec/bsf.h>
 #include <libavutil/avutil.h>
 #include <libavutil/avstring.h>
 #include <libavutil/dict.h>
@@ -475,3 +476,15 @@ const char *get_codec_long_name(AVCodecID id);
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,56,100)
 #define AV_INPUT_BUFFER_PADDING_SIZE FF_INPUT_BUFFER_PADDING_SIZE
 #endif
+
+#ifndef ff_const59
+#if FF_API_AVIOFORMAT
+#define ff_const59
+#else
+#define ff_const59 const
+#endif
+#endif // !ff_const59
+
+int compat_decode(AVCodecContext* avctx, AVFrame* frame, int* got_frame, const AVPacket* pkt);
+int compat_encode(AVCodecContext* avctx, AVPacket* avpkt,
+    int* got_packet, const AVFrame* frame);

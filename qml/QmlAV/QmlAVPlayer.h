@@ -30,6 +30,9 @@
 #include <QmlAV/QuickFilter.h>
 #include <QtAV/AVError.h>
 #include <QtAV/VideoCapture.h>
+#include <QTimer>
+
+#include <QBuffer>
 
 namespace QtAV {
 class AVPlayer;
@@ -48,16 +51,18 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(bool hasAudio READ hasAudio NOTIFY hasAudioChanged)
     Q_PROPERTY(bool hasVideo READ hasVideo NOTIFY hasVideoChanged)
     Q_PROPERTY(PlaybackState playbackState READ playbackState NOTIFY playbackStateChanged)
-    Q_PROPERTY(bool autoPlay READ autoPlay WRITE setAutoPlay NOTIFY autoPlayChanged)
     Q_PROPERTY(bool autoLoad READ isAutoLoad WRITE setAutoLoad NOTIFY autoLoadChanged)
     Q_PROPERTY(qreal playbackRate READ playbackRate WRITE setPlaybackRate NOTIFY playbackRateChanged)
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
+    Q_PROPERTY(QByteArray sourceBytes READ sourceBytes WRITE setSourceBytes NOTIFY sourceBytesChanged)
     Q_PROPERTY(int loops READ loopCount WRITE setLoopCount NOTIFY loopCountChanged)
     Q_PROPERTY(qreal bufferProgress READ bufferProgress NOTIFY bufferProgressChanged)
     Q_PROPERTY(bool seekable READ isSeekable NOTIFY seekableChanged)
     Q_PROPERTY(MediaMetaData *metaData READ metaData CONSTANT)
     Q_PROPERTY(QObject *mediaObject READ mediaObject  NOTIFY mediaObjectChanged SCRIPTABLE false DESIGNABLE false)
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorChanged)
+    Q_PROPERTY(int ffmpegError READ ffmpegError NOTIFY ffmpegErrorChanged)
+    Q_PROPERTY(QString ffmpegErrorStr READ ffmpegErrorStr NOTIFY ffmpegErrorChanged)
     Q_ENUMS(Loop)
     Q_ENUMS(PlaybackState)
     Q_ENUMS(Status)
@@ -81,9 +86,16 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(QtAV::VideoCapture *videoCapture READ videoCapture CONSTANT)
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(int videoTrack READ videoTrack WRITE setVideoTrack NOTIFY videoTrackChanged)
+    Q_PROPERTY(int buffered READ buffered)
     Q_PROPERTY(int bufferSize READ bufferSize WRITE setBufferSize NOTIFY bufferSizeChanged)
     Q_PROPERTY(BufferMode bufferMode READ bufferMode WRITE setBufferMode NOTIFY bufferModeChanged)
     Q_PROPERTY(qreal frameRate READ frameRate WRITE setFrameRate NOTIFY frameRateChanged)
+    Q_PROPERTY(bool realtimeDecode READ realtimeDecode WRITE setRealtimeDecode NOTIFY realtimeDecodeChanged)
+    Q_PROPERTY(QVariantMap mediaData READ mediaData NOTIFY mediaDataTimerTriggered)
+    Q_PROPERTY(int mediaDataTimerInterval READ mediaDataTimerInterval WRITE setMediaDataTimerInterval NOTIFY mediaDataTimerIntervalChanged)
+    Q_PROPERTY(int disconnectTimeout READ disconnectTimeout WRITE setDisconnectTimeout NOTIFY disconnectTimeoutChanged)
+    Q_PROPERTY(bool receivingFrames READ receivingFrames NOTIFY receivingFramesChanged)
+    Q_PROPERTY(MediaEndAction mediaEndAction READ mediaEndAction WRITE setMediaEndAction NOTIFY mediaEndActionChanged)
     Q_PROPERTY(QUrl externalAudio READ externalAudio WRITE setExternalAudio NOTIFY externalAudioChanged)
     Q_PROPERTY(QVariantList internalAudioTracks READ internalAudioTracks NOTIFY internalAudioTracksChanged)
     Q_PROPERTY(QVariantList internalVideoTracks READ internalVideoTracks NOTIFY internalVideoTracksChanged)
@@ -91,7 +103,6 @@ class QmlAVPlayer : public QObject, public QQmlParserStatus
     Q_PROPERTY(QVariantList internalSubtitleTracks READ internalSubtitleTracks NOTIFY internalSubtitleTracksChanged)
     // internal subtitle, e.g. mkv embedded subtitles
     Q_PROPERTY(int internalSubtitleTrack READ internalSubtitleTrack WRITE setInternalSubtitleTrack NOTIFY internalSubtitleTrackChanged)
-    Q_PROPERTY(MediaEndAction mediaEndAction READ mediaEndAction WRITE setMediaEndAction NOTIFY mediaEndActionChanged)
 
     Q_PROPERTY(QQmlListProperty<QuickAudioFilter> audioFilters READ audioFilters)
     Q_PROPERTY(QQmlListProperty<QuickVideoFilter> videoFilters READ videoFilters)
@@ -117,13 +128,33 @@ public:
         Buffering = QtAV::BufferingMedia,
         Buffered = QtAV::BufferedMedia, // when playing
         EndOfMedia = QtAV::EndOfMedia,
-        InvalidMedia = QtAV::InvalidMedia
+        InvalidMedia = QtAV::InvalidMedia,
+        PausedOnMediaAtEnd = QtAV::PausedOnMediaAtEnd
     };
     enum Error {
         NoError,
-        ResourceError,
-        FormatError,
+
         NetworkError,
+
+        OpenTimedout,
+        OpenError,
+        ParseStreamTimedOut,
+        ParseStreamError,
+        StreamNotFound,
+        ReadTimedout,
+        ReadError,
+        SeekError,
+        ResourceError,
+
+        OpenCodecError,
+        CloseCodecError,
+        AudioCodecNotFound,
+        VideoCodecNotFound,
+        SubtitleCodecNotFound,
+        CodecError,
+
+        FormatError,
+
         AccessDenied,
         ServiceMissing
     };
@@ -157,11 +188,13 @@ public:
     bool hasVideo() const;
 
     QUrl source() const;
+    QByteArray sourceBytes() const;
     /*!
      * \brief setSource
      * If url is changed and auto load is true, current playback will stop.
      */
     void setSource(const QUrl& url);
+    void setSourceBytes(const QByteArray& bytes);
 
     // 0,1: play once. MediaPlayer.Infinite: forever.
     // >1: play loopCount() - 1 times. different from Qt
@@ -194,6 +227,8 @@ public:
     Status status() const;
     Error error() const;
     QString errorString() const;
+    int ffmpegError() const;
+    QString ffmpegErrorStr() const;
     PlaybackState playbackState() const;
     void setPlaybackState(PlaybackState playbackState);
     qreal playbackRate() const;
@@ -203,9 +238,6 @@ public:
 
     bool isAutoLoad() const;
     void setAutoLoad(bool autoLoad);
-
-    bool autoPlay() const;
-    void setAutoPlay(bool autoplay);
 
     MediaMetaData *metaData() const;
     QObject *mediaObject() const;
@@ -250,6 +282,8 @@ public:
     void setVideoTrack(int value);
     QVariantList internalVideoTracks() const;
 
+    int buffered() const;
+
     int bufferSize() const;
     void setBufferSize(int value);
 
@@ -259,8 +293,22 @@ public:
     qreal frameRate() const;
     void setFrameRate(qreal value);
 
+    bool realtimeDecode() const;
+    void setRealtimeDecode(bool value);
+
+    QVariantMap mediaData() const;
+
+    int mediaDataTimerInterval() const;
+    void setMediaDataTimerInterval(int value);
+
+    int disconnectTimeout() const;
+    void setDisconnectTimeout(int value);
+
+    bool receivingFrames() const;
+
     MediaEndAction mediaEndAction() const;
     void setMediaEndAction(MediaEndAction value);
+
     /*!
      * \brief externalAudio
      * If externalAudio url is valid, player will use audioTrack of external audio as audio source.
@@ -293,6 +341,12 @@ public Q_SLOTS:
     void seekForward();
     void seekBackward();
     void setNotifyInterval(int notifyInterval);
+
+    bool startRecording(QString filePath, int duration = -1);
+    bool stopRecording();
+
+    void resetMediaData();
+
 Q_SIGNALS:
     void volumeChanged();
     void mutedChanged();
@@ -302,11 +356,11 @@ Q_SIGNALS:
     void durationChanged();
     void positionChanged();
     void sourceChanged();
+    void sourceBytesChanged();
     void autoLoadChanged();
     void loopCountChanged();
     void videoOutChanged();
     void playbackStateChanged();
-    void autoPlayChanged();
     void playbackRateChanged();
     void paused();
     void stopped();
@@ -335,10 +389,18 @@ Q_SIGNALS:
     void bufferSizeChanged();
     void bufferModeChanged();
     void frameRateChanged();
+    void realtimeDecodeChanged();
+    void mediaDataTimerTriggered();
+    void mediaDataTimerStarted();
+    void mediaDataTimerIntervalChanged();
+    void disconnectTimeoutChanged();
+    void receivingFramesChanged();
     void mediaEndActionChanged();
+    void recordFinished(bool success, const QString& format);
 
     void errorChanged();
-    void error(Error error, const QString &errorString);
+    void ffmpegErrorChanged();
+    void error(Error error, const QString &errorString, int ffmpegError = 0, const QString& ffmpegErrorStr="");
     void statusChanged();
     void mediaObjectChanged();
     void audioBackendsChanged();
@@ -346,7 +408,7 @@ Q_SIGNALS:
 
 private Q_SLOTS:
     // connect to signals from player
-    void _q_error(const QtAV::AVError& e);
+    void _q_error(const QtAV::AVError& e, int ffmpegError, const QString &ffmpegErrorStr);
     void _q_statusChanged();
     void _q_started();
     void _q_stopped();
@@ -371,7 +433,6 @@ private:
     bool mUseWallclockAsTimestamps;
     bool m_complete;
     bool m_mute;
-    bool mAutoPlay;
     bool mAutoLoad;
     bool mHasAudio, mHasVideo;
     bool m_fastSeek;
@@ -383,8 +444,12 @@ private:
     PlaybackState mPlaybackState;
     Error mError;
     QString mErrorString;
+    int mffmpegError;
+    QString mffmpegErrorStr;
     QtAV::AVPlayer *mpPlayer;
     QUrl mSource;
+    QByteArray mSourceBytes;
+    QBuffer mIODevice;
     QStringList mVideoCodecs;
     ChannelLayout mChannelLayout;
     int m_timeout;
@@ -401,6 +466,10 @@ private:
     QList<QuickAudioFilter*> m_afilters;
     QList<QuickVideoFilter*> m_vfilters;
     QStringList m_ao;
+
+    QTimer m_setSourceTimer;
+    QUrl m_lastSource;
+    int m_setSourceTryCount = 0;
 };
 
 #endif // QTAV_QML_AVPLAYER_H

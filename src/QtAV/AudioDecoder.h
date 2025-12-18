@@ -37,6 +37,7 @@ class AudioResampler;
 class AudioDecoderPrivate;
 class Q_AV_EXPORT AudioDecoder : public AVDecoder
 {
+    Q_OBJECT
     Q_DISABLE_COPY(AudioDecoder)
     DPTR_DECLARE_PRIVATE(AudioDecoder)
 public:

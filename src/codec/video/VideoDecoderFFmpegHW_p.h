@@ -48,7 +48,10 @@ public:
         , hw_h(0)
         , hw_profile(0)
     {}
-    virtual ~VideoDecoderFFmpegHWPrivate() {} //ctx is 0 now
+    virtual ~VideoDecoderFFmpegHWPrivate() 
+    {
+        this->frame.reset();
+    } //ctx is 0 now
     bool enableFrameRef() const Q_DECL_OVERRIDE { return false;} //because of ffmpeg_get_va_buffer2?
     bool prepare();
     void restore() {

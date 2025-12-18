@@ -28,6 +28,9 @@
 #include "VideoThread.h"
 #include "AVDemuxThread.h"
 #include "utils/Logger.h"
+#include <QTimer>
+#include <QElapsedTimer>
+#include <queue>
 
 namespace QtAV {
 
@@ -35,7 +38,7 @@ static const qint64 kInvalidPosition = std::numeric_limits<qint64>::max();
 class AVPlayer::Private
 {
 public:
-    Private();
+    Private(AVPlayer * player);
     ~Private();
 
     bool checkSourceChange();
@@ -100,6 +103,14 @@ public:
         }
     }
 
+    bool calcRates();
+
+    void initMediaData();
+
+    void updateMediaData();
+
+    void applyMediaDataCalculation();
+
     bool auto_load;
     bool async_load;
     // can be QString, QIODevice*
@@ -150,6 +161,7 @@ public:
     qint64 interrupt_timeout;
 
     qreal force_fps;
+    std::atomic_bool realtimeDecode;
     // timerEvent interval in ms. can divide 1000. depends on media duration, fps etc.
     // <0: auto compute internally, |notify_interval| is the real interval
     int notify_interval;
@@ -157,6 +169,26 @@ public:
     AVPlayer::State state;
     MediaEndAction end_action;
     QMutex load_mutex;
+
+    AVPlayer * q;
+
+    bool shouldLoadInternal = false;
+
+    int disconnectTimeout = 5;
+
+    QElapsedTimer elapsedTimer;
+    QElapsedTimer totalElapsedTimer;
+    quint64 lastTotalBandwidth = 0;
+    quint64 lastTotalVideoBandwidth = 0;
+    quint64 lastTotalAudioBandwidth = 0;
+    qint64 lastTotalFrames = 0;
+    qint64 calc_count = 0;
+
+    bool receivingFrames = false;
+    int checkReceivingCounter = 0;
+
+    QTimer mediaDataTimer;
+    QVariantMap mediaData;
 };
 
 } //namespace QtAV

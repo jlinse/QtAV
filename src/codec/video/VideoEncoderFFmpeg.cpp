@@ -33,6 +33,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 }
 #endif
+#include "AVWrapper.h"
 
 /*!
  * options (properties) are from libavcodec/options_table.h
@@ -116,11 +117,16 @@ bool VideoEncoderFFmpegPrivate::open()
     nb_encoded = 0LL;
     if (codec_name.isEmpty()) {
         // copy ctx from muxer by copyAVCodecContext
-        AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
-        AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
-        return true;
+        const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_H264);
+        if (!codec)
+            return false;
+
+        codec_name = codec->name;
+        //avctx.assign(codec);
+        //AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
+        //return true;
     }
-    AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    const AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
     if (!codec) {
         const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
         if (cd) {
@@ -131,11 +137,7 @@ bool VideoEncoderFFmpegPrivate::open()
         qWarning() << "Can not find encoder for codec " << codec_name;
         return false;
     }
-    if (avctx) {
-        avcodec_free_context(&avctx);
-        avctx = 0;
-    }
-    avctx = avcodec_alloc_context3(codec);
+    avctx.assign(codec);
     avctx->width = width; // coded_width works, why?
     avctx->height = height;
     // reset format_used to user defined format. important to update default format if format is invalid
@@ -247,7 +249,7 @@ bool VideoEncoderFFmpegPrivate::open()
     applyOptionsForContext();
     AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
     // from mpv ao_lavc
-    const int buffer_size = qMax<int>(qMax<int>(width*height*6+200, AV_INPUT_BUFFER_MIN_SIZE), sizeof(AVPicture));//??
+    const int buffer_size = qMax<int>(qMax<int>(width*height*6+200, AV_INPUT_BUFFER_MIN_SIZE), sizeof(AVFrame));//??
     buffer.resize(buffer_size);
     return true;
 }
@@ -302,16 +304,16 @@ bool VideoEncoderFFmpeg::encode(const VideoFrame &frame)
         f->width = frame.width();
         f->height = frame.height();
 //        f->quality = d.avctx->global_quality;
-        switch (timestampMode()) {
-        case TimestampCopy:
+        //switch (timestampMode()) {
+        //case TimestampCopy:
             f->pts = int64_t(frame.timestamp()*frameRate()); // TODO: check monotically increase and fix if not. or another mode?
-            break;
-        case TimestampMonotonic:
-            f->pts = d.nb_encoded+1;
-            break;
-        default:
-            break;
-        }
+        //    break;
+        //case TimestampMonotonic:
+        //    f->pts = d.nb_encoded+1;
+        //    break;
+        //default:
+        //    break;
+        //}
 
         // pts is set in muxer
         const int nb_planes = frame.planeCount();
@@ -368,12 +370,12 @@ bool VideoEncoderFFmpeg::encode(const VideoFrame &frame)
         }
 #endif //HAVE_AVHWCTX
     }
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = (uint8_t*)d.buffer.constData();
-    pkt.size = d.buffer.size();
+    Wrapper::AVPacketWrapper pkt;
+
+    pkt->data = (uint8_t*)d.buffer.constData();
+    pkt->size = d.buffer.size();
     int got_packet = 0;
-    int ret = avcodec_encode_video2(d.avctx, &pkt, f.data(), &got_packet);
+    int ret = compat_encode(d.avctx, &pkt, &got_packet, f.data());
     if (ret < 0) {
         qWarning("error avcodec_encode_video2: %s" ,av_err2str(ret));
         return false; //false

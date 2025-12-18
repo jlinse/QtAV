@@ -26,6 +26,8 @@
 #include "QtAV/Statistics.h"
 #include "utils/BlockingQueue.h"
 #include "utils/Logger.h"
+#include <chrono>
+#include <set>
 
 namespace QtAV {
 
@@ -36,7 +38,6 @@ public:
         : started(false)
         , async(false)
         , encoded_frames(0)
-        , start_time(0)
         , source_player(0)
         , afilter(0)
         , vfilter(0)
@@ -55,14 +56,14 @@ public:
     bool started;
     bool async;
     int encoded_frames;
-    qint64 start_time;
+
     AVPlayer *source_player;
     AudioEncodeFilter *afilter;
     VideoEncodeFilter *vfilter;
     //BlockingQueue<Packet> aqueue, vqueue; // TODO: 1 queue if packet.mediaType is enabled
     AVMuxer muxer;
     QString format;
-    QVector<Filter*> filters;
+    std::set<Filter*> filters;
 };
 
 AVTranscoder::AVTranscoder(QObject *parent)
@@ -228,23 +229,6 @@ bool AVTranscoder::isPaused() const
     return false; //stopped
 }
 
-qint64 AVTranscoder::startTime() const
-{
-    return d->start_time;
-}
-
-void AVTranscoder::setStartTime(qint64 ms)
-{
-    if (d->start_time == ms)
-        return;
-    d->start_time = ms;
-    Q_EMIT startTimeChanged(ms);
-    if (d->afilter)
-        d->afilter->setStartTime(startTime());
-    if (d->vfilter)
-        d->vfilter->setStartTime(startTime());
-}
-
 void AVTranscoder::start()
 {
     if (!videoEncoder())
@@ -256,15 +240,15 @@ void AVTranscoder::start()
     d->filters.clear();
     if (sourcePlayer()) {
         if (d->afilter) {
-            d->filters.append(d->afilter);
-            d->afilter->setStartTime(startTime());
+            d->filters.insert(d->afilter);
+            d->afilter->resetStartTime();
             sourcePlayer()->installFilter(d->afilter);
             disconnect(sourcePlayer(), SIGNAL(stopped()), d->afilter, SLOT(finish()));
             connect(sourcePlayer(), SIGNAL(stopped()), d->afilter, SLOT(finish()), Qt::DirectConnection);
         }
         if (d->vfilter) {
-            d->filters.append(d->vfilter);
-            d->vfilter->setStartTime(startTime());
+            d->filters.insert(d->vfilter);
+            d->vfilter->resetStartTime();
             qDebug("framerate: %.3f/%.3f", videoEncoder()->frameRate(), sourcePlayer()->statistics().video.frame_rate);
             if (videoEncoder()->frameRate() <= 0) { // use source frame rate. set before install filter (so before open)
                 videoEncoder()->setFrameRate(sourcePlayer()->statistics().video.frame_rate);
@@ -294,6 +278,8 @@ void AVTranscoder::stop()
         d->afilter->finish(); //FIXME: thread of sync mode
     if (d->vfilter)
         d->vfilter->finish();
+
+    stopInternal();
 }
 
 void AVTranscoder::stopInternal()
@@ -352,6 +338,9 @@ void AVTranscoder::writeAudio(const QtAV::Packet &packet)
         //d->aqueue.put(packet);
         return;
     }
+    if (!packet.isValid())
+        return;
+
     d->muxer.writeAudio(packet);
     Q_EMIT audioFrameEncoded(packet.pts);
 
@@ -367,6 +356,8 @@ void AVTranscoder::writeVideo(const QtAV::Packet &packet)
     // TODO: muxer maybe is not open. queue the packet
     if (!d->muxer.isOpen())
         return;
+    if (!packet.isValid())
+        return;
     d->muxer.writeVideo(packet);
     Q_EMIT videoFrameEncoded(packet.pts);
     // TODO: startpts, duration, encoded size
@@ -376,9 +367,12 @@ void AVTranscoder::writeVideo(const QtAV::Packet &packet)
 
 void AVTranscoder::tryFinish()
 {
+    if (d->filters.empty())
+        return;
+
     Filter* f = qobject_cast<Filter*>(sender());
-    d->filters.remove(d->filters.indexOf(f));
-    if (d->filters.isEmpty())
+    d->filters.erase(f);
+    if (d->filters.empty())
         stopInternal();
 }
 } //namespace QtAV

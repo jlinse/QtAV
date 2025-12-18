@@ -20,33 +20,106 @@
 ******************************************************************************/
 
 #include "QtAV/private/SubtitleProcessor.h"
+#include "QtAV/AVDemuxer.h"
+#include "QtAV/private/AVCompat.h"
 #include "QtAV/private/factory.h"
-#include <QtCore/QFile>
+#include "SubtitleProcessor_p.h"
 #include "utils/Logger.h"
 
+#include <QtCore/QFile>
+
 namespace QtAV {
-
-FACTORY_DEFINE(SubtitleProcessor)
-
-// can not declare in class member
-extern bool RegisterSubtitleProcessorFFmpeg_Man();
-extern bool RegisterSubtitleProcessorLibASS_Man();
-void SubtitleProcessor::registerAll()
+static QStringList ffmpeg_supported_sub_extensions_by_codec()
 {
-    static bool done = false;
-    if (done)
-        return;
-    done = true;
-    RegisterSubtitleProcessorFFmpeg_Man();
-#if QTAV_HAVE(LIBASS)
-    RegisterSubtitleProcessorLibASS_Man();
+    QStringList exts;
+    const AVCodec *c = NULL;
+#if AVCODEC_STATIC_REGISTER
+    void *it = NULL;
+    while ((c = av_codec_iterate(&it))) {
+#else
+    avcodec_register_all();
+    while ((c = av_codec_next(c))) {
 #endif
+        if (c->type != AVMEDIA_TYPE_SUBTITLE)
+            continue;
+        qDebug("sub codec: %s", c->name);
+#if AVFORMAT_STATIC_REGISTER
+        const AVInputFormat *i = NULL;
+        void *it2 = NULL;
+        while ((i = av_demuxer_iterate(&it2))) {
+#else
+        av_register_all(); // MUST register all input/output formats
+        AVInputFormat *i = NULL;
+        while ((i = av_iformat_next(i))) {
+#endif
+            if (!strcmp(i->name, c->name)) {
+                qDebug("found iformat");
+                if (i->extensions) {
+                    exts.append(QString::fromLatin1(i->extensions).split(QLatin1Char(',')));
+                } else {
+                    qDebug("has no exts");
+                    exts.append(QString::fromLatin1(i->name));
+                }
+                break;
+            }
+        }
+        if (!i) {
+            // qDebug("codec name '%s' is not found in AVInputFormat, just append codec name", c->name);
+            // exts.append(c->name);
+        }
+    }
+    return exts;
+}
+static QStringList ffmpeg_supported_sub_extensions()
+{
+    QStringList exts;
+#if AVFORMAT_STATIC_REGISTER
+    const AVInputFormat *i = NULL;
+    void *it = NULL;
+    while ((i = av_demuxer_iterate(&it))) {
+#else
+    av_register_all(); // MUST register all input/output formats
+    AVInputFormat *i = NULL;
+    while ((i = av_iformat_next(i))) {
+#endif
+        // strstr parameters can not be null
+        if (i->long_name && strstr(i->long_name, "subtitle")) {
+            if (i->extensions) {
+                exts.append(QString::fromLatin1(i->extensions).split(QLatin1Char(',')));
+            } else {
+                exts.append(QString::fromLatin1(i->name));
+            }
+        }
+    }
+    // AVCodecDescriptor.name and AVCodec.name may be different. avcodec_get_name() use AVCodecDescriptor if possible
+    QStringList codecs;
+    const AVCodec *c = NULL;
+#if AVCODEC_STATIC_REGISTER
+    it = NULL;
+    while ((c = av_codec_iterate(&it))) {
+#else
+    avcodec_register_all();
+    while ((c = av_codec_next(c))) {
+#endif
+        if (c->type == AVMEDIA_TYPE_SUBTITLE)
+            codecs.append(QString::fromLatin1(c->name));
+    }
+    const AVCodecDescriptor *desc = NULL;
+    while ((desc = avcodec_descriptor_next(desc))) {
+        if (desc->type == AVMEDIA_TYPE_SUBTITLE)
+            codecs.append(QString::fromLatin1(desc->name));
+    }
+    exts << codecs;
+    exts.removeDuplicates();
+    return exts;
 }
 
 SubtitleProcessor::SubtitleProcessor()
-    : m_width(0)
-    , m_height(0)
+    : d_ptr(new QtAV::SubtitleProcessorPrivate())
+{}
+SubtitleProcessor::~SubtitleProcessor()
 {
+    delete d_ptr;
 }
 
 bool SubtitleProcessor::process(const QString &path)
@@ -60,49 +133,79 @@ bool SubtitleProcessor::process(const QString &path)
     f.close();
     return ok;
 }
+QList<SubtitleFrame> SubtitleProcessor::frames()
+{
+    return d_ptr->frames();
+}
+QStringList SubtitleProcessor::supportedTypes() const
+{
+    static const QStringList sSuffixes = ffmpeg_supported_sub_extensions();
+    return sSuffixes;
+}
+bool SubtitleProcessor::process(QIODevice *dev)
+{
+    return d_ptr->process(dev);
+}
 
 QImage SubtitleProcessor::getImage(qreal pts, QRect *boundingRect)
 {
-    Q_UNUSED(pts)
-    Q_UNUSED(boundingRect)
-    return QImage();
+    return d_ptr->getImage(pts, boundingRect);
 }
 
 SubImageSet SubtitleProcessor::getSubImages(qreal pts, QRect *boundingRect)
 {
-    Q_UNUSED(pts);
-    Q_UNUSED(boundingRect);
-    return SubImageSet();
+    return d_ptr->getSubImages(pts, boundingRect);
 }
 
 void SubtitleProcessor::setFrameSize(int width, int height)
 {
-    if (width == m_width && height == m_height)
-        return;
-    m_width = width;
-    m_height = height;
-    onFrameSizeChanged(m_width, m_height);
+    d_ptr->setFrameSize(width, height);
 }
 
 QSize SubtitleProcessor::frameSize() const
 {
-    return QSize(m_width, m_height);
+    return QSize(d_ptr->m_width, d_ptr->m_height);
 }
 
 int SubtitleProcessor::frameWidth() const
 {
-    return m_width;
+    return d_ptr->m_width;
 }
 
 int SubtitleProcessor::frameHeight() const
 {
-    return m_height;
+    return d_ptr->m_height;
 }
 
-void SubtitleProcessor::onFrameSizeChanged(int width, int height)
+void SubtitleProcessor::setFontFile(const QString &file)
 {
-    Q_UNUSED(width);
-    Q_UNUSED(height);
+    d_ptr->setFontFile(file);
 }
 
-} //namespace QtAV
+void SubtitleProcessor::setFontsDir(const QString &dir)
+{
+    d_ptr->setFontsDir(dir);
+}
+void SubtitleProcessor::setFontFileForced(bool force)
+{
+    d_ptr->setFontFileForced(force);
+}
+
+bool SubtitleProcessor::processHeader(const QByteArray &codec, const QByteArray &data)
+{
+    return d_ptr->processHeader(codec, data);
+}
+
+QtAV::SubtitleFrame SubtitleProcessor::processLine(const QByteArray &data,
+                                                   qreal pts /*= -1*/,
+                                                   qreal duration /*= 0*/)
+{
+    return d_ptr->processLine(data, pts, duration);
+}
+
+QString SubtitleProcessor::getText(qreal pts) const
+{
+    return d_ptr->getText(pts);
+}
+
+} // namespace QtAV

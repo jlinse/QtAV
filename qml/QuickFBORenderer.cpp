@@ -1,6 +1,6 @@
 /******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
-    Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
+    Copyright (C) 2012-2022 Wang Bin <wbsecg1@gmail.com>
 
 *   This file is part of QtAV (from 2015)
 
@@ -27,13 +27,13 @@
 #include "QtAV/private/mkid.h"
 #include "QtAV/private/factory.h"
 #include <QtCore/QCoreApplication>
-#include <QtGui/QOpenGLFunctions>
-#include <QtGui/QOpenGLFramebufferObject>
+#include <QOpenGLFunctions>
+#include <QOpenGLFramebufferObject>
 #include <QtQuick/QQuickWindow>
 // for dynamicgl. qglfunctions before qt5.3 does not have portable gl functions
 // use qt gl func if possible to avoid linking to opengl directly
 #if QT_VERSION >= QT_VERSION_CHECK(5, 3, 0)
-#include <QtGui/QOpenGLFunctions>
+#include <QOpenGLFunctions>
 #define DYGL(glFunc) QOpenGLContext::currentContext()->functions()->glFunc
 #else
 #define DYGL(glFunc) glFunc
@@ -137,7 +137,7 @@ bool QuickFBORenderer::receiveFrame(const VideoFrame &frame)
     d.frame_changed = true;
 //    update();  // why update slow? because of calling in a different thread?
     //QMetaObject::invokeMethod(this, "update"); // slower than directly postEvent
-    QCoreApplication::postEvent(this, new QEvent(QEvent::User));
+    QCoreApplication::postEvent(this, new QEvent(QEvent::User), INT_MAX);
     return true;
 }
 
@@ -160,7 +160,11 @@ void QuickFBORenderer::setSource(QObject *source)
             p0 = qp0->player();
     }
     if(p0)
+    {
         p0->removeVideoRenderer(this);
+        if(!(p0->mediaEndAction() & MediaEndAction_KeepDisplay) && p0->file().isEmpty())
+            receive(VideoFrame());
+    }
 
     d.source = source;
     Q_EMIT sourceChanged();

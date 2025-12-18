@@ -88,7 +88,10 @@ MediaIO* MediaIO::createForUrl(const QString &url)
 static int av_read(void *opaque, unsigned char *buf, int buf_size)
 {
     MediaIO* io = static_cast<MediaIO*>(opaque);
-    return io->read((char*)buf, buf_size);
+    int sz = io->read((char*)buf, buf_size);
+    if (sz == 0)
+        return AVERROR_EOF;
+    return sz;
 }
 
 static int av_write(void *opaque, unsigned char *buf, int buf_size)

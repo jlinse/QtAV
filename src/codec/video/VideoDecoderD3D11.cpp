@@ -187,8 +187,8 @@ VideoFrame VideoDecoderD3D11::frame()
             f.setBytesPerLine(fmt.bytesPerLine(d.width, i), i); //used by gl to compute texture size
         }
         f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
-        f.setTimestamp(d.frame->pkt_pts/1000.0);
-        f.setDisplayAspectRatio(d.getDAR(d.frame));
+        f.setTimestamp(d.frame.timestamp());
+        f.setDisplayAspectRatio(d.frame.getDAR(d.codec_ctx));
         return f;
     }
 //    qDebug("process for view: %p, texture: %p", surface, texture.Get());
@@ -365,7 +365,7 @@ void VideoDecoderD3D11Private::destroyDecoder()
 bool VideoDecoderD3D11Private::setupSurfaceInterop()
 {
     if (copy_mode == VideoDecoderFFmpegHW::ZeroCopy)
-        interop_res = d3d11::InteropResourcePtr(d3d11::InteropResource::create());
+        interop_res = d3d11::InteropResource::create();
     if (interop_res)
         interop_res->setDevice(d3ddev);
     return true;

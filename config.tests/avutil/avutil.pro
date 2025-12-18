@@ -10,3 +10,7 @@ SOURCES += main.cpp
 
 LIBS += -lavutil
 include(../paths.pri)
+
+message("avutil FFMPEG_PATH = " $$FFMPEG_PATH);
+message("avutil INCLUDEPATH = " $$INCLUDEPATH);
+message("avutil LIBS = " $$LIBS);

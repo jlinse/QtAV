@@ -40,13 +40,10 @@ class Q_AV_EXPORT SubtitleFilter : public VideoFilter, public SubtitleAPIProxy
     Q_OBJECT
     DPTR_DECLARE_PRIVATE(SubtitleFilter)
     Q_PROPERTY(QByteArray codec READ codec WRITE setCodec NOTIFY codecChanged)
-    Q_PROPERTY(QStringList engines READ engines WRITE setEngines NOTIFY enginesChanged)
-    Q_PROPERTY(QString engine READ engine NOTIFY engineChanged)
     Q_PROPERTY(bool fuzzyMatch READ fuzzyMatch WRITE setFuzzyMatch NOTIFY fuzzyMatchChanged)
     //Q_PROPERTY(QString fileName READ fileName WRITE setFileName NOTIFY fileNameChanged)
     Q_PROPERTY(QStringList dirs READ dirs WRITE setDirs NOTIFY dirsChanged)
     Q_PROPERTY(QStringList suffixes READ suffixes WRITE setSuffixes NOTIFY suffixesChanged)
-    Q_PROPERTY(QStringList supportedSuffixes READ supportedSuffixes NOTIFY supportedSuffixesChanged)
     Q_PROPERTY(bool canRender READ canRender NOTIFY canRenderChanged)
     Q_PROPERTY(qreal delay READ delay WRITE setDelay NOTIFY delayChanged)
 
@@ -99,14 +96,12 @@ Q_SIGNALS:
     void loaded(const QString& path);
 
     void codecChanged();
-    void enginesChanged();
     void fuzzyMatchChanged();
     void contentChanged();
     //void fileNameChanged();
     void dirsChanged();
     void suffixesChanged();
-    void supportedSuffixesChanged();
-    void engineChanged();
+
     void delayChanged();
     void fontFileChanged();
     void fontsDirChanged();

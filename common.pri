@@ -109,7 +109,10 @@ defineReplace(platformTargetSuffix) {
     CONFIG(debug, debug|release) {
         !debug_and_release|build_pass {
             mac: return($${suffix}_debug)
-            win32: return($${suffix}d)
+            win32: {
+                win32-g++: return($${suffix})
+                !win32-g++: return($${suffix}d)
+            }
         }
     }
     return($$suffix)
@@ -477,7 +480,7 @@ defineTest(preparePaths) {
         EXE_EXT =
         win32: EXE_EXT = .exe
         CONFIG(release, debug|release): !isEmpty(QMAKE_STRIP):!mac_framework: QMAKE_POST_LINK = -$$QMAKE_STRIP $$DESTDIR/$${TARGET}$${EXE_EXT} #.exe in win
-    } else: DESTDIR = $$qtLongName($$BUILD_DIR/lib)
+    } else: DESTDIR = $$BUILD_DIR/lib
     !build_pass {
         message(target: $$DESTDIR/$$TARGET)
         !isEmpty(PROJECTROOT) {

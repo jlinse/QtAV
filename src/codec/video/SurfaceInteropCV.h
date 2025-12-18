@@ -43,13 +43,16 @@ enum InteropType {
     InteropCVOpenGLES,       // ios
     InteropAuto
 };
+class InteropResource;
+typedef QSharedPointer<InteropResource> InteropResourcePtr;
 
-class InteropResource
+class InteropResource : public QObject
 {
+    Q_OBJECT
 public:
     InteropResource();
     // Must have CreateInteropXXX in each implemention
-    static InteropResource* create(InteropType type);
+    static InteropResourcePtr create(InteropType type);
     virtual ~InteropResource() {}
     /*!
      * \brief stridesForWidth
@@ -88,7 +91,7 @@ private:
     GLenum m_format[4];
     GLenum m_dtype[4];
 };
-typedef QSharedPointer<InteropResource> InteropResourcePtr;
+
 
 class SurfaceInteropCV Q_DECL_FINAL: public VideoSurfaceInterop
 {

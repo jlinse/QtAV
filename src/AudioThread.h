@@ -36,6 +36,8 @@ class AudioThread : public AVThread
 public:
     explicit AudioThread(QObject *parent = 0);
 
+    bool decodePacket(Packet& pkt);
+
 protected:
     void applyFilters(AudioFrame& frame);
     virtual void run();

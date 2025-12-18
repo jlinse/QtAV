@@ -48,6 +48,7 @@ VideoFormat::PixelFormat format_from_cv(int cv);
 // check extension GL_APPLE_rgb_422 and rectangle?
 class InteropResourceIOSurface Q_DECL_FINAL : public InteropResource
 {
+    Q_OBJECT
 public:
     bool stridesForWidth(int cvfmt, int width, int* strides, VideoFormat::PixelFormat* outFmt) Q_DECL_OVERRIDE;
     bool mapToTexture2D() const Q_DECL_OVERRIDE { return false;}
@@ -64,9 +65,9 @@ public:
     }
 };
 
-InteropResource* CreateInteropIOSurface()
+InteropResourcePtr CreateInteropIOSurface()
 {
-    return new InteropResourceIOSurface();
+    return InteropResourcePtr(new InteropResourceIOSurface(),&QObject::deleteLater);
 }
 
 bool InteropResourceIOSurface::stridesForWidth(int cvfmt, int width, int *strides, VideoFormat::PixelFormat* outFmt)
@@ -162,3 +163,4 @@ bool InteropResourceIOSurface::map(CVPixelBufferRef buf, GLuint *tex, int w, int
 }
 } // namespace cv
 } // namespace QtAV
+#include "SurfaceInteropIOSurface.moc"

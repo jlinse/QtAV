@@ -29,6 +29,7 @@ namespace QtAV {
 namespace d3d9 {
 class GLInteropResource Q_DECL_FINAL: public InteropResource
 {
+    Q_OBJECT
 public:
     GLInteropResource(IDirect3DDevice9 * d3device);
     ~GLInteropResource();
@@ -41,9 +42,9 @@ private:
     HANDLE interop_obj;
 };
 
-InteropResource* CreateInteropGL(IDirect3DDevice9 *dev)
+InteropResourcePtr CreateInteropGL(IDirect3DDevice9 *dev)
 {
-    return new GLInteropResource(dev);
+    return InteropResourcePtr(new GLInteropResource(dev), &QObject::deleteLater);
 }
 
 GLInteropResource::GLInteropResource(IDirect3DDevice9 *d3device)
@@ -125,3 +126,4 @@ bool GLInteropResource::ensureResource(int w, int h, GLuint tex)
 }
 }
 }
+#include "SurfaceInteropD3D9GL.moc"

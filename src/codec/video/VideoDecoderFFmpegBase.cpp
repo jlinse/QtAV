@@ -22,6 +22,7 @@
 #include "VideoDecoderFFmpegBase.h"
 #include "QtAV/Packet.h"
 #include "utils/Logger.h"
+#include "AVWrapper.h"
 
 namespace QtAV {
 
@@ -30,11 +31,11 @@ extern ColorRange colorRangeFromFFmpeg(AVColorRange cr);
 
 static void SetColorDetailsByFFmpeg(VideoFrame *f, AVFrame* frame, AVCodecContext* codec_ctx)
 {
-    ColorSpace cs = colorSpaceFromFFmpeg(av_frame_get_colorspace(frame));
+    ColorSpace cs = colorSpaceFromFFmpeg(frame->colorspace);
     if (cs == ColorSpace_Unknown)
         cs = colorSpaceFromFFmpeg(codec_ctx->colorspace);
     f->setColorSpace(cs);
-    ColorRange cr = colorRangeFromFFmpeg(av_frame_get_color_range(frame));
+    ColorRange cr = colorRangeFromFFmpeg(frame->color_range);
     if (cr == ColorRange_Unknown) {
         // check yuvj format. TODO: deprecated, check only for old ffmpeg?
         const AVPixelFormat pixfmt = (AVPixelFormat)frame->format;
@@ -68,7 +69,7 @@ static void SetColorDetailsByFFmpeg(VideoFrame *f, AVFrame* frame, AVCodecContex
 void VideoDecoderFFmpegBasePrivate::updateColorDetails(VideoFrame *f)
 {
     if (f->format().pixelFormatFFmpeg() == frame->format) {
-        SetColorDetailsByFFmpeg(f, frame, codec_ctx);
+        SetColorDetailsByFFmpeg(f, &frame, codec_ctx);
         return;
     }
     // hw decoder output frame may have a different format, e.g. gl interop frame may have rgb format for rendering(stored as yuv)
@@ -88,29 +89,14 @@ void VideoDecoderFFmpegBasePrivate::updateColorDetails(VideoFrame *f)
             f->setColorSpace(ColorSpace_BT601);
         f->setColorRange(ColorRange_Limited);
     } else {
-        SetColorDetailsByFFmpeg(f, frame, codec_ctx);
+        SetColorDetailsByFFmpeg(f, &frame, codec_ctx);
     }
-}
-
-qreal VideoDecoderFFmpegBasePrivate::getDAR(AVFrame *f)
-{
-    // lavf 54.5.100 av_guess_sample_aspect_ratio: stream.sar > frame.sar
-    qreal dar = 0;
-    if (f->height > 0)
-        dar = (qreal)f->width/(qreal)f->height;
-    // prefer sar from AVFrame if sar != 1/1
-    if (f->sample_aspect_ratio.num > 1)
-        dar *= av_q2d(f->sample_aspect_ratio);
-    else if (codec_ctx && codec_ctx->sample_aspect_ratio.num > 1) // skip 1/1
-        dar *= av_q2d(codec_ctx->sample_aspect_ratio);
-    return dar;
 }
 
 VideoDecoderFFmpegBase::VideoDecoderFFmpegBase(VideoDecoderFFmpegBasePrivate &d):
     VideoDecoder(d)
 {
 }
-
 bool VideoDecoderFFmpegBase::decode(const Packet &packet)
 {
     if (!isAvailable())
@@ -121,14 +107,13 @@ bool VideoDecoderFFmpegBase::decode(const Packet &packet)
     int got_frame_ptr = 0;
     int ret = 0;
     if (packet.isEOF()) {
-        AVPacket eofpkt;
-        av_init_packet(&eofpkt);
-        eofpkt.data = NULL;
-        eofpkt.size = 0;
-        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, &eofpkt);
+        Wrapper::AVPacketWrapper eofpkt;
+        ret = compat_decode(d.codec_ctx, &d.frame, &got_frame_ptr, &eofpkt);
+
     } else {
-        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
+        ret = compat_decode(d.codec_ctx, &d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
     }
+
     //qDebug("pic_type=%c", av_get_picture_type_char(d.frame->pict_type));
     d.undecoded_size = qMin(packet.data.size() - ret, packet.data.size());
     if (ret < 0) {
@@ -155,16 +140,22 @@ VideoFrame VideoDecoderFFmpegBase::frame()
         return VideoFrame();
     // it's safe if width, height, pixfmt will not change, only data change
     VideoFrame frame(d.frame->width, d.frame->height, VideoFormat((int)d.codec_ctx->pix_fmt));
-    frame.setDisplayAspectRatio(d.getDAR(d.frame));
+    frame.setDisplayAspectRatio(d.frame.getDAR(d.codec_ctx));
     frame.setBits(d.frame->data);
     frame.setBytesPerLine(d.frame->linesize);
     // in s. TODO: what about AVFrame.pts? av_frame_get_best_effort_timestamp? move to VideoFrame::from(AVFrame*)
-    frame.setTimestamp((double)d.frame->pkt_pts/1000.0);
-    frame.setMetaData(QStringLiteral("avbuf"), QVariant::fromValue(AVFrameBuffersRef(new AVFrameBuffers(d.frame))));
+    frame.setTimestamp((double)d.frame->pts/1000.0);
+    frame.setMetaData(QStringLiteral("avbuf"), QVariant::fromValue(AVFrameBuffersRef(new AVFrameBuffers(&d.frame))));
     d.updateColorDetails(&frame);
     if (frame.format().hasPalette()) {
         frame.setMetaData(QStringLiteral("pallete"), QByteArray((const char*)d.frame->data[1], 256*4));
     }
     return frame;
+}
+
+AVFrame* VideoDecoderFFmpegBase::avframe()
+{
+    DPTR_D(VideoDecoderFFmpegBase);
+    return &d.frame;
 }
 } //namespace QtAV

@@ -166,6 +166,11 @@ void PlayerSubtitle::onPlayerStart()
     return;
 }
 
+void PlayerSubtitle::onPlayerStopped() 
+{
+   m_sub->clear();
+}
+
 void PlayerSubtitle::onEnabledChanged(bool value)
 {
     m_enabled = value;
@@ -258,13 +263,13 @@ void PlayerSubtitle::connectSignals()
     connect(m_player, SIGNAL(sourceChanged()), this, SLOT(onPlayerSourceChanged()));
     connect(m_player, SIGNAL(positionChanged(qint64)), this, SLOT(onPlayerPositionChanged()));
     connect(m_player, SIGNAL(started()), this, SLOT(onPlayerStart()));
+    connect(m_player, SIGNAL(stopped()), this, SLOT(onPlayerStopped()));
     connect(m_player, SIGNAL(internalSubtitlePacketRead(int,QtAV::Packet)), this, SLOT(processInternalSubtitlePacket(int,QtAV::Packet)));
     connect(m_player, SIGNAL(internalSubtitleHeaderRead(QByteArray,QByteArray)), this, SLOT(processInternalSubtitleHeader(QByteArray,QByteArray)));
     connect(m_player, SIGNAL(internalSubtitleTracksChanged(QVariantList)), this, SLOT(updateInternalSubtitleTracks(QVariantList)));
     // try to reload internal subtitle track. if failed and external subtitle is enabled, fallback to external
     connect(m_player, SIGNAL(subtitleStreamChanged(int)), this, SLOT(tryReloadInternalSub()));
     connect(m_sub, SIGNAL(codecChanged()), this, SLOT(tryReload()));
-    connect(m_sub, SIGNAL(enginesChanged()), this, SLOT(tryReload()));
 }
 
 void PlayerSubtitle::disconnectSignals()
@@ -278,7 +283,6 @@ void PlayerSubtitle::disconnectSignals()
     disconnect(m_player, SIGNAL(internalSubtitleHeaderRead(QByteArray,QByteArray)), this, SLOT(processInternalSubtitleHeader(QByteArray,QByteArray)));
     disconnect(m_player, SIGNAL(internalSubtitleTracksChanged(QVariantList)), this, SLOT(updateInternalSubtitleTracks(QVariantList)));
     disconnect(m_sub, SIGNAL(codecChanged()), this, SLOT(tryReload()));
-    disconnect(m_sub, SIGNAL(enginesChanged()), this, SLOT(tryReload()));
 }
 
 } //namespace QtAV

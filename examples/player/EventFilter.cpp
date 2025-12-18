@@ -112,7 +112,7 @@ void EventFilter::help()
 bool EventFilter::eventFilter(QObject *watched, QEvent *event)
 {
     Q_UNUSED(watched);
-    AVPlayer *player = static_cast<AVPlayer*>(parent());
+    AVPlayer *player = qobject_cast<AVPlayer*>(parent());
     if (!player || !player->renderer() || !player->renderer()->widget())
         return false;
     if (qobject_cast<QWidget*>(watched) != player->renderer()->widget()) {

@@ -117,12 +117,13 @@ QList<QVariant> getAudioInfoValues(const Statistics& s) {
 }
 
 
-StatisticsView::StatisticsView(QWidget *parent) :
+StatisticsView::StatisticsView(QtAV::AVPlayer& player,QWidget *parent) :
     QDialog(parent)
   , mTimer(0)
   , mpFPS(0)
   , mpAudioBitRate(0)
   , mpVideoBitRate(0)
+  , mPlayer(player)
 {
     setWindowTitle(tr("Media info"));
     setModal(false);
@@ -163,9 +164,10 @@ StatisticsView::StatisticsView(QWidget *parent) :
     setLayout(vl);
 }
 
-void StatisticsView::setStatistics(const Statistics& s)
+void StatisticsView::setStatistics()
 {
-    mStatistics = s;
+    const auto& s = mPlayer.statistics();
+
     QVariantList v = getBaseInfoValues(s);
     int i = 0;
     foreach(QTreeWidgetItem* item, mBaseItems) {
@@ -211,8 +213,9 @@ void StatisticsView::timerEvent(QTimerEvent *e)
 {
     if (e->timerId() != mTimer)
         return;
-    if (mpFPS) {
-        mpFPS->setData(1, Qt::DisplayRole, QString::number(mStatistics.video_only.currentDisplayFPS(), 'f', 2));
+	if (mpFPS) {
+		const auto& s = mPlayer.statistics();
+        mpFPS->setData(1, Qt::DisplayRole, QString::number(s.video_only.currentDisplayFPS(), 'f', 2));
     }
 }
 

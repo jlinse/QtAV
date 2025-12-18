@@ -72,10 +72,13 @@ preparePaths($$OUT_PWD/../out)
 CONFIG += depend_includepath #?
 
 PROJECT_SRCPATH = $$PWD
-PROJECT_LIBDIR = $$qtLongName($$BUILD_DIR/lib)
+#PROJECT_LIBDIR = $$qtLongName($$BUILD_DIR/lib)
+PROJECT_LIBDIR = $$BUILD_DIR/lib
 INCLUDEPATH *= $$PROJECT_SRCPATH $$PROJECT_SRCPATH/.. $$PROJECT_SRCPATH/$$NAME
 DEPENDPATH *= $$PROJECT_SRCPATH
 #QMAKE_LFLAGS_RPATH += #will append to rpath dir
+message("Project_TargetName " $$PROJECT_TARGETNAME);
+message("Project_Libdir " $$PROJECT_LIBDIR);
 
 #eval() ?
 !contains(CONFIG, $$lower($$NAME)-buildlib) {

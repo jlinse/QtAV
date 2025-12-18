@@ -42,6 +42,7 @@ public:
     bool operator !() const { return !isValid();}
     inline bool operator <(const SubtitleFrame& f) const { return end < f.end;}
     inline bool operator <(qreal t) const { return end < t;}
+    bool contains(qreal time) const { return time >= begin && time <= end; }
     qreal begin;
     qreal end;
     QString text; //plain text. always valid
@@ -51,15 +52,12 @@ class Q_AV_EXPORT Subtitle : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QByteArray codec READ codec WRITE setCodec NOTIFY codecChanged)
-    // QList<SubtitleProcessorId>
-    Q_PROPERTY(QStringList engines READ engines WRITE setEngines NOTIFY enginesChanged)
-    Q_PROPERTY(QString engine READ engine NOTIFY engineChanged)
     Q_PROPERTY(bool fuzzyMatch READ fuzzyMatch WRITE setFuzzyMatch NOTIFY fuzzyMatchChanged)
     Q_PROPERTY(QByteArray rawData READ rawData WRITE setRawData NOTIFY rawDataChanged)
     Q_PROPERTY(QString fileName READ fileName WRITE setFileName NOTIFY fileNameChanged)
     Q_PROPERTY(QStringList dirs READ dirs WRITE setDirs NOTIFY dirsChanged)
     Q_PROPERTY(QStringList suffixes READ suffixes WRITE setSuffixes NOTIFY suffixesChanged)
-    Q_PROPERTY(QStringList supportedSuffixes READ supportedSuffixes NOTIFY supportedSuffixesChanged)
+
     Q_PROPERTY(qreal timestamp READ timestamp WRITE setTimestamp)
     Q_PROPERTY(qreal delay READ delay WRITE setDelay NOTIFY delayChanged)
     Q_PROPERTY(QString text READ getText)
@@ -87,19 +85,7 @@ public:
      * \return
      */
     bool isLoaded() const;
-    /*!
-     * \brief setEngines
-     * Set subtitle processor engine names, in priority order. When loading a subtitle, use the engines
-     * one by one until a usable engine is found.
-     * \param value
-     */
-    void setEngines(const QStringList& value);
-    QStringList engines() const;
-    /*!
-     * \brief engine
-     * \return The engine in use for current subtitle
-     */
-    QString engine() const;
+
     void setFuzzyMatch(bool value);
     bool fuzzyMatch() const;
     void setRawData(const QByteArray& data);
@@ -132,6 +118,7 @@ public:
     QStringList suffixes() const;
 
     qreal timestamp() const;
+    qreal contentTimestamp() const;
     /*!
      * \brief delay
      * unit: second
@@ -187,13 +174,14 @@ public Q_SLOTS:
     void load();
     void loadAsync();
     void setTimestamp(qreal t);
+    void clear();
 Q_SIGNALS:
     // TODO: also add to AVPlayer?
     /// empty path if load from raw data
     void loaded(const QString& path = QString());
     void canRenderChanged();
     void codecChanged();
-    void enginesChanged();
+
     void fuzzyMatchChanged();
     /*!
      * \brief contentChanged
@@ -204,8 +192,7 @@ Q_SIGNALS:
     void fileNameChanged();
     void dirsChanged();
     void suffixesChanged();
-    void supportedSuffixesChanged();
-    void engineChanged();
+
     void delayChanged();
     void fontFileChanged();
     void fontsDirChanged();
@@ -230,9 +217,7 @@ public:
     void setCodec(const QByteArray& value);
     QByteArray codec() const;
     bool isLoaded() const;
-    void setEngines(const QStringList& value);
-    QStringList engines() const;
-    QString engine() const;
+
     void setFuzzyMatch(bool value);
     bool fuzzyMatch() const;
     //always use exact file path by setFile(). file name is used internally

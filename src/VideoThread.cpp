@@ -33,18 +33,21 @@
 #include "QtAV/private/AVCompat.h"
 #include <QtCore/QFileInfo>
 #include "utils/Logger.h"
+#include "AVPlayer.h"
+#include "codec/video/VideoDecoderFFmpegBase.h"
 
 namespace QtAV {
 
 class VideoThreadPrivate : public AVThreadPrivate
 {
 public:
-    VideoThreadPrivate():
+    VideoThreadPrivate(VideoThread* vt):
         AVThreadPrivate()
       , force_fps(0)
       , force_dt(0)
       , capture(0)
       , filter_context(0)
+      , q_ptr{vt}
     {
     }
     ~VideoThreadPrivate() {
@@ -53,6 +56,36 @@ public:
             delete filter_context;
             filter_context = 0;
         }
+    }
+
+    inline void update_video_info(VideoFrame frame) {
+        statistics->mutex.lock();
+        statistics->totalKeyFrames++;
+        statistics->realResolution = QSize(frame.width(), frame.height());
+        if(statistics->totalKeyFrames==-1)
+        {
+            auto ibs = av_image_get_buffer_size(AVPixelFormat(frame.pixelFormatFFmpeg()),
+                                                frame.width(),
+                                                frame.height(),
+                                                32);
+            if(ibs>0)
+                statistics->imageBufferSize = ibs;
+
+            statistics->totalFrames = 0;
+            statistics->totalKeyFrames = 0;
+            statistics->droppedFrames = 0;
+            statistics->droppedPackets = 0;
+            emit q_ptr->firstKeyFrameReceived();
+        }
+        if(statistics->imageBufferSize==0) {
+            auto ibs = av_image_get_buffer_size(AVPixelFormat(frame.pixelFormatFFmpeg()),
+                                                frame.width(),
+                                                frame.height(),
+                                                32);
+            if(ibs>0)
+                statistics->imageBufferSize = ibs;
+        }
+        statistics->mutex.unlock();
     }
 
     VideoFrameConverter conv;
@@ -64,11 +97,15 @@ public:
     VideoCapture *capture;
     VideoFilterContext *filter_context;//TODO: use own smart ptr. QSharedPointer "=" is ugly
     VideoFrame displayed_frame;
+    bool wait_key_frame = false;
+    VideoThread* q_ptr;
 };
 
 VideoThread::VideoThread(QObject *parent) :
-    AVThread(*new VideoThreadPrivate(), parent)
+    AVThread(*new VideoThreadPrivate(this), parent)
 {
+    player = qobject_cast<AVPlayer*>(parent);
+    connect(this,&VideoThread::firstKeyFrameReceived,player,&AVPlayer::firstKeyFrameReceived);
 }
 
 //it is called in main thread usually, but is being used in video thread,
@@ -185,6 +222,52 @@ void VideoThread::setEQ(int b, int c, int s)
     }
 }
 
+bool VideoThread::decodePacket(Packet &pkt)
+{
+    DPTR_D(VideoThread);
+    if (!pkt.isValid()) {
+        d.statistics->mutex.lock();
+        d.statistics->droppedPackets++;
+        d.statistics->mutex.unlock();
+        d.wait_key_frame = true;
+        return false;
+    }
+
+    if (d.wait_key_frame) {
+        if (!pkt.hasKeyFrame)
+            return false;
+        d.wait_key_frame = false;
+    }
+
+    if(!d.dec)
+        return false;
+    VideoDecoder *dec = static_cast<VideoDecoder*>(d.dec);
+    if (!dec->decode(pkt))
+        return false;
+    if(pkt.hasKeyFrame)
+        d.update_video_info(dec->frame());
+    if (!pkt.isEOF())
+        pkt.skip(pkt.data.size() - dec->undecodedSize());
+    VideoFrame frame = dec->frame();
+
+    d.statistics->mutex.lock();
+    d.statistics->totalFrames++;
+    d.statistics->mutex.unlock();
+    if (!frame.isValid()) {
+        d.statistics->mutex.lock();
+        d.statistics->droppedFrames++;
+        d.statistics->mutex.unlock();
+        qWarning("invalid video frame from decoder. undecoded data size: %d", pkt.data.size());
+        return false;
+    }
+
+    applyFilters(frame);
+    if(!deliverVideoFrame(frame))
+        return false;
+    d.displayed_frame = frame;
+    return true;
+}
+
 void VideoThread::applyFilters(VideoFrame &frame)
 {
     DPTR_D(VideoThread);
@@ -277,8 +360,25 @@ void VideoThread::run()
     const char* pkt_data = NULL; // workaround for libav9 decode fail but error code >= 0
     qint64 last_deliver_time = 0;
     int sync_id = 0;
+    auto realtimeDecode = player->realtimeDecode();
     while (!d.stop) {
         processNextTask();
+
+        if(d.statistics->resetValues.load(std::memory_order_relaxed)) {
+            d.statistics->mutex.lock();
+            d.statistics->totalFrames = 0;
+            d.statistics->droppedFrames = 0;
+            d.statistics->droppedPackets = 0;
+            d.statistics->totalKeyFrames = -3;
+            d.statistics->mutex.unlock();
+            d.statistics->resetValues.store(false);
+        }
+
+        if(realtimeDecode) {
+            QThread::msleep(50);
+            continue;
+        }
+
         //TODO: why put it at the end of loop then stepForward() not work?
         //processNextTask tryPause(timeout) and  and continue outter loop
         if (d.render_pts0 < 0) { // no pause when seeking
@@ -318,6 +418,9 @@ void VideoThread::run()
             //qDebug() << pkt.position << " pts:" <<pkt.pts;
             //Compare to the clock
             if (!pkt.isValid()) {
+                d.statistics->mutex.lock();
+                d.statistics->droppedPackets++;
+                d.statistics->mutex.unlock();
                 // may be we should check other information. invalid packet can come from
                 wait_key_frame = true;
                 qDebug("Invalid packet! flush video codec context!!!!!!!!!! video packet queue size: %d", d.packets.size());
@@ -508,11 +611,29 @@ void VideoThread::run()
             pkt = Packet();
             continue;
         }
+
+        if(pkt.hasKeyFrame)
+            d.update_video_info(dec->frame());
+
         // reduce here to ensure to decode the rest data in the next loop
         if (!pkt.isEOF())
             pkt.skip(pkt.data.size() - dec->undecodedSize());
         VideoFrame frame = dec->frame();
+
+        ///sample code for accessing ffmpeg decoder and avframe
+//        if(dec->name()=="FFmpeg")
+//        {
+//           auto ffmpegDec = static_cast<VideoDecoderFFmpegBase*>(dec);
+//           auto avframe = ffmpegDec->avframe();
+//        }
+
+        d.statistics->mutex.lock();
+        d.statistics->totalFrames++;
+        d.statistics->mutex.unlock();
         if (!frame.isValid()) {
+            d.statistics->mutex.lock();
+            d.statistics->droppedFrames++;
+            d.statistics->mutex.unlock();
             qWarning("invalid video frame from decoder. undecoded data size: %d", pkt.data.size());
             if (pkt_data == pkt.data.constData()) //FIXME: for libav9. what about other versions?
                 pkt = Packet();

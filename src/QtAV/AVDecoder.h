@@ -26,6 +26,8 @@
 #include <QtCore/QVariant>
 #include <QtCore/QObject>
 
+struct AVCodecContext;
+
 namespace QtAV {
 
 class Packet;
@@ -48,8 +50,8 @@ public:
     virtual bool close();
     bool isOpen() const;
     virtual void flush();
-    void setCodecContext(void* codecCtx); //protected
-    void* codecContext() const;
+    void setCodecContext(const AVCodecContext* codecCtx); //protected
+    AVCodecContext* codecContext() const;
     /*not available if AVCodecContext == 0*/
     bool isAvailable() const;
     virtual bool decode(const Packet& packet) = 0;
@@ -73,7 +75,7 @@ public:
     QVariantHash options() const;
 
 Q_SIGNALS:
-    void error(const QtAV::AVError& e); //explictly use QtAV::AVError in connection for Qt4 syntax
+    void error(const QtAV::AVError& e, int ffmpegError=0, const QString& ffmpegErrorStr=""); //explictly use QtAV::AVError in connection for Qt4 syntax
     void descriptionChanged();
 protected:
     AVDecoder(AVDecoderPrivate& d);

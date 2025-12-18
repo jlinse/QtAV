@@ -31,6 +31,7 @@ namespace QtAV {
 namespace d3d11 {
 class GLInteropResource Q_DECL_FINAL: public InteropResource
 {
+    Q_OBJECT
 public:
     GLInteropResource();
     ~GLInteropResource();
@@ -56,9 +57,9 @@ private:
     GLuint gltex[2];
 };
 
-InteropResource* CreateInteropGL()
+InteropResourcePtr CreateInteropGL()
 {
-    return new GLInteropResource();
+    return InteropResourcePtr(new GLInteropResource(), &QObject::deleteLater);
 }
 
 GLInteropResource::GLInteropResource()
@@ -181,3 +182,4 @@ bool GLInteropResource::ensureResource(DXGI_FORMAT fmt, int w, int h, GLuint tex
 }
 }
 }
+#include "SurfaceInteropD3D11GL.moc"

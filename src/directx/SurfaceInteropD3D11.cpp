@@ -59,9 +59,9 @@ bool InteropResource::isSupported(InteropType type)
     return false;
 }
 
-extern InteropResource* CreateInteropEGL();
-extern InteropResource* CreateInteropGL();
-InteropResource* InteropResource::create(InteropType type)
+extern InteropResourcePtr CreateInteropEGL();
+extern InteropResourcePtr CreateInteropGL();
+InteropResourcePtr InteropResource::create(InteropType type)
 {
     if (type == InteropAuto || type == InteropEGL) {
 #if QTAV_HAVE(D3D11_EGL)

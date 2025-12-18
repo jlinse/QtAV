@@ -33,11 +33,15 @@ enum InteropType {
     InteropGL
 };
 
-class InteropResource
+class InteropResource;
+typedef QSharedPointer<InteropResource> InteropResourcePtr;
+
+class InteropResource : public QObject
 {
+    Q_OBJECT
 public:
     static bool isSupported(InteropType type = InteropAuto);
-    static InteropResource* create(IDirect3DDevice9 * dev, InteropType type = InteropAuto);
+    static InteropResourcePtr create(IDirect3DDevice9 * dev, InteropType type = InteropAuto);
     typedef unsigned int GLuint;
     InteropResource(IDirect3DDevice9 * d3device);
     virtual ~InteropResource();
@@ -60,7 +64,6 @@ protected:
     IDirect3DSurface9 *dx_surface; // size is frame size(visual size) for display
     int width, height; // video frame width and dx_surface width without alignment, not dxva decoded surface width
 };
-typedef QSharedPointer<InteropResource> InteropResourcePtr;
 
 class SurfaceInterop Q_DECL_FINAL: public VideoSurfaceInterop
 {

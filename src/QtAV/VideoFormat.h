@@ -245,7 +245,6 @@ public:
     // test AV_PIX_FMT_FLAG_XXX
     bool isBigEndian() const;
     bool hasPalette() const;
-    bool isPseudoPaletted() const;
     /**
      * All values of a component are bit-wise packed end to end.
      */

@@ -25,7 +25,7 @@
 #include <QtCore/QUrl>
 #include "qoptions.h"
 #include "Config.h"
-#include "ScreenSaver.h"
+#include "powermanagement/powermanagement.h"
 
 QOptions COMMON_EXPORT get_common_options();
 void COMMON_EXPORT do_common_options_before_qapp(const QOptions& options);

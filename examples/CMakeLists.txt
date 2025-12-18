@@ -1,4 +1,4 @@
-find_package(Qt5Sql REQUIRED)
+find_package(Qt5 COMPONENTS Sql DBus REQUIRED)
 if(WIN32)
   set(EXE_TYPE WIN32)
 elseif(APPLE)
@@ -8,19 +8,20 @@ set(COMMON_SRC
   common/common.cpp
   common/Config.cpp
   common/qoptions.cpp
+  common/powermanagement/powermanagement.cpp
+  common/powermanagement/powermanagement_x11.cpp
 )
 set(COMMON_HEADERS
   common/common.h
   common/Config.h
   common/qoptions.h
-  common/ScreenSaver.h
+  common/powermanagement/powermanagement.h
+  common/powermanagement/powermanagement_x11.h
   common/common_export.h
 )
-if(NOT IOS)
-  list(APPEND COMMON_SRC common/ScreenSaver.cpp)
-  if(APPLE)
-    list(APPEND COMMON_LIBS "-framework CoreServices")
-  endif()
+if(APPLE)
+  message("apple")
+  list(APPEND COMMON_LIBS "-framework CoreServices -framework IOKit")
 endif()
 
 SET(COMMON_QRC common/theme/theme.qrc)
@@ -31,8 +32,8 @@ set_source_files_properties(${COMMON_RES} PROPERTIES GENERATED ON)
 # add HEADERS for moc
 add_library(common STATIC ${COMMON_SRC} ${COMMON_RES} ${COMMON_HEADERS})
 target_link_libraries(common
-  LINK_PUBLIC Qt5::Core Qt5::Gui ${COMMON_LIBS}
-  LINK_PRIVATE Qt5::Sql
+  PRIVATE Qt5::Core Qt5::Gui  
+  PUBLIC Qt5::Sql Qt5::DBus ${COMMON_LIBS}
 )
 target_compile_definitions(common PUBLIC -DBUILD_COMMON_STATIC)
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -1,4 +1,4 @@
-/******************************************************************************
+﻿/******************************************************************************
     QtAV:  Multimedia framework based on Qt and FFmpeg
     Copyright (C) 2012-2017 Wang Bin <wbsecg1@gmail.com>
 
@@ -25,9 +25,15 @@
 #include "QtAV/AVDemuxer.h"
 #include "QtAV/AVDecoder.h"
 #include "VideoThread.h"
+#include "AudioThread.h"
 #include <QtCore/QTime>
 #include "utils/Logger.h"
 #include <QTimer>
+#include "SPSCQueue.h"
+#include <thread>
+#include <libavcodec/packet.h>
+#include "AVPlayer.h"
+#include <cmath>
 
 #define RESUME_ONCE_ON_SEEK 0
 
@@ -631,10 +637,90 @@ void AVDemuxThread::run()
     }
     qreal last_apts = 0;
     qreal last_vpts = 0;
+    qreal last_dts = 0;
 
     AutoSem as(&sem);
     Q_UNUSED(as);
+
+    bool realtimeDecode = qobject_cast<AVPlayer*>(parent())->realtimeDecode();
+
+    if(realtimeDecode) {
+        rigtorp::SPSCQueue<Packet> packets(audio_thread ? 100 : 30);
+        Q_EMIT mediaStatusChanged(QtAV::BufferedMedia);
+        Q_EMIT bufferProgressChanged(1);
+
+        std::atomic<double> fps = demuxer->frameRate();
+        if(fps<=0 || fps>1000 || std::isnan(fps.load()))
+            fps = 20;
+        qint64 totalFrames = 0;
+        qint64 lastTotalFrames = 0;
+        QElapsedTimer elapsedTimer;
+        elapsedTimer.start();
+        auto t = std::thread([&] {
+          while (!end) {
+              if (!demuxer->readFrame()) {
+                  QThread::msleep(10);
+                  continue;
+              }
+
+              // calculate fps using exponential moving average
+              auto elapsed = elapsedTimer.elapsed();
+              if(elapsed>1000) {
+                  double alpha = totalFrames>0 ? 0.333 : 1.0;
+                  auto val = (static_cast<double>(totalFrames-lastTotalFrames)/elapsed)*1000;
+                  lastTotalFrames = totalFrames;
+                  fps = qMax((alpha * val) + (1.0 - alpha) * fps, 1.0);
+                  elapsedTimer.start();
+              }
+
+              ++totalFrames;
+
+              while(!end && !packets.try_push(demuxer->packet()))
+                QThread::msleep(1);
+          }
+        });
+
+        int bufFullCount = 0;
+        while (!end) {
+            while (!end && !packets.front())
+                QThread::msleep(1);
+            if(!packets.front())
+                continue;
+            auto psize = packets.size();
+            if(psize>(packets.capacity()*0.9))
+                ++bufFullCount;
+            else
+                bufFullCount = 0;
+            if(bufFullCount>10) {
+                while (packets.front())
+                    packets.pop();
+                bufFullCount = 0;
+                Packet p;
+                if(video_thread)
+                    static_cast<VideoThread*>(video_thread)->decodePacket(p);
+                continue;
+            }
+            pkt = *packets.front();
+            bool ret = false;
+            if(video_thread && demuxer->videoStream()==pkt.asAVPacket()->stream_index)
+                ret = static_cast<VideoThread*>(video_thread)->decodePacket(pkt);
+            else if(audio_thread && demuxer->audioStream()==pkt.asAVPacket()->stream_index)
+                ret = static_cast<AudioThread*>(audio_thread)->decodePacket(pkt);
+            if(ret) {
+                int wait = int((1000-psize*5)/fps);
+                wait = qMin(qMax(wait , 0), 1000);
+                QThread::msleep(wait);
+            }
+            packets.pop();
+        }
+
+        t.join();
+    }
+
     while (!end) {
+        if(realtimeDecode)
+            break;
+
         processNextSeekTask();
         //vthread maybe changed by AVPlayer.setPriority() from no dec case
         vqueue = video_thread ? video_thread->packetQueue() : 0;
@@ -672,8 +758,11 @@ void AVDemuxThread::run()
             if (exit_thread) {
                 if (!(mediaEndAction() & MediaEndAction_Pause))
                     break;
+                else
+                    Q_EMIT mediaStatusChanged(QtAV::PausedOnMediaAtEnd);
                 pause(true);
                 Q_EMIT requestClockPause(true);
+                Q_EMIT mediaEndActionPauseTriggered();
                 if (aqueue)
                     aqueue->blockEmpty(true);
                 if (vqueue)

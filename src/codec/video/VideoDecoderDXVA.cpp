@@ -30,6 +30,7 @@
 #include "utils/Logger.h"
 #include "directx/SurfaceInteropD3D9.h"
 #include <QtCore/QSysInfo>
+#include <QOperatingSystemVersion>
 #define DX_LOG_COMPONENT "DXVA2"
 #include "utils/DirectXHelper.h"
 
@@ -98,7 +99,7 @@ public:
         VideoDecoderD3DPrivate()
     {
         // d3d9+gl interop may not work on optimus moble platforms, 0-copy is enabled only for egl interop
-        if (d3d9::InteropResource::isSupported(d3d9::InteropEGL) && QSysInfo::windowsVersion() >= QSysInfo::WV_VISTA)
+        if (d3d9::InteropResource::isSupported(d3d9::InteropEGL) && QOperatingSystemVersion::current() >= QOperatingSystemVersion::Windows7)
             copy_mode = VideoDecoderFFmpegHW::ZeroCopy;
 
         hd3d9_dll = 0;
@@ -189,8 +190,8 @@ VideoFrame VideoDecoderDXVA::frame()
         VideoFrame f(d.width, d.height, VideoFormat::Format_RGB32);
         f.setBytesPerLine(d.width * 4); //used by gl to compute texture size
         f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
-        f.setTimestamp(d.frame->pkt_pts/1000.0);
-        f.setDisplayAspectRatio(d.getDAR(d.frame));
+        f.setTimestamp(d.frame.timestamp());
+        f.setDisplayAspectRatio(d.frame.getDAR(d.codec_ctx));
         return f;
     }
     class ScopedD3DLock {
@@ -269,7 +270,7 @@ bool VideoDecoderDXVAPrivate::createDevice()
         return false;
     }
     vendor = QString::fromLatin1(DXHelper::vendorName(d3dai.VendorId));
-    description = QString().sprintf("DXVA2 (%.*s, vendor %lu(%s), device %lu, revision %lu)",
+    description = QString::asprintf("DXVA2 (%.*s, vendor %lu(%s), device %lu, revision %lu)",
                                     sizeof(d3dai.Description), d3dai.Description,
                                     d3dai.VendorId, qPrintable(vendor), d3dai.DeviceId, d3dai.Revision);
 
@@ -445,7 +446,7 @@ void* VideoDecoderDXVAPrivate::setupAVVAContext()
 bool VideoDecoderDXVAPrivate::setupSurfaceInterop()
 {
     if (copy_mode == VideoDecoderFFmpegHW::ZeroCopy)
-        interop_res = d3d9::InteropResourcePtr(d3d9::InteropResource::create(d3ddev));
+        interop_res = d3d9::InteropResource::create(d3ddev);
     return true;
 }
 } //namespace QtAV

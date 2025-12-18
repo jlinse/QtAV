@@ -12,8 +12,6 @@ INCLUDE(CheckTypeSize)
 include_directories(${QTDIR}/include) #TODO: remove. use external/include
 get_filename_component(QTDIR "${QTDIR}" ABSOLUTE)
 
-find_package(PkgConfig)
-
 list(APPEND EXTRA_INCLUDE ${QTAV_SOURCE_DIR}/external/include)
 list(APPEND EXTRA_LIBS ${CMAKE_LIBRARY_PATH_FLAG}${QTAV_SOURCE_DIR}/external/lib)
 if(APPLE)
@@ -30,136 +28,63 @@ if(EXISTS ${QTAV_SOURCE_DIR}/contrib/capi/capi.h)
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_CAPI=1)
 endif()
 
-pkg_check_modules (AVFORMAT libavformat REQUIRED)
-if(${AVFORMAT_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVFORMAT)
-    message("Found AVFORMAT: ${AVFORMAT_LINK_LIBRARIES}")
+if(NOT FFMPEG_FOUND)
+  find_package(FFMPEG REQUIRED)
+  FFMPEG_FIND(libavresample   avresample   avresample.h)
+  set(FFMPEG_AVFORMAT_FOUND ${FFMPEG_libavformat_FOUND} CACHE BOOL "")
+  set(FFMPEG_AVCODEC_FOUND ${FFMPEG_libavcodec_FOUND} CACHE BOOL "")
+  set(FFMPEG_SWSCALE_FOUND ${FFMPEG_libswscale_FOUND} CACHE BOOL "")
+  set(FFMPEG_AVUTIL_FOUND ${FFMPEG_libavutil_FOUND} CACHE BOOL "")
+  set(FFMPEG_AVFILTER_FOUND ${FFMPEG_libavfilter_FOUND} CACHE BOOL "")
+  set(FFMPEG_AVDEVICE_FOUND ${FFMPEG_libavdevice_FOUND} CACHE BOOL "")
+  set(FFMPEG_AVRESAMPLE_FOUND ${FFMPEG_libavresample_FOUND} CACHE BOOL "")
+  set(FFMPEG_SWRESAMPLE_FOUND ${FFMPEG_libswresample_FOUND} CACHE BOOL "")
 endif()
 
-pkg_check_modules (AVCODEC libavcodec REQUIRED)
-if(${AVCODEC_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVCODEC)
-    message("Found AVCODEC: ${AVCODEC_LINK_LIBRARIES}")
+if(FFMPEG_AVFORMAT_FOUND AND FFMPEG_AVCODEC_FOUND AND FFMPEG_SWSCALE_FOUND AND 
+FFMPEG_AVUTIL_FOUND AND FFMPEG_AVFILTER_FOUND AND FFMPEG_AVDEVICE_FOUND) 
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVFORMAT=1)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVCODEC=1)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_SWSCALE=1)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVUTIL=1)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVFILTER=1)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVDEVICE=1)
+else()
+  message(FATAL_ERROR "libavformat libavcodec libswscale libavutil libavfilter libavdevice is required")
 endif()
 
-pkg_check_modules (SWSCALE libswscale REQUIRED)
-if(${SWSCALE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES SWSCALE)
-    message("Found SWSCALE: ${SWSCALE_LINK_LIBRARIES}")
+if (NOT FFMPEG_AVRESAMPLE_FOUND AND NOT FFMPEG_SWRESAMPLE_FOUND)
+    message(FATAL_ERROR "libswresample or libavresample is required")
+endif() 
+
+if(FFMPEG_AVRESAMPLE_FOUND)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_AVRESAMPLE=1) 
 endif()
 
-pkg_check_modules (AVUTIL libavutil REQUIRED)
-if(${AVUTIL_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVUTIL)
-    message("Found AVUTIL: ${AVUTIL_LINK_LIBRARIES}")
+if(FFMPEG_SWRESAMPLE_FOUND)
+  list(APPEND EXTRA_DEFS -DQTAV_HAVE_SWRESAMPLE=1)
 endif()
 
-pkg_check_modules (AVFILTER libavfilter)
-if(${AVFILTER_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVFILTER)
-    message("Found AVFILTER: ${AVFILTER_LINK_LIBRARIES}")
-endif()
 
-pkg_check_modules (AVDEVICE libavdevice)
-if(${AVDEVICE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVDEVICE)
-    message("Found AVDEVICE: ${AVDEVICE_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (AVRESAMPLE libavresample)
-if(${AVRESAMPLE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVRESAMPLE)
-    message("Found AVRESAMPLE: ${AVRESAMPLE_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (SWRESAMPLE libswresample)
-if(${SWRESAMPLE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES SWRESAMPLE)
-    message("Found SWRESAMPLE: ${SWRESAMPLE_LINK_LIBRARIES}")
-endif()
-
-if (NOT AVRESAMPLE_FOUND AND NOT SWRESAMPLE_FOUND)
-    message(FATAL_ERROR "swresample or avresample is required")
-endif()
-
+  
 list(APPEND EXTRA_DEFS -DBUILD_QTAV_LIB -D__STDC_CONSTANT_MACROS)
 
-check_include_file(ass/ass.h HAVE_ASS_H)
-if(HAVE_ASS_H)
-  if(HAVE_CAPI) # dynamic load
-    if(IOS OR ANDROID OR WindowsPhone OR WindowsStore)
-    else()
-      set(HAVE_ASS 1)
-    endif()
-  endif()
-  if(NOT HAVE_ASS) # link to ass
-    check_library_exists(ass ass_library_init "" HAVE_ASS)
-    if(HAVE_ASS)
-      set(DYNAMIC_ASS 0)
-      list(APPEND EXTRA_DEFS -DCAPI_LINK_ASS)
-      list(APPEND EXTRA_LIBS ass)
-    endif()
-  endif()
-endif()
-if(HAVE_ASS)
+find_package(ASS REQUIRED)
+if(ASS_FOUND)
+  list(APPEND EXTRA_LIBS ASS::ASS)
+  list(APPEND EXTRA_DEFS -DCAPI_LINK_ASS)
   list(APPEND EXTRA_DEFS -DQTAV_HAVE_LIBASS=1)
-  list(APPEND SOURCES
-    capi/ass_api.cpp
-    subtitle/SubtitleProcessorLibASS.cpp
-  )
+  list(APPEND SOURCES capi/ass_api.cpp)
 endif()
 
-set(DYNAMIC_OPENAL ${HAVE_CAPI})
-if(APPLE)
-  set(HAVE_OPENAL 1)
-  if(NOT DYNAMIC_OPENAL)
-    list(APPEND EXTRA_LIBS "-framework OpenAL")
-  endif()
-  list(APPEND EXTRA_DEFS -DHEADER_OPENAL_PREFIX)
-else()
-  set(OLD_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
-  set(CMAKE_REQUIRED_INCLUDES ${EXTRA_INCLUDE})
-  check_include_files(AL/al.h HAVE_AL_H)
-  set(CMAKE_REQUIRED_INCLUDES ${OLD_REQUIRED_INCLUDES})
-  if(HAVE_AL_H)
-    if(HAVE_CAPI) #TODO: option(LINK_OPENAL...)
-      set(HAVE_OPENAL 1)
-      # DYNAMIC_OPENAL is set by user
-    else()
-      if(WIN32)
-        check_library_exists(OpenAL alGetError "" HAVE_OPENAL)
-      else()
-        check_library_exists(openal alGetError "" HAVE_OPENAL)
-        if(NOT HAVE_OPENAL)
-            check_library_exists(OpenAL alGetError "" HAVE_OPENAL) # blackberry
-            if(HAVE_OPENAL)
-              list(APPEND EXTRA_LIBS OpenAL)
-            endif()
-        else()
-            list(APPEND EXTRA_LIBS openal)
-        endif()
-      endif()
-      if(HAVE_OPENAL)
-        set(DYNAMIC_OPENAL 0)
-      endif()
-    endif()
-  endif()
-endif()
-if(HAVE_OPENAL AND NOT DYNAMIC_OPENAL)
-  list(APPEND EXTRA_DEFS -DCAPI_LINK_OPENAL)
-endif()
-if(HAVE_OPENAL)
-  list(APPEND SOURCES
-    capi/openal_api.cpp
-    output/audio/AudioOutputOpenAL.cpp
-    )
-endif()
 
 if (APPLE)
   set(CMAKE_CXX_SYSTEM_FRAMEWORK_SEARCH_FLAG "-F ") # original is "-iframework", lots of build errors
   set(CMAKE_C_SYSTEM_FRAMEWORK_SEARCH_FLAG "-F ")
   set(OLD_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
-  set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} avcodec)
+  set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${FFMPEG_LIBRARIES})
+  set(OLD_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
+  set(CMAKE_REQUIRED_INCLUDES ${EXTRA_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR} ${FFMPEG_INCLUDE_DIRS})
   check_c_source_compiles(
     "#include <libavcodec/videotoolbox.h>
     int main() {
@@ -167,6 +92,7 @@ if (APPLE)
         return 0;
     }" HAVE_VIDEOTOOLBOX)
   set(CMAKE_REQUIRED_LIBRARIES ${OLD_REQUIRED_LIBRARIES})
+  set(CMAKE_REQUIRED_INCLUDES ${OLD_REQUIRED_INCLUDES})
 
   if (HAVE_VIDEOTOOLBOX)
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_VIDEOTOOLBOX=1)
@@ -181,27 +107,14 @@ if (APPLE)
         )
     else()
       list(APPEND SOURCES 
-        codec/video/SurfaceInteropIOSurface.cpp
+        codec/video/SurfaceInteropIOSurface.mm
         )
     endif()
+    list(APPEND EXTRA_DEFS -DCAPI_LINK_ASS -DQTAV_HAVE_VIDEOTOOLBOX=1)
   endif()
 
   list(APPEND SOURCES output/audio/AudioOutputAudioToolbox.cpp)
   list(APPEND EXTRA_LIBS "-framework CoreFoundation" "-framework AudioToolbox" "-framework OpenGL")
-endif()
-
-set(DEP_H  OPENAL VIDEOTOOLBOX)
-foreach (D ${DEP_H})
-  if (${D})
-    ADD_DEFINITIONS(-DQTAV_HAVE_${D}=1)
-  endif()
-endforeach()
-
-if (AVRESAMPLE_FOUND)
-  list(APPEND SOURCES AudioResamplerLibav.cpp)
-endif()
-if (SWRESAMPLE_FOUND)
-  list(APPEND SOURCES AudioResamplerFF.cpp)
 endif()
 
 set(HAVE_EGL 0)
@@ -225,6 +138,9 @@ if(Qt5Gui_OPENGL_IMPLEMENTATION STREQUAL GL) # windows always set to GL
   endif()
 else()
   set(OPENGLES 1)
+  if(WIN32)
+    set(DYNAMIC_GL 1)
+  endif()
 endif()
 if(OPENGLES OR DYNAMIC_GL)
   set(HAVE_EGL 1)
@@ -249,9 +165,8 @@ list(APPEND SOURCES
     subtitle/CharsetDetector.cpp
     subtitle/PlainText.cpp
     subtitle/PlayerSubtitle.cpp
-    subtitle/Subtitle.cpp
     subtitle/SubtitleProcessor.cpp
-    subtitle/SubtitleProcessorFFmpeg.cpp
+    subtitle/Subtitle.cpp
     subtitle/SubImage.cpp
     utils/GPUMemCopy.cpp
     utils/Logger.cpp
@@ -280,6 +195,7 @@ list(APPEND SOURCES
     filter/LibAVFilter.cpp
     filter/SubtitleFilter.cpp
     filter/EncodeFilter.cpp
+    filter/VUMeterFilter.cpp
     ImageConverter.cpp
     ImageConverterFF.cpp
     Packet.cpp
@@ -311,6 +227,7 @@ list(APPEND SOURCES
     codec/video/VideoEncoderFFmpeg.cpp
     VideoThread.cpp
     VideoFrameExtractor.cpp
+    AVWrapper.cpp
     )
 
 if(HAVE_OPENGL)
@@ -357,9 +274,9 @@ if(WIN32 OR WindowsStore OR WindowsPhone)
   )
   list(APPEND EXTRA_DEFS -DQTAV_HAVE_XAUDIO2=1)
   set(OLD_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES})
-  set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} avcodec) # TODO: lib dir
+  set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} ${FFMPEG_LIBRARIES}) # TODO: lib dir
   set(OLD_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
-  set(CMAKE_REQUIRED_INCLUDES ${EXTRA_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR})
+  set(CMAKE_REQUIRED_INCLUDES ${EXTRA_INCLUDE} ${CMAKE_CURRENT_SOURCE_DIR} ${FFMPEG_INCLUDE_DIRS})
   check_cxx_source_compiles("
   #include \"directx/dxcompat.h\"
   #include <d3d11.h>
@@ -377,8 +294,6 @@ if(WIN32 OR WindowsStore OR WindowsPhone)
   set(CMAKE_REQUIRED_LIBRARIES ${OLD_REQUIRED_LIBRARIES})
   if(HAVE_D3D11)
     # https://crascit.com/2015/03/28/enabling-cxx11-in-cmake/ (global and specified target)
-    set(CMAKE_CXX_STANDARD 11)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_D3D11VA=1)
     list(APPEND SOURCES
       codec/video/VideoDecoderD3D11.cpp
@@ -388,7 +303,7 @@ if(WIN32 OR WindowsStore OR WindowsPhone)
     if(HAVE_EGL)
       list(APPEND SOURCES directx/SurfaceInteropD3D11EGL.cpp)
     endif()
-    if(HAVE_OPENGL AND NOT OPENGLES) # dynamic gl or desktop
+    if(OPENGL OR DYNAMIC_GL) # dynamic gl or desktop
       list(APPEND SOURCES directx/SurfaceInteropD3D11GL.cpp)
     endif()
   endif()
@@ -420,12 +335,28 @@ if(WIN32 OR WindowsStore OR WindowsPhone)
     )
   endif()
 endif()
-check_library_exists(portaudio Pa_Initialize "" HAVE_PORTAUDIO)
-if(HAVE_PORTAUDIO)
-  list(APPEND SOURCES output/audio/AudioOutputPortAudio.cpp)
-  list(APPEND EXTRA_DEFS -DQTAV_HAVE_PORTAUDIO=1)
-  list(APPEND EXTRA_LIBS portaudio)
+
+find_package(OpenAL CONFIG)
+if(OPENAL_FOUND)
+  list(APPEND SOURCES
+    capi/openal_api.cpp
+    output/audio/AudioOutputOpenAL.cpp
+    )
+  list(APPEND EXTRA_LIBS OpenAL::OpenAL)
+  list(APPEND EXTRA_DEFS -DCAPI_LINK_OPENAL -DHEADER_OPENAL_PREFIX -DQTAV_HAVE_OPENAL=1)
+else()
+  find_package(portaudio CONFIG)
+  if (TARGET portaudio_static OR TARGET portaudio)
+      list(APPEND SOURCES output/audio/AudioOutputPortAudio.cpp)
+      list(APPEND EXTRA_DEFS -DQTAV_HAVE_PORTAUDIO=1)
+      if (TARGET portaudio_static)
+        list(APPEND EXTRA_LIBS portaudio_static)
+      else()
+        list(APPEND EXTRA_LIBS portaudio)
+      endif()
+  endif()
 endif()
+
 check_library_exists(pulse pa_threaded_mainloop_new "" HAVE_PULSE)
 if(HAVE_PULSE)
   list(APPEND SOURCES output/audio/AudioOutputPulse.cpp)
@@ -449,7 +380,9 @@ if(HAVE_VAAPI)
   list(APPEND EXTRA_LIBS va X11)
 endif()
 
-if(NOT APPLE)
+
+find_package(CUDA)
+if(CUDA_FOUND)
   list(APPEND EXTRA_DEFS -DQTAV_HAVE_CUDA=1)
   list(APPEND EXTRA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
   list(APPEND SOURCES
@@ -483,6 +416,7 @@ list(APPEND HEADERS ${SDK_HEADERS} ${SDK_PRIVATE_HEADERS}
     utils/internal.h
     output/OutputSet.h
     ColorTransform.h
+    AVWrapper.h
     )
 
 # TODO: rc template
@@ -502,14 +436,9 @@ list(REMOVE_DUPLICATES EXTRA_LIBS)
 target_link_libraries(${MODULE} 
   LINK_PRIVATE ${EXTRA_LIBS}
   LINK_PUBLIC Qt5::Core Qt5::Gui # will add include dirs, macros etc.
+  LINK_PUBLIC ${FFMPEG_LIBRARIES} 
 )
-
-foreach(PKG_CONFIG_MODULE ${PKG_CONFIG_MODULES})
-    target_link_libraries(${MODULE} PRIVATE ${${PKG_CONFIG_MODULE}_LINK_LIBRARIES})
-    target_include_directories(${MODULE} PRIVATE ${${PKG_CONFIG_MODULE}_INCLUDE_DIRS})
-    target_compile_options(${MODULE} PRIVATE ${${PKG_CONFIG_MODULE}_CFLAGS_OTHER})
-    target_compile_definitions(${MODULE} PRIVATE -DQTAV_HAVE_${PKG_CONFIG_MODULE}=1)
-endforeach()
+target_include_directories(${MODULE} PRIVATE ${FFMPEG_INCLUDE_DIRS})
 
 set_target_properties(${MODULE} PROPERTIES
   MACOSX_RPATH ON

@@ -31,7 +31,7 @@
 #include <QAndroidJniObject>
 #endif
 #include "qtquick2applicationviewer.h"
-#include "../common/ScreenSaver.h"
+//#include "../common/ScreenSaver.h"
 #include "../common/common.h"
 
 int main(int argc, char *argv[])
@@ -171,6 +171,6 @@ qDebug() <<  "event dispatcher:" << QCoreApplication::eventDispatcher();
     QObject::connect(&Config::instance(), SIGNAL(changed()), &Config::instance(), SLOT(save()));
     QObject::connect(viewer.rootObject(), SIGNAL(requestFullScreen()), &viewer, SLOT(showFullScreen()));
     QObject::connect(viewer.rootObject(), SIGNAL(requestNormalSize()), &viewer, SLOT(showNormal()));
-    ScreenSaver::instance().disable(); //restore in dtor
+    //ScreenSaver::instance().disable(); //restore in dtor
     return app.exec();
 }

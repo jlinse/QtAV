@@ -110,7 +110,8 @@ qint64 QIODeviceIO::read(char *data, qint64 maxSize)
     DPTR_D(QIODeviceIO);
     if (!d.dev)
         return 0;
-    return d.dev->read(data, maxSize);
+    auto sz = d.dev->read(data, maxSize);
+    return sz;
 }
 
 qint64 QIODeviceIO::write(const char *data, qint64 maxSize)

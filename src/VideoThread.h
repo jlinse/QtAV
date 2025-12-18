@@ -31,6 +31,7 @@ namespace QtAV {
 class VideoCapture;
 class VideoFrame;
 class VideoThreadPrivate;
+class AVPlayer;
 class VideoThread : public AVThread
 {
     Q_OBJECT
@@ -47,6 +48,8 @@ public:
     void setSaturation(int val);
     void setEQ(int b, int c, int s);
 
+    bool decodePacket(Packet& pkt);
+
 public Q_SLOTS:
     void addCaptureTask();
     void clearRenderers();
@@ -57,6 +60,12 @@ protected:
     bool deliverVideoFrame(VideoFrame &frame);
     virtual void run();
     // wait for value msec. every usleep is a small time, then process next task and get new delay
+
+private:
+    AVPlayer * player;
+
+Q_SIGNALS:
+    void firstKeyFrameReceived();
 };
 
 

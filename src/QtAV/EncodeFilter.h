@@ -59,12 +59,8 @@ public:
     AudioEncoder* encoder() const;
     // TODO: async property
 
-    /*!
-     * \brief startTime
-     * start to encode after startTime()
-     */
-    qint64 startTime() const;
-    void setStartTime(qint64 value);
+    void resetStartTime();
+    qreal currentTimestamp() const;
 public Q_SLOTS:
     /*!
      * \brief finish
@@ -80,7 +76,6 @@ Q_SIGNALS:
      */
     void readyToEncode();
     void frameEncoded(const QtAV::Packet& packet);
-    void startTimeChanged(qint64 value);
     // internal use only
     void requestToEncode(const QtAV::AudioFrame& frame);
 protected Q_SLOTS:
@@ -120,12 +115,8 @@ public:
     VideoEncoder* encoder() const;
     // TODO: async property
 
-    /*!
-     * \brief startTime
-     * start to encode after startTime()
-     */
-    qint64 startTime() const;
-    void setStartTime(qint64 value);
+    void resetStartTime();
+    qreal currentTimestamp() const;
 public Q_SLOTS:
     /*!
      * \brief finish
@@ -141,7 +132,6 @@ Q_SIGNALS:
      */
     void readyToEncode();
     void frameEncoded(const QtAV::Packet& packet);
-    void startTimeChanged(qint64 value);
     // internal use only
     void requestToEncode(const QtAV::VideoFrame& frame);
 protected Q_SLOTS:

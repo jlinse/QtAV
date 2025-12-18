@@ -21,6 +21,7 @@
 
 #include "QtAV/Statistics.h"
 #include "utils/ring.h"
+#include <mutex>
 
 namespace QtAV {
 
@@ -118,8 +119,47 @@ Statistics::Statistics()
 {
 }
 
+ Statistics::Statistics(const Statistics &other) 
+ {
+     *this = other;
+ }
+
 Statistics::~Statistics()
 {
+}
+
+Statistics &Statistics::operator=(const Statistics &other) 
+{
+    if (this == &other)
+        return *this;
+
+    std::scoped_lock guard(other.mutex, mutex);
+
+    bandwidthRate = other.bandwidthRate;
+    videoBandwidthRate = other.videoBandwidthRate;
+    audioBandwidthRate = other.audioBandwidthRate;
+    fps = other.fps;
+    displayFPS = other.displayFPS;
+    totalFrames = other.totalFrames;
+    droppedPackets = other.droppedPackets;
+    droppedFrames = other.droppedFrames;
+    totalKeyFrames = other.totalKeyFrames;
+    realResolution = other.realResolution;
+    imageBufferSize = other.imageBufferSize;
+
+    video_only = other.video_only;
+    audio_only = other.audio_only;
+
+    video = other.video;
+    audio = other.audio;
+
+    url = other.url;
+    bit_rate = other.bit_rate;
+    format = other.format;
+    start_time = other.start_time;
+    duration = other.duration;
+    metadata = other.metadata;
+    return *this;
 }
 
 void Statistics::reset()

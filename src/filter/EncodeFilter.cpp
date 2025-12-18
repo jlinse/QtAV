@@ -34,7 +34,13 @@ namespace QtAV {
 class AudioEncodeFilterPrivate Q_DECL_FINAL : public AudioFilterPrivate
 {
 public:
-    AudioEncodeFilterPrivate() : enc(0), start_time(0), async(false), finishing(0), leftOverAudio() {}
+    AudioEncodeFilterPrivate()
+        : enc(0)
+        , start_time(std::chrono::high_resolution_clock::now())
+        , async(false)
+        , finishing(0)
+        , leftOverAudio()
+    {}
     ~AudioEncodeFilterPrivate() {
         if (enc) {
             enc->close();
@@ -43,7 +49,7 @@ public:
     }
 
     AudioEncoder* enc;
-    qint64 start_time;
+    std::chrono::high_resolution_clock::time_point start_time;
     bool async;
     QAtomicInt finishing;
     QThread enc_thread;
@@ -94,18 +100,16 @@ AudioEncoder* AudioEncodeFilter::encoder() const
     return d_func().enc;
 }
 
-qint64 AudioEncodeFilter::startTime() const
-{
-    return d_func().start_time;
-}
-
-void AudioEncodeFilter::setStartTime(qint64 value)
+void AudioEncodeFilter::resetStartTime()
 {
     DPTR_D(AudioEncodeFilter);
-    if (d.start_time == value)
-        return;
-    d.start_time = value;
-    Q_EMIT startTimeChanged(value);
+    d.start_time = std::chrono::high_resolution_clock::now();
+}
+
+qreal AudioEncodeFilter::currentTimestamp() const 
+{
+    auto span = std::chrono::high_resolution_clock::now() - d_func().start_time;
+    return (qreal) std::chrono::duration_cast<std::chrono::milliseconds>(span).count() / 1000.0;
 }
 
 void AudioEncodeFilter::finish()
@@ -129,13 +133,16 @@ void AudioEncodeFilter::process(Statistics *statistics, AudioFrame *frame)
 {
     Q_UNUSED(statistics);
     DPTR_D(AudioEncodeFilter);
+
+    AudioFrame f = frame->clone();
+    f.setTimestamp(this->currentTimestamp());
     if (!isAsync()) {
-        encode(*frame);
+        encode(f);
         return;
     }
     if (!d.enc_thread.isRunning())
         d.enc_thread.start();
-    Q_EMIT requestToEncode(*frame);
+    Q_EMIT requestToEncode(f);
 }
 
 void AudioEncodeFilter::encode(const AudioFrame& frame)
@@ -170,8 +177,7 @@ void AudioEncodeFilter::encode(const AudioFrame& frame)
         d.finishing = 0;
         return;
     }
-    if (frame.timestamp()*1000.0 < startTime())
-        return;
+
     AudioFrame f(frame);
     if (f.format() != d.enc->audioFormat())
         f = f.to(d.enc->audioFormat());
@@ -211,7 +217,12 @@ void AudioEncodeFilter::encode(const AudioFrame& frame)
 class VideoEncodeFilterPrivate Q_DECL_FINAL : public VideoFilterPrivate
 {
 public:
-    VideoEncodeFilterPrivate() : enc(0), start_time(0), async(false), finishing(0) {}
+    VideoEncodeFilterPrivate()
+        : enc(0)
+        , start_time(std::chrono::high_resolution_clock::now())
+        , async(false)
+        , finishing(0)
+    {}
     ~VideoEncodeFilterPrivate() {
         if (enc) {
             enc->close();
@@ -220,7 +231,7 @@ public:
     }
 
     VideoEncoder* enc;
-    qint64 start_time;
+    std::chrono::high_resolution_clock::time_point start_time;
     bool async;
     QAtomicInt finishing;
     QThread enc_thread;
@@ -262,6 +273,7 @@ VideoEncoder* VideoEncodeFilter::createEncoder(const QString &name)
         delete d.enc;
     }
     d.enc = VideoEncoder::create(name.toLatin1().constData());
+    d.enc->setBitRate(4000000);
     return d.enc;
 }
 
@@ -270,18 +282,16 @@ VideoEncoder* VideoEncodeFilter::encoder() const
     return d_func().enc;
 }
 
-qint64 VideoEncodeFilter::startTime() const
-{
-    return d_func().start_time;
-}
-
-void VideoEncodeFilter::setStartTime(qint64 value)
+void VideoEncodeFilter::resetStartTime()
 {
     DPTR_D(VideoEncodeFilter);
-    if (d.start_time == value)
-        return;
-    d.start_time = value;
-    Q_EMIT startTimeChanged(value);
+    d.start_time = std::chrono::high_resolution_clock::now();
+}
+
+qreal VideoEncodeFilter::currentTimestamp() const 
+{
+    auto span = std::chrono::high_resolution_clock::now() - d_func().start_time;
+    return (qreal) std::chrono::duration_cast<std::chrono::milliseconds>(span).count() / 1000.0;
 }
 
 void VideoEncodeFilter::finish()
@@ -305,13 +315,16 @@ void VideoEncodeFilter::process(Statistics *statistics, VideoFrame *frame)
 {
     Q_UNUSED(statistics);
     DPTR_D(VideoEncodeFilter);
+
+    VideoFrame f = frame->clone();
+    f.setTimestamp(this->currentTimestamp());
     if (!isAsync()) {
-        encode(*frame);
+        encode(f);
         return;
     }
     if (!d.enc_thread.isRunning())
         d.enc_thread.start();
-    requestToEncode(*frame);
+    requestToEncode(f);
 }
 
 void VideoEncodeFilter::encode(const VideoFrame& frame)
@@ -343,8 +356,7 @@ void VideoEncodeFilter::encode(const VideoFrame& frame)
         d.finishing = 0;
         return;
     }
-    if (frame.timestamp()*1000.0 < startTime())
-        return;
+
     // TODO: async
     VideoFrame f(frame);
     if (f.pixelFormat() != d.enc->pixelFormat() || d.enc->width() != f.width() || d.enc->height() != f.height())

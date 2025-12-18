@@ -24,6 +24,7 @@
 #include <QWidget>
 #include <QUrl>
 
+
 QT_BEGIN_NAMESPACE
 class QWidgetAction;
 class QToolButton;
@@ -40,6 +41,8 @@ class SubtitleFilter;
 class VideoPreviewWidget;
 class DynamicShaderObject;
 class GLSLFilter;
+class VUMeterFilter;
+class AVTranscoder;
 }
 QT_BEGIN_NAMESPACE
 class QMenu;
@@ -59,6 +62,7 @@ class StatisticsView;
 class OSDFilter;
 class AVFilterSubtitle;
 class Preview;
+class PowerManagement;
 class MainWindow : public QWidget
 {
     Q_OBJECT
@@ -144,7 +148,6 @@ private slots:
     void toggleSubtitleAutoLoad(bool value);
     void openSubtitle();
     void setSubtitleCharset(const QString& charSet);
-    void setSubtitleEngine(const QString& value);
 
     void changeClockType(QAction* action);
     void syncVolumeUi(qreal value);
@@ -179,7 +182,7 @@ private:
     QToolButton *mpPlayPauseBtn;
     QToolButton *mpStopBtn, *mpForwardBtn, *mpBackwardBtn;
     QToolButton *mpOpenBtn;
-    QToolButton *mpInfoBtn, *mpMenuBtn, *mpSetupBtn, *mpCaptureBtn;
+    QToolButton *mpInfoBtn, *mpMenuBtn, *mpSetupBtn, *mpCaptureBtn,*mpVedioRecordBtn;
     QMenu *mpMenu;
     QAction *mpVOAction, *mpARAction; //remove mpVOAction if vo.id() is supported
     QAction *mpRepeatEnableAction;
@@ -200,7 +203,6 @@ private:
     QString mFile;
     QString mTitle;
 
-    QLabel *mpPreview;
 
     DecoderConfigPage *mpDecoderConfigPage;
     VideoEQConfigPage *mpVideoEQ;
@@ -215,6 +217,9 @@ private:
     QtAV::VideoPreviewWidget *m_preview;
     QtAV::DynamicShaderObject *m_shader;
     QtAV::GLSLFilter *m_glsl;
+
+    PowerManagement* mpPowerManagement;
+    QtAV::AVTranscoder *mpTranscoder;
 };
 
 

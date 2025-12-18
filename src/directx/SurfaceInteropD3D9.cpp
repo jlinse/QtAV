@@ -63,9 +63,9 @@ bool InteropResource::isSupported(InteropType type)
     return false;
 }
 
-extern InteropResource* CreateInteropEGL(IDirect3DDevice9 *dev);
-extern InteropResource* CreateInteropGL(IDirect3DDevice9 *dev);
-InteropResource* InteropResource::create(IDirect3DDevice9 *dev, InteropType type)
+extern InteropResourcePtr CreateInteropEGL(IDirect3DDevice9 *dev);
+extern InteropResourcePtr CreateInteropGL(IDirect3DDevice9 *dev);
+InteropResourcePtr InteropResource::create(IDirect3DDevice9 *dev, InteropType type)
 {
     Q_UNUSED(dev);
     if (type == InteropAuto || type == InteropEGL) {

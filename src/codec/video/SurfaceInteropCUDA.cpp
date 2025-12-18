@@ -301,7 +301,7 @@ bool EGLInteropResource::ensureD3DDevice()
     }
     if (!device9)
         return false;
-    qDebug() << QString().sprintf("CUDA.D3D9 (%.*s, vendor %lu, device %lu, revision %lu)",
+    qDebug() << QString::asprintf("CUDA.D3D9 (%.*s, vendor %lu, device %lu, revision %lu)",
                                     sizeof(ai9.Description), ai9.Description,
                                     ai9.VendorId, ai9.DeviceId, ai9.Revision);
 

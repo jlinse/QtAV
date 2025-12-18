@@ -121,6 +121,7 @@ bool PacketBuffer::checkFull() const
 
 void PacketBuffer::onPut(const Packet &p)
 {
+	std::unique_lock<std::mutex> lck(m_mtx);
     if (m_mode == BufferTime) {
         m_value1 = qint64(p.pts*1000.0); // FIXME: what if no pts
         m_value0 = qint64(queue[0].pts*1000.0); // must compute here because it is reset to 0 if take from empty
@@ -151,6 +152,7 @@ void PacketBuffer::onPut(const Packet &p)
 
 void PacketBuffer::onTake(const Packet &p)
 {
+	std::unique_lock<std::mutex> lck(m_mtx);
     if (checkEmpty()) {
         m_buffering = true;
     }
@@ -173,6 +175,7 @@ void PacketBuffer::onTake(const Packet &p)
 
 qreal PacketBuffer::calc_speed(bool use_bytes) const
 {
+    std::unique_lock<std::mutex> lck(m_mtx);
     if (m_history.empty())
         return 0;
     const qreal dt = (double)QDateTime::currentMSecsSinceEpoch()/1000.0 - m_history.front().t/1000.0;
