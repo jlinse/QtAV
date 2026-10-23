@@ -284,7 +284,7 @@ void set_opengl_backend(const QString& glopt, const QString &appname)
         gl = QLatin1String("es_");
         gl.append(Config::instance().getANGLEPlatform().toLower());
     }
-#if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0) && QT_VERSION < QT_VERSION_CHECK(6, 0, 0) // Qt6: no ANGLE and no AA_Use*OpenGL, see QQuickWindow::setGraphicsApi
     if (gl.startsWith(QLatin1String("es"))) {
         qApp->setAttribute(Qt::AA_UseOpenGLES);
 #ifdef QT_OPENGL_DYNAMIC

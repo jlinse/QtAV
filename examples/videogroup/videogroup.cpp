@@ -20,7 +20,8 @@
 
 #include "videogroup.h"
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QEvent>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -28,7 +29,7 @@
 #include <QtAV/AudioOutput.h>
 #include <QtAVWidgets>
 #if QT_VERSION < QT_VERSION_CHECK(6,0,0)
-#define DESKTOP_RECT() qApp->desktop()->rect()
+#define DESKTOP_RECT() QRect(QPoint(0, 0), QGuiApplication::primaryScreen()->size())
 #else
 #define DESKTOP_RECT() qApp->primaryScreen()->availableGeometry()
 #endif
@@ -122,7 +123,7 @@ void VideoGroup::setSingleWindow(bool s)
         QGridLayout *layout = new QGridLayout;
         layout->setSizeConstraint(QLayout::SetMaximumSize);
         layout->setSpacing(1);
-        layout->setMargin(0);
+        layout->setContentsMargins(0, 0, 0, 0);
         layout->setContentsMargins(0, 0, 0, 0);
         view->setLayout(layout);
 
@@ -213,7 +214,11 @@ void VideoGroup::addRenderer()
 {
     VideoRendererId v = VideoRendererId_Widget;
     if (vid == QLatin1String("gl"))
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) // no QGLWidget in Qt6
+        v = VideoRendererId_OpenGLWidget;
+#else
         v = VideoRendererId_GLWidget2;
+#endif
     else if (vid == QLatin1String("d2d"))
         v = VideoRendererId_Direct2D;
     else if (vid == QLatin1String("gdi"))

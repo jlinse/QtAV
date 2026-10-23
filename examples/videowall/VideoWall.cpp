@@ -20,7 +20,8 @@
 
 #include "VideoWall.h"
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QEvent>
 #include <QFileDialog>
 #include <QGridLayout>
@@ -46,7 +47,7 @@ VideoWall::VideoWall(QObject *parent) :
     view = new QWidget;
     if (view) {
         qDebug("WA_OpaquePaintEvent=%d", view->testAttribute(Qt::WA_OpaquePaintEvent));
-        view->resize(qApp->desktop()->size());
+        view->resize(QGuiApplication::primaryScreen()->size());
         view->move(QPoint(0, 0));
         view->show();
     }
@@ -117,20 +118,24 @@ void VideoWall::show()
     }
     qDebug("show wall: %d x %d", r, c);
 
-    int w = view ? view->frameGeometry().width()/c : qApp->desktop()->width()/c;
-    int h = view ? view->frameGeometry().height()/r : qApp->desktop()->height()/r;
+    int w = view ? view->frameGeometry().width()/c : QGuiApplication::primaryScreen()->size().width()/c;
+    int h = view ? view->frameGeometry().height()/r : QGuiApplication::primaryScreen()->size().height()/r;
     if (view) {
         QGridLayout *layout = new QGridLayout;
         layout->setSizeConstraint(QLayout::SetMaximumSize);
         layout->setSpacing(1);
-        layout->setMargin(0);
+        layout->setContentsMargins(0, 0, 0, 0);
         layout->setContentsMargins(0, 0, 0, 0);
         view->setLayout(layout);
     }
 
     VideoRendererId v = VideoRendererId_Widget;
     if (vid == QLatin1String("gl"))
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) // no QGLWidget in Qt6
+        v = VideoRendererId_OpenGLWidget;
+#else
         v = VideoRendererId_GLWidget2;
+#endif
     else if (vid == QLatin1String("opengl"))
         v = VideoRendererId_OpenGLWidget;
     else if (vid == QLatin1String("d2d"))

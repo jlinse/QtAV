@@ -54,7 +54,11 @@ protected:
     QRectF mapSubRect(const QRect& r, qreal w, qreal h);
     virtual QSGNode *updatePaintNode(QSGNode *node, UpdatePaintNodeData *data);
     virtual bool event(QEvent *e);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    virtual void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry);
+#else
     virtual void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry);
+#endif
 private:
     QuickSubtitle *m_sub;
     QSGTexture* m_texture;

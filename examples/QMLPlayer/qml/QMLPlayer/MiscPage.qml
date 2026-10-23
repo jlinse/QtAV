@@ -234,9 +234,9 @@ Page {
     }
     Connections {
         target: PlayerConfig
-        onLogLevelChanged: logMenu.updateUi()
-        onLanguageChanged: langMenu.updateUi()
-        onOpenGLTypeChanged: {
+        function onLogLevelChanged() { logMenu.updateUi() }
+        function onLanguageChanged() { langMenu.updateUi() }
+        function onOpenGLTypeChanged() {
             if (glSet.visible)
                 glMenu.updateUi()
         }

@@ -29,10 +29,14 @@
 #include <QTimeEdit>
 #include <QLabel>
 #include <QApplication>
-#include <QDesktopWidget>
+#include <QGuiApplication>
+#include <QActionGroup>
+#include <QScreen>
 #include <QDesktopServices>
 #include <QtCore/QFileInfo>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QtCore/QTextCodec>
+#endif
 #include <QtCore/QTextStream>
 #include <QtCore/QUrl>
 #include <QGraphicsOpacityEffect>
@@ -440,9 +444,11 @@ void MainWindow::setupUi()
     subMenu->addAction(pWA); //must add action after the widget action is ready. is it a Qt bug?
     box->addItem(tr("Auto detect"), QString::fromLatin1("AutoDetect"));
     box->addItem(tr("System"), QString::fromLatin1("System"));
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0) // no QTextCodec in Qt6, and Subtitle ignores the codec there
     foreach (const QByteArray& cs, QTextCodec::availableCodecs()) {
         box->addItem(QString::fromLatin1(cs), QString::fromLatin1(cs));
     }
+#endif
     connect(box, SIGNAL(activated(QString)), SLOT(setSubtitleCharset(QString)));
     mpSubtitle->setCodec(box->itemData(box->currentIndex()).toByteArray());
     box->setToolTip(tr("Auto detect requires libchardet"));
@@ -1075,7 +1081,11 @@ void MainWindow::wheelEvent(QWheelEvent *e)
         return;
     }
 #endif //WHEEL_SPEED
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QPointF p = mpRenderer->widget()->mapFrom(this, e->position().toPoint());
+#else
     QPointF p = mpRenderer->widget()->mapFrom(this, e->pos());
+#endif
     QPointF fp = mpRenderer->mapToFrame(p);
     //qDebug() <<  p << fp;
     if (fp.x() < 0)
@@ -1132,7 +1142,11 @@ void MainWindow::help()
         return;
     }
     QTextStream ts(&f);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    ts.setEncoding(QStringConverter::Utf8);
+#else
     ts.setCodec("UTF-8");
+#endif
     QString text = ts.readAll();
     QMessageBox::information(0, tr("Help"), text);
 }
@@ -1284,7 +1298,7 @@ void MainWindow::onTVMenuClick()
     static TVView *tvv = new TVView;
     tvv->show();
     connect(tvv, SIGNAL(clicked(QString,QString)), SLOT(onPlayListClick(QString,QString)));
-    tvv->setMaximumHeight(qApp->desktop()->height());
+    tvv->setMaximumHeight(QGuiApplication::primaryScreen()->size().height());
     tvv->setMinimumHeight(tvv->width()*2);
 }
 

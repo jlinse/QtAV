@@ -22,6 +22,7 @@
 #ifndef QTAV_QML_AVPLAYER_H
 #define QTAV_QML_AVPLAYER_H
 
+#include <QmlAV/Export.h>
 #include <QtCore/QObject>
 #include <QtCore/QStringList> //5.0
 #include <QtQml/QQmlParserStatus>
@@ -358,12 +359,12 @@ private Q_SLOTS:
 
 private:
     static void af_append(QQmlListProperty<QuickAudioFilter> *property, QuickAudioFilter *value);
-    static int af_count(QQmlListProperty<QuickAudioFilter> *property);
-    static QuickAudioFilter *af_at(QQmlListProperty<QuickAudioFilter> *property, int index);
+    static QMLAV_LIST_INDEX af_count(QQmlListProperty<QuickAudioFilter> *property);
+    static QuickAudioFilter *af_at(QQmlListProperty<QuickAudioFilter> *property, QMLAV_LIST_INDEX index);
     static void af_clear(QQmlListProperty<QuickAudioFilter> *property);
     static void vf_append(QQmlListProperty<QuickVideoFilter> *property, QuickVideoFilter *value);
-    static int vf_count(QQmlListProperty<QuickVideoFilter> *property);
-    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, int index);
+    static QMLAV_LIST_INDEX vf_count(QQmlListProperty<QuickVideoFilter> *property);
+    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, QMLAV_LIST_INDEX index);
     static void vf_clear(QQmlListProperty<QuickVideoFilter> *property);
 
     Q_DISABLE_COPY(QmlAVPlayer)

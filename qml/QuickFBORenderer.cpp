@@ -345,13 +345,13 @@ void QuickFBORenderer::vf_append(QQmlListProperty<QuickVideoFilter> *property, Q
     self->installFilter(value);
 }
 
-int QuickFBORenderer::vf_count(QQmlListProperty<QuickVideoFilter> *property)
+QMLAV_LIST_INDEX QuickFBORenderer::vf_count(QQmlListProperty<QuickVideoFilter> *property)
 {
     QuickFBORenderer* self = static_cast<QuickFBORenderer*>(property->object);
     return self->d_func().filters.size();
 }
 
-QuickVideoFilter* QuickFBORenderer::vf_at(QQmlListProperty<QuickVideoFilter> *property, int index)
+QuickVideoFilter* QuickFBORenderer::vf_at(QQmlListProperty<QuickVideoFilter> *property, QMLAV_LIST_INDEX index)
 {
     QuickFBORenderer* self = static_cast<QuickFBORenderer*>(property->object);
     return self->d_func().filters.at(index);

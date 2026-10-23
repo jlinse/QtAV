@@ -108,7 +108,7 @@ public:
 
     QLibrary cuda_dll;
     QLibrary cuvid_dll;
-    typedef struct {
+    typedef struct api_s {
         typedef CUresult CUDAAPI tcuGetErrorName(CUresult error, const char **pStr);
         tcuGetErrorName* cuGetErrorName;
         typedef CUresult CUDAAPI tcuGetErrorString(CUresult error, const char **pStr);

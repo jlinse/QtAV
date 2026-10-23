@@ -30,53 +30,46 @@ if(EXISTS ${QTAV_SOURCE_DIR}/contrib/capi/capi.h)
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_CAPI=1)
 endif()
 
-pkg_check_modules (AVFORMAT libavformat REQUIRED)
-if(${AVFORMAT_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVFORMAT)
-    message("Found AVFORMAT: ${AVFORMAT_LINK_LIBRARIES}")
-endif()
+# FFmpeg: use pkg-config when it knows the library, otherwise look in FFMPEG_DIR
+# (or in the AV*_INCLUDE_DIRS / AV*_LIBRARIES cache variables) so it works on Windows without pkg-config.
+set(FFMPEG_DIR "" CACHE PATH "FFmpeg install dir containing include/ and lib/ (used when pkg-config has no .pc files)")
+function(qtav_find_ffmpeg VAR PC_NAME HEADER LIB_NAME)
+  set(REQUIRED_ARG ${ARGV4})
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(${VAR} QUIET ${PC_NAME})
+  endif()
+  if(NOT ${VAR}_FOUND)
+    find_path(${VAR}_HEADER_DIR ${HEADER} HINTS ${${VAR}_INCLUDE_DIRS} ${FFMPEG_DIR}/include)
+    find_library(${VAR}_LIBRARY NAMES ${LIB_NAME} HINTS ${FFMPEG_DIR}/lib)
+    if(${VAR}_LIBRARY STREQUAL "${VAR}_LIBRARY-NOTFOUND" AND ${VAR}_LIBRARIES)
+      set(${VAR}_LIBRARY ${${VAR}_LIBRARIES})
+    endif()
+    if(${VAR}_HEADER_DIR AND ${VAR}_LIBRARY)
+      set(${VAR}_FOUND 1)
+      set(${VAR}_INCLUDE_DIRS ${${VAR}_HEADER_DIR})
+      set(${VAR}_LINK_LIBRARIES ${${VAR}_LIBRARY})
+      set(${VAR}_CFLAGS_OTHER "")
+    endif()
+  endif()
+  if(${VAR}_FOUND)
+    message(STATUS "Found ${VAR}: ${${VAR}_LINK_LIBRARIES}")
+    foreach(V FOUND INCLUDE_DIRS LINK_LIBRARIES CFLAGS_OTHER)
+      set(${VAR}_${V} ${${VAR}_${V}} PARENT_SCOPE)
+    endforeach()
+    set(PKG_CONFIG_MODULES ${PKG_CONFIG_MODULES} ${VAR} PARENT_SCOPE)
+  elseif(REQUIRED_ARG)
+    message(FATAL_ERROR "${PC_NAME} not found. Set FFMPEG_DIR to the FFmpeg dir containing include/ and lib/")
+  endif()
+endfunction()
 
-pkg_check_modules (AVCODEC libavcodec REQUIRED)
-if(${AVCODEC_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVCODEC)
-    message("Found AVCODEC: ${AVCODEC_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (SWSCALE libswscale REQUIRED)
-if(${SWSCALE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES SWSCALE)
-    message("Found SWSCALE: ${SWSCALE_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (AVUTIL libavutil REQUIRED)
-if(${AVUTIL_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVUTIL)
-    message("Found AVUTIL: ${AVUTIL_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (AVFILTER libavfilter)
-if(${AVFILTER_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVFILTER)
-    message("Found AVFILTER: ${AVFILTER_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (AVDEVICE libavdevice)
-if(${AVDEVICE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVDEVICE)
-    message("Found AVDEVICE: ${AVDEVICE_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (AVRESAMPLE libavresample)
-if(${AVRESAMPLE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES AVRESAMPLE)
-    message("Found AVRESAMPLE: ${AVRESAMPLE_LINK_LIBRARIES}")
-endif()
-
-pkg_check_modules (SWRESAMPLE libswresample)
-if(${SWRESAMPLE_FOUND})
-    list(APPEND PKG_CONFIG_MODULES SWRESAMPLE)
-    message("Found SWRESAMPLE: ${SWRESAMPLE_LINK_LIBRARIES}")
-endif()
+qtav_find_ffmpeg(AVFORMAT libavformat libavformat/avformat.h avformat REQUIRED)
+qtav_find_ffmpeg(AVCODEC libavcodec libavcodec/avcodec.h avcodec REQUIRED)
+qtav_find_ffmpeg(SWSCALE libswscale libswscale/swscale.h swscale REQUIRED)
+qtav_find_ffmpeg(AVUTIL libavutil libavutil/avutil.h avutil REQUIRED)
+qtav_find_ffmpeg(AVFILTER libavfilter libavfilter/avfilter.h avfilter)
+qtav_find_ffmpeg(AVDEVICE libavdevice libavdevice/avdevice.h avdevice)
+qtav_find_ffmpeg(AVRESAMPLE libavresample libavresample/avresample.h avresample)
+qtav_find_ffmpeg(SWRESAMPLE libswresample libswresample/swresample.h swresample)
 
 if (NOT AVRESAMPLE_FOUND AND NOT SWRESAMPLE_FOUND)
     message(FATAL_ERROR "swresample or avresample is required")
@@ -209,9 +202,27 @@ set(DYNAMIC_GL 0)
 set(OPENGL 0)     #desktop opengl only
 set(OPENGLES 0)   #glesv2 only
 set(HAVE_OPENGL 1) # qt with opengl enabled. 1 of DYNAMIC_GL, OPENGL and OPENGLES is true
-#get_target_property(QtGui_location Qt5::Gui LOCATION) #dll path
 
-if(Qt5Gui_OPENGL_IMPLEMENTATION STREQUAL GL) # windows always set to GL
+if(QT_VERSION_MAJOR EQUAL 6)
+  # Qt6 reports the GL flavour through features instead of Qt5Gui_OPENGL_IMPLEMENTATION
+  if(QT_FEATURE_dynamicgl)
+    set(DYNAMIC_GL 1)
+  elseif(QT_FEATURE_opengles2)
+    set(OPENGLES 1)
+  elseif(QT_FEATURE_opengl)
+    set(OPENGL 1)
+  endif()
+  if(QT_FEATURE_egl)
+    # Qt6 has no ANGLE, the EGL headers must come from somewhere else
+    set(OLD_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES})
+    set(CMAKE_REQUIRED_INCLUDES ${EXTRA_INCLUDE})
+    check_include_file(EGL/egl.h HAVE_EGL_H)
+    set(CMAKE_REQUIRED_INCLUDES ${OLD_REQUIRED_INCLUDES})
+    if(HAVE_EGL_H)
+      set(HAVE_EGL 1)
+    endif()
+  endif()
+elseif(Qt5Gui_OPENGL_IMPLEMENTATION STREQUAL GL) # windows always set to GL
   if(EXISTS ${QT_INSTALL_HEADERS}/QtANGLE)
     set(DYNAMIC_GL 1) # assume Qt5Gui_OPENGL_IMPLEMENTATION is not GL if build with ANGLE only
     if(NOT DEFINED Qt5Gui_EGL_INCLUDE_DIRS)
@@ -226,7 +237,7 @@ if(Qt5Gui_OPENGL_IMPLEMENTATION STREQUAL GL) # windows always set to GL
 else()
   set(OPENGLES 1)
 endif()
-if(OPENGLES OR DYNAMIC_GL)
+if(QT_VERSION_MAJOR EQUAL 5 AND (OPENGLES OR DYNAMIC_GL))
   set(HAVE_EGL 1)
 endif()
 if(NOT OPENGL AND NOT OPENGLES AND NOT DYNAMIC_GL)
@@ -261,7 +272,7 @@ list(APPEND SOURCES
     AudioFormat.cpp
     AudioFrame.cpp
     AudioResampler.cpp
-    AudioResamplerTemplate.cpp
+    # AudioResamplerTemplate.cpp is #included by AudioResamplerFF/Libav.cpp
     codec/audio/AudioDecoder.cpp
     codec/audio/AudioDecoderFFmpeg.cpp
     codec/audio/AudioEncoder.cpp
@@ -320,7 +331,7 @@ if(HAVE_OPENGL)
     filter/GLSLFilter.cpp
     output/video/OpenGLRendererBase.cpp
   )
-  if(NOT Qt5Gui_VERSION VERSION_LESS 5.4.0)
+  if(NOT Qt${QT_VERSION_MAJOR}Gui_VERSION VERSION_LESS 5.4.0)
     list(APPEND SDK_HEADERS QtAV/OpenGLWindowRenderer.h)
     list(APPEND SOURCES output/video/OpenGLWindowRenderer.cpp)
   endif()
@@ -377,8 +388,6 @@ if(WIN32 OR WindowsStore OR WindowsPhone)
   set(CMAKE_REQUIRED_LIBRARIES ${OLD_REQUIRED_LIBRARIES})
   if(HAVE_D3D11)
     # https://crascit.com/2015/03/28/enabling-cxx11-in-cmake/ (global and specified target)
-    set(CMAKE_CXX_STANDARD 11)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_D3D11VA=1)
     list(APPEND SOURCES
       codec/video/VideoDecoderD3D11.cpp
@@ -488,7 +497,7 @@ list(APPEND HEADERS ${SDK_HEADERS} ${SDK_PRIVATE_HEADERS}
 # TODO: rc template
 SET(RESOURCES ${MODULE}.qrc shaders/shaders.qrc)
 SOURCE_GROUP("Resources" FILES ${RESOURCES})
-QT5_ADD_RESOURCES(RESOURCES_SOURCES ${RESOURCES})
+qtav_add_resources(RESOURCES_SOURCES ${RESOURCES})
 set_source_files_properties(${RESOURCES_SOURCES} PROPERTIES GENERATED ON)
 if(WIN32)
   set(RC_FILE ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}.rc)
@@ -497,12 +506,30 @@ endif()
 # add HEADERS for moc
 add_library(${MODULE} SHARED ${SOURCES} ${RESOURCES_SOURCES} ${HEADERS} ${RC_FILE})
 
+# Windows: QtAV.dll needs the FFmpeg dlls at runtime. Copy them next to the binaries so running from an IDE
+# (VS Code, Qt Creator) works without having FFmpeg in PATH. QmlAV.dll in bin/QtAV finds them via the exe dir.
+if(WIN32 AND FFMPEG_DIR AND EXISTS ${FFMPEG_DIR}/bin)
+  file(GLOB FFMPEG_DLLS ${FFMPEG_DIR}/bin/*.dll)
+  if(FFMPEG_DLLS)
+    add_custom_target(qtav_deploy_ffmpeg ALL
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FFMPEG_DLLS} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+      COMMENT "Copying FFmpeg dlls to ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+    )
+  endif()
+endif()
+
 list(REMOVE_DUPLICATES EXTRA_LIBS)
 # qt5_use_modules(since 2.8.9) is deprecated since cmake 2.8.11
 target_link_libraries(${MODULE} 
   LINK_PRIVATE ${EXTRA_LIBS}
-  LINK_PUBLIC Qt5::Core Qt5::Gui # will add include dirs, macros etc.
+  LINK_PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui # will add include dirs, macros etc.
 )
+if(QT_VERSION_MAJOR EQUAL 6 AND HAVE_OPENGL)
+  # QOpenGLBuffer, QOpenGLShaderProgram, QOpenGLTexture... moved from Gui to the OpenGL module in Qt6
+  find_package(Qt6 REQUIRED COMPONENTS OpenGL)
+  target_link_libraries(${MODULE} LINK_PUBLIC Qt6::OpenGL)
+endif()
 
 foreach(PKG_CONFIG_MODULE ${PKG_CONFIG_MODULES})
     target_link_libraries(${MODULE} PRIVATE ${${PKG_CONFIG_MODULE}_LINK_LIBRARIES})

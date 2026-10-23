@@ -98,7 +98,11 @@ public:
         VideoDecoderD3DPrivate()
     {
         // d3d9+gl interop may not work on optimus moble platforms, 0-copy is enabled only for egl interop
-        if (d3d9::InteropResource::isSupported(d3d9::InteropEGL) && QSysInfo::windowsVersion() >= QSysInfo::WV_VISTA)
+        if (d3d9::InteropResource::isSupported(d3d9::InteropEGL)
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+                && QSysInfo::windowsVersion() >= QSysInfo::WV_VISTA
+#endif
+                )
             copy_mode = VideoDecoderFFmpegHW::ZeroCopy;
 
         hd3d9_dll = 0;
@@ -269,7 +273,7 @@ bool VideoDecoderDXVAPrivate::createDevice()
         return false;
     }
     vendor = QString::fromLatin1(DXHelper::vendorName(d3dai.VendorId));
-    description = QString().sprintf("DXVA2 (%.*s, vendor %lu(%s), device %lu, revision %lu)",
+    description = QString::asprintf("DXVA2 (%.*s, vendor %lu(%s), device %lu, revision %lu)",
                                     sizeof(d3dai.Description), d3dai.Description,
                                     d3dai.VendorId, qPrintable(vendor), d3dai.DeviceId, d3dai.Revision);
 

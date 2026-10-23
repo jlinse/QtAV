@@ -63,7 +63,11 @@ int main(int argc, char *argv[])
     VideoRenderer *renderer = 0;
     bool textfilter = false;
     if (vo == QLatin1String("gl")) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) // no QGLWidget in Qt6
+        renderer = VideoRenderer::create(VideoRendererId_OpenGLWidget);
+#else
         renderer = VideoRenderer::create(VideoRendererId_GLWidget2);
+#endif
         textfilter = true;
     } else if (vo == QLatin1String("d2d")) {
         renderer = VideoRenderer::create(VideoRendererId_Direct2D);

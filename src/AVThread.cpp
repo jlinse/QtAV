@@ -93,14 +93,19 @@ bool AVThread::installFilter(Filter *filter, int index, bool lock)
     // already installed at desired position
     if (p == old)
         return true;
+    // move: remove the old entry (not the one at the new position), Qt6 asserts on out of range removeAt
     if (lock) {
         QMutexLocker locker(&d.mutex);
-        if (p >= 0)
-            d.filters.removeAt(p);
+        if (old >= 0) {
+            d.filters.removeAt(old);
+            p = qMin(p, d.filters.size());
+        }
         d.filters.insert(p, filter);
     } else {
-        if (p >= 0)
-            d.filters.removeAt(p);
+        if (old >= 0) {
+            d.filters.removeAt(old);
+            p = qMin(p, d.filters.size());
+        }
         d.filters.insert(p, filter);
     }
     return true;

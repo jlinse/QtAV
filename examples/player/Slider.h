@@ -39,7 +39,11 @@ signals:
     void onHover(int pos, int value);
 
 protected:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    virtual void enterEvent(QEnterEvent* event);
+#else
     virtual void enterEvent(QEvent* event);
+#endif
     virtual void leaveEvent(QEvent *e);
     virtual void mouseMoveEvent(QMouseEvent* event);
     virtual void mousePressEvent(QMouseEvent *event);

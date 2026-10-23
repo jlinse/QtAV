@@ -120,7 +120,14 @@ QString QOption::help() const
 
 bool QOption::operator <(const QOption& o) const
 {
-    return mType < o.type() || mShortName < o.shortName() || mLongName < o.longName() || mDescription < o.description();
+    // lexicographic: ORing the fields is not a strict weak ordering (asserts in debug STL)
+    if (mType != o.type())
+        return mType < o.type();
+    if (mShortName != o.shortName())
+        return mShortName < o.shortName();
+    if (mLongName != o.longName())
+        return mLongName < o.longName();
+    return mDescription < o.description();
 }
 
 static QString get_short(const QString& name)

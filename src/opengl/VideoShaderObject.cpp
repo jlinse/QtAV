@@ -120,6 +120,11 @@ public:
     QString header;
     QString sampleFunc;
     QString pp;
+    // userShaderHeader() etc. return const char*, which must stay valid after they return.
+    // A temporary toUtf8() would be freed immediately (garbage in the shader with Qt6)
+    QByteArray header_u8;
+    QByteArray sampleFunc_u8;
+    QByteArray pp_u8;
 };
 
 DynamicShaderObject::DynamicShaderObject(QObject *parent)
@@ -141,6 +146,7 @@ void DynamicShaderObject::setHeader(const QString &text)
     if (d.header == text)
         return;
     d.header = text;
+    d.header_u8 = text.toUtf8();
     Q_EMIT headerChanged();
     rebuildLater();
 }
@@ -157,6 +163,7 @@ void DynamicShaderObject::setSample(const QString &text)
     if (d.sampleFunc == text)
         return;
     d.sampleFunc = text;
+    d.sampleFunc_u8 = text.toUtf8();
     Q_EMIT sampleChanged();
     rebuildLater();
 }
@@ -172,6 +179,7 @@ void DynamicShaderObject::setPostProcess(const QString &text)
     if (d.pp == text)
         return;
     d.pp = text;
+    d.pp_u8 = text.toUtf8();
     Q_EMIT postProcessChanged();
     rebuildLater();
 }
@@ -182,21 +190,21 @@ const char* DynamicShaderObject::userShaderHeader(QOpenGLShader::ShaderType st) 
         return 0;
     if (d_func().header.isEmpty())
         return 0;
-    return d_func().header.toUtf8().constData();
+    return d_func().header_u8.constData();
 }
 
 const char* DynamicShaderObject::userSample() const
 {
     if (d_func().sampleFunc.isEmpty())
         return 0;
-    return d_func().sampleFunc.toUtf8().constData();
+    return d_func().sampleFunc_u8.constData();
 }
 
 const char* DynamicShaderObject::userPostProcess() const
 {
     if (d_func().pp.isEmpty())
         return 0;
-    return d_func().pp.toUtf8().constData();
+    return d_func().pp_u8.constData();
 }
 
 } //namespace QtAV

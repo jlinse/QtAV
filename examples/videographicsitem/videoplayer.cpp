@@ -21,8 +21,12 @@
 #include "videoplayer.h"
 #include <QGraphicsView>
 
-#if !defined(QT_NO_OPENGL) && QT_VERSION < QT_VERSION_CHECK(6,0,0)
+#if !defined(QT_NO_OPENGL)
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
 #include <QtOpenGL/QGLWidget>
+#else
+#include <QOpenGLWidget>
+#endif
 #endif
 
 #include <QCheckBox>
@@ -101,7 +105,11 @@ void VideoPlayer::setOpenGL(bool o)
         return;
     }
 #ifndef QT_NO_OPENGL
+#if QT_VERSION < QT_VERSION_CHECK(6,0,0)
     QGLWidget *glw = new QGLWidget();//QGLFormat(QGL::SampleBuffers));
+#else
+    QOpenGLWidget *glw = new QOpenGLWidget();
+#endif
     glw->setAutoFillBackground(false);
     view->setViewport(glw);
     view->setCacheMode(QGraphicsView::CacheNone);

@@ -26,7 +26,16 @@
 #include <QtQml/QQmlEngine>
 #include <QtQml/QQmlContext>
 #include <QtGui/QScreen>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QtQuick/QQuickWindow>
+#include <QtQuick/QSGRendererInterface>
+#endif
+#include <QtCore/qglobal.h>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QInputDevice>
+#else
 #include <QTouchDevice>
+#endif
 #ifdef Q_OS_ANDROID
 #include <QAndroidJniObject>
 #endif
@@ -46,6 +55,12 @@ int main(int argc, char *argv[])
     Config::setName(QString::fromLatin1("QMLPlayer"));
     do_common_options_before_qapp(options);
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // Qt6 scene graph defaults to D3D11/Metal/Vulkan. VideoOutput2 (QuickFBORenderer) renders with OpenGL and
+    // QQuickFramebufferObject only works with the OpenGL RHI backend. QSG_RHI_BACKEND still overrides it.
+    if (!qEnvironmentVariableIsSet("QSG_RHI_BACKEND"))
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("QMLPlayer"));
     app.setApplicationDisplayName(QStringLiteral("QtAV QMLPlayer"));
@@ -97,13 +112,22 @@ qDebug() <<  "event dispatcher:" << QCoreApplication::eventDispatcher();
     if (qFuzzyIsNull(sr))
         sr = r;
     engine->rootContext()->setContextProperty(QStringLiteral("scaleRatio"), sr);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    qDebug() << "input devices: " << QInputDevice::devices();
+#else
     qDebug() << "touch devices: " << QTouchDevice::devices();
+#endif
     engine->rootContext()->setContextProperty(QStringLiteral("isTouchScreen"), false);
 #ifdef Q_OS_WINPHONE
     engine->rootContext()->setContextProperty(QStringLiteral("isTouchScreen"), true);
 #endif
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    foreach (const QInputDevice* dev, QInputDevice::devices()) {
+        if (dev->type() == QInputDevice::DeviceType::TouchScreen) {
+#else
     foreach (const QTouchDevice* dev, QTouchDevice::devices()) {
         if (dev->type() == QTouchDevice::TouchScreen) {
+#endif
             engine->rootContext()->setContextProperty(QStringLiteral("isTouchScreen"), true);
             break;
         }
@@ -114,6 +138,10 @@ qDebug() <<  "event dispatcher:" << QCoreApplication::eventDispatcher();
     else
         qml.prepend(QLatin1String("qrc:///"));
     viewer.setMainQmlFile(qml);
+    if (!viewer.rootObject()) { // qml failed to load, the errors were printed by the engine
+        qCritical() << "Failed to load" << qml;
+        return 1;
+    }
     viewer.show();
     QOption op = options.option(QStringLiteral("width"));
     if (op.isSet())

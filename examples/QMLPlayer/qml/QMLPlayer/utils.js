@@ -6,7 +6,7 @@ var kFontSize = scaled(16)
 var kSpacing = scaled(4)
 
 // "/xxx" will be resolved as qrc:///xxx. while "xxx" is "qrc:///QMLDIR/xxx
-var resprefix = Qt.resolvedUrl(" ").substring(0, 4) == "qrc:" ? "/" : ""
+var resprefix = Qt.resolvedUrl(" ").toString().substring(0, 4) == "qrc:" ? "/" : ""
 
 function resurl(s) { //why called twice if in qrc?
     return resprefix + s

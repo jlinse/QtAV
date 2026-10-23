@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.11 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(QTAV)
 
@@ -30,34 +30,38 @@ option(BUILD_Vulkan "Build Vulkan Renderer" ON)
 
 list(APPEND CMAKE_FIND_ROOT_PATH ${QTDIR})
 
-find_package(Qt5Core REQUIRED)
-find_package(Qt5Gui REQUIRED)
-get_target_property(qmake Qt5::qmake LOCATION)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_HEADERS
-    OUTPUT_VARIABLE QT_INSTALL_HEADERS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_LIBS
-    OUTPUT_VARIABLE QT_INSTALL_LIBS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_BINS
-    OUTPUT_VARIABLE QT_INSTALL_BINS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_QML
-    OUTPUT_VARIABLE QT_INSTALL_QML
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_PREFIX
-    OUTPUT_VARIABLE QT_INSTALL_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# Qt major version: prefer Qt6, fall back to Qt5. Force one with -DQT_VERSION_MAJOR=5|6
+if(NOT QT_VERSION_MAJOR)
+  find_package(QT NAMES Qt6 Qt5 COMPONENTS Core REQUIRED)
+endif()
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Gui)
+set(QT_VERSION ${Qt${QT_VERSION_MAJOR}Core_VERSION})
+macro(qtav_add_resources)
+  if(QT_VERSION_MAJOR EQUAL 6)
+    qt6_add_resources(${ARGN})
+  else()
+    qt5_add_resources(${ARGN})
+  endif()
+endmacro()
+set(CMAKE_CXX_STANDARD 17) # Qt6 requires it, and some QtAV sources already use C++17 features
+
+if(QT_VERSION_MAJOR EQUAL 6)
+  # no qmake in cmake-only Qt6 builds
+  set(QT_INSTALL_PREFIX ${QT6_INSTALL_PREFIX})
+  set(QT_INSTALL_HEADERS ${QT_INSTALL_PREFIX}/include)
+  set(QT_INSTALL_LIBS ${QT_INSTALL_PREFIX}/lib)
+  set(QT_INSTALL_BINS ${QT_INSTALL_PREFIX}/bin)
+  set(QT_INSTALL_QML ${QT_INSTALL_PREFIX}/qml)
+else()
+  get_target_property(qmake Qt5::qmake LOCATION)
+  foreach(QT_DIR HEADERS LIBS BINS QML PREFIX)
+    execute_process(
+      COMMAND ${qmake} -query QT_INSTALL_${QT_DIR}
+      OUTPUT_VARIABLE QT_INSTALL_${QT_DIR}
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  endforeach()
+endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${QT5_CFLAGS}")
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -85,7 +89,7 @@ else()
   set(QTAV_INSTALL_QML ${QT_INSTALL_QML})
 endif()
 
-message(STATUS "Qt version: ${Qt5Core_VERSION_STRING}")
+message(STATUS "Qt version: ${QT_VERSION}")
 message(STATUS "Qt prefix: ${QT_INSTALL_PREFIX}")
 message(STATUS "QtAV headers prefix: ${QTAV_INSTALL_HEADERS}")
 message(STATUS "QtAV libs prefix: ${QTAV_INSTALL_LIBS}")
@@ -119,14 +123,14 @@ endif()
 
 add_subdirectory(src)
 
-find_package(Qt5Widgets)
-if(Qt5Widgets_FOUND)
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Widgets)
+if(Qt${QT_VERSION_MAJOR}Widgets_FOUND)
   add_subdirectory(widgets)
 endif()
 
 if(BUILD_QML)
-  find_package(Qt5 COMPONENTS Qml Quick)
-  if(Qt5Qml_FOUND AND Qt5Quick_FOUND)
+  find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Qml Quick)
+  if(Qt${QT_VERSION_MAJOR}Qml_FOUND AND Qt${QT_VERSION_MAJOR}Quick_FOUND)
       add_subdirectory(qml)
   endif()
 endif()

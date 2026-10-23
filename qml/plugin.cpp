@@ -60,8 +60,12 @@ public:
 #if QT_VERSION >= QT_VERSION_CHECK(5, 2, 0)
         qmlRegisterType<QuickFBORenderer>(uri, 1, 5, "VideoOutput2");
 #endif
-        qmlRegisterUncreatableType<VideoCapture>(uri, 1, 6, "VideoCapture", trUtf8("VideoCapture is provided by MediaPlayer"));
+        qmlRegisterUncreatableType<VideoCapture>(uri, 1, 6, "VideoCapture", QStringLiteral("VideoCapture is provided by MediaPlayer"));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        qmlRegisterAnonymousType<MediaMetaData>(uri, 1);
+#else
         qmlRegisterType<MediaMetaData>();
+#endif
 
         // FIXME: if version is 2.x, some qtav types will be undefined, why?
         // 1.7

@@ -1,4 +1,4 @@
-find_package(Qt5Sql REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)
 if(WIN32)
   set(EXE_TYPE WIN32)
 elseif(APPLE)
@@ -25,14 +25,14 @@ endif()
 
 SET(COMMON_QRC common/theme/theme.qrc)
 SOURCE_GROUP("Resources" FILES ${COMMON_QRC})
-qt5_add_resources(COMMON_RES ${COMMON_QRC})
+qtav_add_resources(COMMON_RES ${COMMON_QRC})
 set_source_files_properties(${COMMON_RES} PROPERTIES GENERATED ON)
 
 # add HEADERS for moc
 add_library(common STATIC ${COMMON_SRC} ${COMMON_RES} ${COMMON_HEADERS})
 target_link_libraries(common
-  LINK_PUBLIC Qt5::Core Qt5::Gui ${COMMON_LIBS}
-  LINK_PRIVATE Qt5::Sql
+  LINK_PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui ${COMMON_LIBS}
+  LINK_PRIVATE Qt${QT_VERSION_MAJOR}::Sql
 )
 target_compile_definitions(common PUBLIC -DBUILD_COMMON_STATIC)
 target_include_directories(common PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -91,12 +91,12 @@ set(PLAYER_HEADERS
 
 SET(PLAYER_QRC player/res/player.qrc)
 SOURCE_GROUP("Resources" FILES ${PLAYER_QRC})
-qt5_add_resources(PLAYER_RES ${PLAYER_QRC})
+qtav_add_resources(PLAYER_RES ${PLAYER_QRC})
 set_source_files_properties(${PLAYER_RES} PROPERTIES GENERATED ON)
 
-if(Qt5Quick_FOUND)
+if(Qt${QT_VERSION_MAJOR}Quick_FOUND)
   set(QMLPLAYER_QRC QMLPlayer/qmlplayer.qrc)
-  qt5_add_resources(QMLPLAYER_RES ${QMLPLAYER_QRC})
+  qtav_add_resources(QMLPLAYER_RES ${QMLPLAYER_QRC})
   set_source_files_properties(${QMLPLAYER_RES} PROPERTIES GENERATED ON)
   set(MODULE QMLPlayer)
   if(WIN32)
@@ -111,12 +111,12 @@ if(Qt5Quick_FOUND)
       ${RC_FILE}
       )
   target_include_directories(QMLPlayer PRIVATE QMLPlayer/qtquick2applicationviewer)
-  target_link_libraries(QMLPlayer Qt5::Quick common)
+  target_link_libraries(QMLPlayer Qt${QT_VERSION_MAJOR}::Quick common)
   install(TARGETS QMLPlayer
     RUNTIME DESTINATION ${QTAV_INSTALL_BINS}
   )
 endif()
-if(Qt5Widgets_FOUND)
+if(Qt${QT_VERSION_MAJOR}Widgets_FOUND)
   set(MODULE Player)
   if(WIN32)
     set(RC_FILE ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}.rc)
@@ -131,7 +131,7 @@ if(Qt5Widgets_FOUND)
   if(BUILD_EXAMPLES)
     SET(FILTERS_QRC filters/res.qrc)
     SOURCE_GROUP("Resources" FILES ${FILTERS_QRC})
-    qt5_add_resources(FILTERS_RES ${FILTERS_QRC})
+    qtav_add_resources(FILTERS_RES ${FILTERS_QRC})
     set_source_files_properties(${FILTERS_RES} PROPERTIES GENERATED ON)
     add_executable(filters filters/main.cpp filters/SimpleFilter.cpp ${FILTERS_RES})
     target_link_libraries(filters QtAVWidgets)

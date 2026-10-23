@@ -23,6 +23,7 @@
 #ifndef QTAV_QML_QQUICKRENDERER_H
 #define QTAV_QML_QQUICKRENDERER_H
 
+#include <QmlAV/Export.h>
 #include <QtAV/VideoRenderer.h>
 #include <QtQuick/QQuickItem>
 #include <QmlAV/QuickFilter.h>
@@ -97,7 +98,11 @@ Q_SIGNALS:
     void backgroundColorChanged() Q_DECL_OVERRIDE;
 protected:
     bool event(QEvent *e) Q_DECL_OVERRIDE;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) Q_DECL_OVERRIDE;
+#else
     void geometryChanged(const QRectF &newGeometry, const QRectF &oldGeometry) Q_DECL_OVERRIDE;
+#endif
 
     bool receiveFrame(const VideoFrame &frame) Q_DECL_OVERRIDE;
     void drawFrame() Q_DECL_OVERRIDE;
@@ -111,8 +116,8 @@ private:
     bool onSetOrientation(int value) Q_DECL_OVERRIDE;
 
     static void vf_append(QQmlListProperty<QuickVideoFilter> *property, QuickVideoFilter *value);
-    static int vf_count(QQmlListProperty<QuickVideoFilter> *property);
-    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, int index);
+    static QMLAV_LIST_INDEX vf_count(QQmlListProperty<QuickVideoFilter> *property);
+    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, QMLAV_LIST_INDEX index);
     static void vf_clear(QQmlListProperty<QuickVideoFilter> *property);
 };
 typedef QQuickItemRenderer VideoRendererQQuickItem;

@@ -1,21 +1,31 @@
 set(MODULE QtAVWidgets)
 set(EXTRA_DEFS -DBUILD_QTAVWIDGETS_LIB)
-list(APPEND EXTRA_DEFS -DQTAV_HAVE_GL=1)
-list(APPEND EXTRA_DEFS -DQTAV_HAVE_VULKAN=1)
 
+# Qt5: QGLWidget based renderer (Qt5OpenGL). Qt6 dropped QGLWidget, QOpenGLWidget lives in Qt6OpenGLWidgets
 set(HAVE_QT5OPENGL 0)
-if(BUILD_QT5OPENGL)
+if(BUILD_QT5OPENGL AND QT_VERSION_MAJOR EQUAL 5)
   find_package(Qt5OpenGL QUIET)
   if(Qt5OpenGL_FOUND)
     set(HAVE_QT5OPENGL 1)
+    list(APPEND EXTRA_DEFS -DQTAV_HAVE_GL=1)
+  endif()
+endif()
+set(HAVE_QT6OPENGLWIDGETS 0)
+if(QT_VERSION_MAJOR EQUAL 6)
+  find_package(Qt6 QUIET COMPONENTS OpenGL OpenGLWidgets)
+  if(Qt6OpenGLWidgets_FOUND)
+    set(HAVE_QT6OPENGLWIDGETS 1)
   endif()
 endif()
 
-set(HAVE_Vulkan 0)
+set(HAVE_VULKAN 0)
 if(BUILD_Vulkan)
   find_package(Vulkan)
   if(Vulkan_FOUND)
-    set(HAVE_Vulkan 1)
+    set(HAVE_VULKAN 1)
+    list(APPEND EXTRA_DEFS -DQTAV_HAVE_VULKAN=1)
+  else()
+    message(STATUS "Vulkan SDK not found, QtAVWidgets Vulkan renderer disabled")
   endif()
 endif()
 
@@ -28,7 +38,6 @@ set(SDK_HEADERS
   QtAVWidgets/version.h
   QtAVWidgets/VideoPreviewWidget.h
   QtAVWidgets/WidgetRenderer.h
-  QtAVWidgets/VulkanRenderer.h
 )
 file(GLOB SDK_PRIVATE_HEADERS QtAVWidgets/*.h)
 
@@ -38,7 +47,6 @@ set(SOURCES
   OpenGLWidgetRenderer.cpp
   VideoPreviewWidget.cpp
   WidgetRenderer.cpp
-  VulkanRenderer.cpp
 )
 
 if(HAVE_QT5OPENGL)
@@ -46,7 +54,7 @@ if(HAVE_QT5OPENGL)
   list(APPEND SOURCES GLWidgetRenderer2.cpp)
 endif()
 
-if(HAVE_Vulkan)
+if(HAVE_VULKAN)
   list(APPEND SDK_HEADERS QtAVWidgets/VulkanRenderer.h)
   list(APPEND SDK_PRIVATE_HEADERS ../src/ColorTransform.h)
   list(APPEND SOURCES VulkanRendererPrivate.cpp)
@@ -55,7 +63,7 @@ if(HAVE_Vulkan)
 endif()
 
 # TODO: Qt5Gui_OPENGL_IMPLEMENTATION?
-if(Qt5Gui_VERSION VERSION_LESS 5.4.0)
+if(Qt${QT_VERSION_MAJOR}Gui_VERSION VERSION_LESS 5.4.0)
   list(APPEND SDK_HEADERS QtAVWidgets/QOpenGLWidget.h)
   list(APPEND SOURCES QOpenGLWidget.cpp)
 endif()
@@ -69,10 +77,13 @@ endif()
 add_library(${MODULE} SHARED ${SOURCES} ${RESOURCES_SOURCES} ${HEADERS} ${RC_FILE})
 target_link_libraries(${MODULE}
   LINK_PRIVATE ${EXTRA_LIBS}
-  LINK_PUBLIC QtAV Qt5::Widgets
+  LINK_PUBLIC QtAV Qt${QT_VERSION_MAJOR}::Widgets
 )
 if(HAVE_QT5OPENGL)
   target_link_libraries(${MODULE} LINK_PUBLIC Qt5::OpenGL)
+endif()
+if(HAVE_QT6OPENGLWIDGETS)
+  target_link_libraries(${MODULE} LINK_PUBLIC Qt6::OpenGL Qt6::OpenGLWidgets)
 endif()
 if(HAVE_VULKAN)
   target_link_libraries(${MODULE} LINK_PUBLIC Vulkan::Vulkan)
@@ -98,9 +109,11 @@ target_include_directories(${MODULE}
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/${MODULE}>
   PRIVATE ${EXTRA_INCLUDE}
-  $<BUILD_INTERFACE:${Vulkan_INCLUDE_DIRS}>
   )
 target_compile_definitions(${MODULE} PRIVATE ${EXTRA_DEFS})
+if(HAVE_VULKAN)
+  target_include_directories(${MODULE} PRIVATE ${Vulkan_INCLUDE_DIRS})
+endif()
 
 
 install(FILES

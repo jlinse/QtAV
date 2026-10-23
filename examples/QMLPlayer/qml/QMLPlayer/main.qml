@@ -18,17 +18,12 @@
     License along with this library; if not, write to the Free Software
     Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 ******************************************************************************/
-//if qt<5.3, remove lines: sed '/\/\/IF_QT53/,/\/\/ENDIF_QT53/d'
-import QtQuick 2.0
-//IF_QT53
-import QtQuick.Dialogs 1.2
-/*
-//ENDIF_QT53
-import QtQuick.Dialogs 1.1 /*
-*/
-//import QtMultimedia 5.0
+// Qt6 only: QtQuick.Dialogs 1.x was replaced by the new QtQuick.Dialogs, Dialog is from Controls
+import QtQuick
+import QtQuick.Dialogs
+import QtQuick.Controls as QQC // aliased: Button, Slider, Menu... would clash with the local types
 import QtAV 1.7
-import QtQuick.Window 2.1
+import QtQuick.Window
 import "utils.js" as Utils
 
 Rectangle {
@@ -144,7 +139,7 @@ Rectangle {
 
         onStopped: control.setStopState()
         onPaused: control.setPauseState()
-        onError: {
+        onError: function(error, errorString) {
             if (error != MediaPlayer.NoError) {
                 msg.error(errorString)
             }
@@ -457,13 +452,13 @@ Rectangle {
         }
         Connections {
             target: pageLoader.item
-            onVisibleChanged: {
+            function onVisibleChanged() {
                 if (!pageLoader.item.visible)
                     pageLoader.source = ""
             }
-            onChannelChanged: player.channelLayout = channel
-            onExternalAudioChanged: player.externalAudio = file
-            onAudioTrackChanged: player.audioTrack = track
+            function onChannelChanged(channel) { player.channelLayout = channel }
+            function onExternalAudioChanged(file) { player.externalAudio = file }
+            function onAudioTrackChanged(track) { player.audioTrack = track }
             onSubtitleTrackChanged: player.internalSubtitleTrack = track
             onBrightnessChanged: videoOut.brightness = target.brightness
             onContrastChanged: videoOut.contrast = target.contrast
@@ -502,7 +497,7 @@ Rectangle {
         Connections {
             target: player
             // onStatusChanged: too late to call status is wrong value
-            onDurationChanged: {
+            function onDurationChanged() {
                 if (player.duration <= 0)
                     return
                 var url = player.source.toString()
@@ -561,13 +556,18 @@ Rectangle {
         onShowHelp: pageLoader.source = "About.qml"
     }
 //IF_QT53
-    Dialog {
+    QQC.Dialog {
         id: urlDialog
-        standardButtons: StandardButton.Open | StandardButton.Cancel
+        parent: QQC.Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(root.width * 0.9, Utils.scaled(480))
+        standardButtons: QQC.Dialog.Open | QQC.Dialog.Cancel
         title: qsTr("Open a URL")
         Rectangle {
             color: "black"
             anchors.top: parent.top
+            implicitHeight: Utils.kItemHeight
             height: Utils.kItemHeight
             width: parent.width
             TextInput {
@@ -583,12 +583,12 @@ Rectangle {
     FileDialog {
         id: fileDialog
         title: "Please choose a media file"
-        selectMultiple: true
-        folder: PlayerConfig.lastFile
+        fileMode: FileDialog.OpenFiles
+        currentFolder: PlayerConfig.lastFile
         onAccepted: {
             var sub, av
-            for (var i = 0; i < fileUrls.length; ++i) {
-                var s = fileUrls[i].toString()
+            for (var i = 0; i < selectedFiles.length; ++i) {
+                var s = selectedFiles[i].toString()
                 if (s.endsWith(".srt")
                         || s.endsWith(".ass")
                         || s.endsWith(".ssa")
@@ -599,9 +599,9 @@ Rectangle {
                         || s.endsWith(".sami")
                         || s.endsWith(".sup")
                         || s.endsWith(".txt"))
-                    sub = fileUrls[i]
+                    sub = selectedFiles[i]
                 else
-                    av = fileUrls[i]
+                    av = selectedFiles[i]
             }
             if (sub) {
                 subtitle.autoLoad = false
@@ -618,7 +618,7 @@ Rectangle {
     }
     Connections {
         target: Qt.application
-        onStateChanged: { //since 5.1
+        function onStateChanged() { //since 5.1
             if (Qt.platform.os === "winrt" || Qt.platform.os === "winphone") //paused by system
                 return
             // winrt is handled by system
@@ -634,7 +634,7 @@ Rectangle {
     }
     Connections {
         target: PlayerConfig
-        onZeroCopyChanged: {
+        function onZeroCopyChanged() {
             var opt = player.videoCodecOptions
             if (PlayerConfig.zeroCopy) {
                 opt["copyMode"] = "ZeroCopy"

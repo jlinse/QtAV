@@ -32,7 +32,11 @@ void* GetProcAddress_Qt(const char *name)
     void* p = (void*)QOpenGLContext::currentContext()->getProcAddress(QByteArray((const char*)name));
     if (!p) {
 #if defined(Q_OS_WIN) && defined(QT_OPENGL_DYNAMIC)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        HMODULE handle = GetModuleHandleW(L"opengl32.dll"); // QOpenGLContext::openGLModuleHandle() was removed
+#else
         HMODULE handle = (HMODULE)QOpenGLContext::openGLModuleHandle();
+#endif
         if (handle)
             p = (void*)GetProcAddress(handle, name);
 #endif

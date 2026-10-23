@@ -1,5 +1,5 @@
 import QtQuick 2.0
-import QtQuick.Dialogs 1.1
+import QtQuick.Dialogs
 import "utils.js" as Utils
 
 Page {
@@ -323,31 +323,30 @@ Page {
     FileDialog {
         id: fontFileDialog
         title: qsTr("Choose a font file")
-        folder: PlayerConfig.assFontFile
-        onAccepted: PlayerConfig.assFontFile = fileUrl
+        currentFolder: PlayerConfig.assFontFile
+        onAccepted: PlayerConfig.assFontFile = selectedFile
     }
 
-    FileDialog {
+    FolderDialog {
         id: fontsDirDialog
         title: qsTr("Choose a fonts dir")
-        selectFolder: true
-        folder: PlayerConfig.assFontsDir
-        onAccepted: PlayerConfig.assFontsDir = folder
+        currentFolder: PlayerConfig.assFontsDir
+        onAccepted: PlayerConfig.assFontsDir = selectedFolder
     }
     FontDialog {
         id: fontDialog
-        font: PlayerConfig.subtitleFont
-        onAccepted: PlayerConfig.subtitleFont = font
+        selectedFont: PlayerConfig.subtitleFont
+        onAccepted: PlayerConfig.subtitleFont = selectedFont
     }
     ColorDialog {
         id: colorDialog
-        color: PlayerConfig.subtitleColor
-        onAccepted: PlayerConfig.subtitleColor = color
+        selectedColor: PlayerConfig.subtitleColor
+        onAccepted: PlayerConfig.subtitleColor = selectedColor
     }
     ColorDialog {
         id: outlineColorDialog
-        color: PlayerConfig.subtitleOutlineColor
-        onAccepted: PlayerConfig.subtitleOutlineColor = color
+        selectedColor: PlayerConfig.subtitleOutlineColor
+        onAccepted: PlayerConfig.subtitleOutlineColor = selectedColor
     }
     Component.onCompleted: {
         if (PlayerConfig.subtitleEngines[0] === "FFmpeg")

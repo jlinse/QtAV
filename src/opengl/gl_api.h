@@ -23,6 +23,9 @@
 
 #ifndef QT_NO_OPENGL
 #include <qglobal.h>
+#ifdef Q_OS_WIN32
+#include <qt_windows.h>
+#endif
 # if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 #include <QOpenGLBuffer>
 #include <QOpenGLContext>
@@ -148,6 +151,7 @@ struct api {
     void (GL_APIENTRY *GetTexLevelParameteriv)(GLenum, GLint, GLenum, GLint *);
 
 #if defined(Q_OS_WIN32)
+    // Qt6 gl headers do not include windows.h any more (BOOL, HANDLE, WINAPI)
     //#include <GL/wglext.h> //not found in vs2013
     //https://www.opengl.org/registry/specs/NV/DX_interop.txt
 #ifndef WGL_ACCESS_READ_ONLY_NV

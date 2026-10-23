@@ -22,6 +22,7 @@
 #ifndef QTAV_QUICKFBORENDERER_H
 #define QTAV_QUICKFBORENDERER_H
 
+#include <QmlAV/Export.h>
 #include <QtAV/VideoRenderer.h>
 #include <QtQml/QQmlListProperty>
 #include <QtQuick/QQuickFramebufferObject>
@@ -123,8 +124,8 @@ private:
     void updateRenderRect();
 
     static void vf_append(QQmlListProperty<QuickVideoFilter> *property, QuickVideoFilter *value);
-    static int vf_count(QQmlListProperty<QuickVideoFilter> *property);
-    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, int index);
+    static QMLAV_LIST_INDEX vf_count(QQmlListProperty<QuickVideoFilter> *property);
+    static QuickVideoFilter *vf_at(QQmlListProperty<QuickVideoFilter> *property, QMLAV_LIST_INDEX index);
     static void vf_clear(QQmlListProperty<QuickVideoFilter> *property);
 };
 typedef QuickFBORenderer VideoRendererQuickFBO;

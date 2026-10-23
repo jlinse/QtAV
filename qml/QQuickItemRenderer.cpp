@@ -31,7 +31,11 @@
 #include "QtAV/private/factory.h"
 #include "QtAV/private/VideoRenderer_p.h"
 #include "QmlAV/QmlAVPlayer.h"
+// Qt6 scene graph (RHI) can not draw with the raw GL shader of SGVideoNode: QSGSimpleTextureNode (cpu image) is used
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#define QMLAV_HAVE_SGVIDEONODE 1
 #include "QmlAV/SGVideoNode.h"
+#endif
 
 namespace QtAV {
 static const VideoRendererId VideoRendererId_QQuickItem = mkid::id32base36_6<'Q','Q','I','t','e','m'>::value;
@@ -42,7 +46,11 @@ class QQuickItemRendererPrivate : public VideoRendererPrivate
 public:
     QQuickItemRendererPrivate():
         VideoRendererPrivate()
+#ifdef QMLAV_HAVE_SGVIDEONODE
       , opengl(true)
+#else
+      , opengl(false)
+#endif
       , frame_changed(false)
       , fill_mode(QQuickItemRenderer::PreserveAspectFit)
       , texture(0)
@@ -308,6 +316,10 @@ bool QQuickItemRenderer::isOpenGL() const
 void QQuickItemRenderer::setOpenGL(bool o)
 {
     DPTR_D(QQuickItemRenderer);
+#ifndef QMLAV_HAVE_SGVIDEONODE
+    if (o)
+        return; // opengl node is not available
+#endif
     if (d.opengl == o)
         return;
     d.opengl = o;
@@ -326,13 +338,13 @@ void QQuickItemRenderer::vf_append(QQmlListProperty<QuickVideoFilter> *property,
     self->installFilter(value);
 }
 
-int QQuickItemRenderer::vf_count(QQmlListProperty<QuickVideoFilter> *property)
+QMLAV_LIST_INDEX QQuickItemRenderer::vf_count(QQmlListProperty<QuickVideoFilter> *property)
 {
     QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
     return self->d_func().filters.size();
 }
 
-QuickVideoFilter* QQuickItemRenderer::vf_at(QQmlListProperty<QuickVideoFilter> *property, int index)
+QuickVideoFilter* QQuickItemRenderer::vf_at(QQmlListProperty<QuickVideoFilter> *property, QMLAV_LIST_INDEX index)
 {
     QQuickItemRenderer* self = static_cast<QQuickItemRenderer*>(property->object);
     return self->d_func().filters.at(index);
@@ -352,6 +364,7 @@ void QQuickItemRenderer::drawFrame()
     DPTR_D(QQuickItemRenderer);
     if (!d.node)
         return;
+#ifdef QMLAV_HAVE_SGVIDEONODE
     if (isOpenGL()) {
         SGVideoNode *sgvn = static_cast<SGVideoNode*>(d.node);
         Q_ASSERT(sgvn);
@@ -361,6 +374,7 @@ void QQuickItemRenderer::drawFrame()
         sgvn->setTexturedRectGeometry(d.out_rect, normalizedROI(), d.rotation());
         return;
     }
+#endif
     if (!d.frame_changed) {
         static_cast<QSGSimpleTextureNode*>(d.node)->setRect(d.out_rect);
         d.node->markDirty(QSGNode::DirtyGeometry);
@@ -391,9 +405,12 @@ QSGNode *QQuickItemRenderer::updatePaintNode(QSGNode *node, QQuickItem::UpdatePa
     DPTR_D(QQuickItemRenderer);
     if (d.frame_changed) {
         if (!node) {
+#ifdef QMLAV_HAVE_SGVIDEONODE
             if (isOpenGL()) {
                 node = new SGVideoNode();
-            } else {
+            } else
+#endif
+            {
                 node = new QSGSimpleTextureNode();
             }
         }

@@ -1,5 +1,5 @@
 import QtQuick 2.0
-import QtQuick.Dialogs 1.0
+import QtQuick.Dialogs
 import QtAV 1.6
 import "utils.js" as Utils
 
@@ -127,9 +127,9 @@ Page {
         id: fileDialog
         title: qsTr("Open an external audio track")
         onAccepted: {
-            file.text = fileUrl
+            file.text = selectedFile
             if (externalCheck.checked)
-                root.externalAudioChanged(fileUrl.toString())
+                root.externalAudioChanged(selectedFile.toString())
         }
     }
 }

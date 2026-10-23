@@ -6,19 +6,25 @@
 #  QTAV_INCLUDE_DIRS - the libqtav include directory
 #  QTAV_LIBRARIES    - Link these to use libqtav
 
-find_package(Qt5 QUIET REQUIRED NO_MODULE COMPONENTS Core)
+find_package(QT NAMES Qt6 Qt5 QUIET REQUIRED COMPONENTS Core)
+find_package(Qt${QT_VERSION_MAJOR} QUIET REQUIRED NO_MODULE COMPONENTS Core)
 
-get_target_property(qmake Qt5::qmake LOCATION)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_HEADERS
-    OUTPUT_VARIABLE QT_INSTALL_HEADERS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-execute_process(
-    COMMAND ${qmake} -query QT_INSTALL_LIBS
-    OUTPUT_VARIABLE QT_INSTALL_LIBS
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+if(QT_VERSION_MAJOR EQUAL 6)
+  set(QT_INSTALL_HEADERS ${QT6_INSTALL_PREFIX}/include)
+  set(QT_INSTALL_LIBS ${QT6_INSTALL_PREFIX}/lib)
+else()
+  get_target_property(qmake Qt5::qmake LOCATION)
+  execute_process(
+      COMMAND ${qmake} -query QT_INSTALL_HEADERS
+      OUTPUT_VARIABLE QT_INSTALL_HEADERS
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  execute_process(
+      COMMAND ${qmake} -query QT_INSTALL_LIBS
+      OUTPUT_VARIABLE QT_INSTALL_LIBS
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+endif()
 
 find_path(QTAV_INCLUDE_DIR NAMES QtAV.h
     HINTS ${QT_INSTALL_HEADERS}

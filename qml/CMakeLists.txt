@@ -6,7 +6,6 @@ set(EXTRA_DEFS -DBUILD_QMLAV_LIB)
 set(HEADERS
     QmlAV/Export.h
     QmlAV/MediaMetaData.h
-    QmlAV/SGVideoNode.h
     QmlAV/QQuickItemRenderer.h
     QmlAV/QuickFilter.h
     QmlAV/QmlAVPlayer.h
@@ -17,7 +16,6 @@ set(HEADERS
 set(SOURCES
     plugin.cpp
     QQuickItemRenderer.cpp
-    SGVideoNode.cpp
     QmlAVPlayer.cpp
     QuickFilter.cpp
     QuickSubtitle.cpp
@@ -25,9 +23,14 @@ set(SOURCES
     QuickSubtitleItem.cpp
     QuickVideoPreview.cpp
 )
-if(NOT Qt5Qml_VERSION VERSION_LESS 5.2.0)
+if(NOT Qt${QT_VERSION_MAJOR}Qml_VERSION VERSION_LESS 5.2.0)
   list(APPEND HEADERS QmlAV/QuickFBORenderer.h)
   list(APPEND SOURCES QuickFBORenderer.cpp)
+endif()
+if(QT_VERSION_MAJOR EQUAL 5)
+  # Qt6 scene graph can not use the GL shader material, QQuickItemRenderer falls back to QSGSimpleTextureNode
+  list(APPEND HEADERS QmlAV/SGVideoNode.h)
+  list(APPEND SOURCES SGVideoNode.cpp)
 endif()
 # add HEADERS for moc
 if(WIN32)
@@ -37,7 +40,7 @@ endif()
 add_library(${MODULE} SHARED ${SOURCES} ${RESOURCES_SOURCES} ${HEADERS} ${RC_FILE})
 target_link_libraries(${MODULE}
   LINK_PRIVATE ${EXTRA_LIBS}
-  LINK_PUBLIC QtAV Qt5::Qml Qt5::Quick
+  LINK_PUBLIC QtAV Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
 )
 set_target_properties(${MODULE} PROPERTIES
   OUTPUT_NAME ${MODULE}

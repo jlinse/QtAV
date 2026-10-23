@@ -36,7 +36,11 @@ static const struct {
     VideoRendererId id;
 } vid_map[] = {
 { "opengl", VideoRendererId_OpenGLWidget },
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) // QGLWidget (GLWidget2) does not exist in Qt6, QOpenGLWidget replaces it
+{ "gl", VideoRendererId_OpenGLWidget },
+#else
 { "gl", VideoRendererId_GLWidget2 },
+#endif
 { "d2d", VideoRendererId_Direct2D },
 { "gdi", VideoRendererId_GDI },
 { "xv", VideoRendererId_XV },
@@ -51,10 +55,11 @@ VideoRendererId rendererId_from_opt_name(const QString& name) {
             return vid_map[i].id;
     }
 #ifndef QT_NO_OPENGL
-#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS)
-    return VideoRendererId_OpenGLWidget; // qglwidget is not suitable for android
-#endif
+#if defined(Q_OS_ANDROID) || defined(Q_OS_IOS) || QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    return VideoRendererId_OpenGLWidget; // qglwidget is not suitable for android, and is removed in Qt6
+#else
     return VideoRendererId_GLWidget2;
+#endif
 #endif
     return VideoRendererId_Widget;
 }

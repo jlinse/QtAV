@@ -23,6 +23,7 @@
 #define QTAV_QML_EXPORT_H
 
 #include <qglobal.h>
+#include <QtCore/qtypeinfo.h>
 
 #if defined(BUILD_QMLAV_LIB)
 #  undef QMLAV_EXPORT
@@ -30,6 +31,13 @@
 #else
 #  undef QMLAV_EXPORT
 #  define QMLAV_EXPORT Q_DECL_IMPORT //only for vc?
+#endif
+
+// QQmlListProperty callbacks use qsizetype in Qt6
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#define QMLAV_LIST_INDEX qsizetype
+#else
+#define QMLAV_LIST_INDEX int
 #endif
 
 #endif // QTAV_QML_EXPORT_H

@@ -49,7 +49,15 @@ public:
             avwidgets.setFileNameAndVersion(QStringLiteral("QtAVWidgets"), QTAV_VERSION_MAJOR(QtAV_Version()));
 #endif
             qDebug() << "Loading QtAVWidgets module: " << avwidgets.fileName();
-            if (!avwidgets.load()) {
+            bool loaded = avwidgets.load();
+#if defined(Q_OS_WIN)
+            if (!loaded) {
+                // qmake names the dll QtAVWidgets[d]<major>, the cmake build has no suffix
+                avwidgets.setFileName(QStringLiteral("QtAVWidgets"));
+                loaded = avwidgets.load();
+            }
+#endif
+            if (!loaded) {
                 qWarning("Failed to load QtAVWidgets module");
             }
         }

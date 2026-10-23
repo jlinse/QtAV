@@ -102,7 +102,11 @@ int Slider::pixelPosToRangeValue(int pos) const
                                            sliderMax - sliderMin, opt.upsideDown);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void Slider::enterEvent(QEnterEvent *event)
+#else
 void Slider::enterEvent(QEvent *event)
+#endif
 {
     emit onEnter();
     QSlider::enterEvent(event);
