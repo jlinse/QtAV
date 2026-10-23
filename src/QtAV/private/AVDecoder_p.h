@@ -78,7 +78,7 @@ class Q_AV_PRIVATE_EXPORT AVDecoderPrivate : public DPtrPrivate<AVDecoder>
 {
 public:
     static const char* getProfileName(AVCodecID id, int profile) {
-        AVCodec *c = avcodec_find_decoder(id);
+        const AVCodec *c = avcodec_find_decoder(id);
         if (!c)
             return "Unknow";
         return av_get_profile_name(c, profile);

@@ -383,6 +383,75 @@ void avcodec_free_context(AVCodecContext **pavctx)
 }
 #endif
 
+#ifdef QTAV_NO_AVCODEC_COPY_CONTEXT
+#undef avcodec_copy_context
+#endif
+int qtav_copy_codec_context(AVCodecContext *dst, const AVCodecContext *src)
+{
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    AVCodecParameters *par = avcodec_parameters_alloc();
+    if (!par)
+        return AVERROR(ENOMEM);
+    int ret = avcodec_parameters_from_context(par, src);
+    if (ret >= 0)
+        ret = avcodec_parameters_to_context(dst, par);
+    avcodec_parameters_free(&par);
+    if (ret < 0)
+        return ret;
+    dst->time_base = src->time_base;
+    dst->framerate = src->framerate;
+    dst->pkt_timebase = src->pkt_timebase;
+    dst->sample_aspect_ratio = src->sample_aspect_ratio;
+    dst->bit_rate = src->bit_rate;
+    dst->gop_size = src->gop_size;
+    dst->coded_width = src->coded_width;
+    dst->coded_height = src->coded_height;
+    return 0;
+#else
+    return avcodec_copy_context(dst, src);
+#endif
+}
+
+int qtav_close_codec_context(AVCodecContext **ctx)
+{
+    if (!ctx || !*ctx)
+        return 0;
+#ifdef QTAV_NO_AVCODEC_CLOSE
+    AVCodecContext *c = avcodec_alloc_context3(NULL);
+    if (!c)
+        return AVERROR(ENOMEM);
+    const int ret = qtav_copy_codec_context(c, *ctx);
+    if (ret < 0) {
+        avcodec_free_context(&c);
+        return ret;
+    }
+    avcodec_free_context(ctx);
+    *ctx = c;
+    return 0;
+#else
+    return avcodec_close(*ctx);
+#endif
+}
+
+AVCodecContext* qtav_alloc_stream_codec_context(const AVStream *stream)
+{
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    AVCodecContext *ctx = avcodec_alloc_context3(NULL);
+    if (!ctx)
+        return NULL;
+    if (avcodec_parameters_to_context(ctx, stream->codecpar) < 0) {
+        avcodec_free_context(&ctx);
+        return NULL;
+    }
+    ctx->pkt_timebase = stream->time_base;
+    ctx->framerate = stream->avg_frame_rate;
+    ctx->sample_aspect_ratio = stream->sample_aspect_ratio;
+    return ctx;
+#else
+    return stream->codec;
+#endif
+}
+
 const char *get_codec_long_name(enum AVCodecID id)
 {
     if (id == AV_CODEC_ID_NONE)
@@ -391,7 +460,7 @@ const char *get_codec_long_name(enum AVCodecID id)
     if (cd)
         return cd->long_name;
     av_log(NULL, AV_LOG_WARNING, "Codec 0x%x is not in the full list.\n", id);
-    AVCodec *codec = avcodec_find_decoder(id);
+    const AVCodec *codec = avcodec_find_decoder(id);
     if (codec)
         return codec->long_name;
     codec = avcodec_find_encoder(id);

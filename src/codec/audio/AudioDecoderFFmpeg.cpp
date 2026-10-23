@@ -93,23 +93,20 @@ bool AudioDecoderFFmpeg::decode(const Packet &packet)
         return false;
     DPTR_D(AudioDecoderFFmpeg);
     d.decoded.clear();
-    int got_frame_ptr = 0;
-    int ret = 0;
-    if (packet.isEOF()) {
-        AVPacket eofpkt;
-        av_init_packet(&eofpkt);
-        eofpkt.data = NULL;
-        eofpkt.size = 0;
-        ret = avcodec_decode_audio4(d.codec_ctx, d.frame, &got_frame_ptr, &eofpkt);
-    } else {
-    // const AVPacket*: ffmpeg >= 1.0. no libav
-        ret = avcodec_decode_audio4(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
-    }
-    d.undecoded_size = qMin(packet.data.size() - ret, packet.data.size());
-    if (ret == AVERROR(EAGAIN)) {
+    // NULL packet drains the decoder. AVERROR_EOF is returned if it's already draining
+    int ret = avcodec_send_packet(d.codec_ctx, packet.isEOF() ? NULL : (AVPacket*)packet.asAVPacket());
+    // the decoder has output frames to read before accepting a new packet. keep the packet by setting undecoded size
+    const bool again = ret == AVERROR(EAGAIN);
+    d.undecoded_size = again ? packet.data.size() : 0;
+    if (ret < 0 && !again && ret != AVERROR_EOF) {
+        d.undecoded_size = packet.data.size();
+        qWarning("[AudioDecoder] %s", av_err2str(ret));
         return false;
     }
-    if (ret < 0) {
+    ret = avcodec_receive_frame(d.codec_ctx, d.frame);
+    const bool got_frame_ptr = ret >= 0;
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+        d.undecoded_size = packet.data.size();
         qWarning("[AudioDecoder] %s", av_err2str(ret));
         return false;
     }
@@ -134,7 +131,7 @@ AudioFrame AudioDecoderFFmpeg::frame()
     DPTR_D(AudioDecoderFFmpeg);
     AudioFormat fmt;
     fmt.setSampleFormatFFmpeg(d.frame->format);
-    fmt.setChannelLayoutFFmpeg(d.frame->channel_layout);
+    fmt.setChannelLayoutFFmpeg(QTAV_AVFRAME_CHANNEL_LAYOUT(d.frame));
     fmt.setSampleRate(d.frame->sample_rate);
     if (!fmt.isValid()) {// need more data to decode to get a frame
         return AudioFrame();
@@ -145,7 +142,7 @@ AudioFrame AudioDecoderFFmpeg::frame()
     f.setBytesPerLine(d.frame->linesize[0], 0); // for correct alignment
     f.setSamplesPerChannel(d.frame->nb_samples);
     // TODO: ffplay check AVFrame.pts, pkt_pts, last_pts+nb_samples. move to AudioFrame::from(AVFrame*)
-    f.setTimestamp((double)d.frame->pkt_pts/1000.0);
+    f.setTimestamp((double)QTAV_FRAME_PKT_PTS(d.frame)/1000.0);
     f.setAudioResampler(d.resampler); // TODO: remove. it's not safe if frame is shared. use a pool or detach if ref >1
     return f;
 }

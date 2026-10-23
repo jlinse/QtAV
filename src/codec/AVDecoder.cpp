@@ -27,7 +27,7 @@
 
 namespace QtAV {
 
-static AVCodec* get_codec(const QString &name, const QString& hwa, AVCodecID cid)
+static const AVCodec* get_codec(const QString &name, const QString& hwa, AVCodecID cid)
 {
     QString fullname(name);
     if (name.isEmpty()) {
@@ -35,7 +35,7 @@ static AVCodec* get_codec(const QString &name, const QString& hwa, AVCodecID cid
             return avcodec_find_decoder(cid);
         fullname = QString("%1_%2").arg(avcodec_get_name(cid)).arg(hwa);
     }
-    AVCodec *codec = avcodec_find_decoder_by_name(fullname.toUtf8().constData());
+    const AVCodec *codec = avcodec_find_decoder_by_name(fullname.toUtf8().constData());
     if (codec)
         return codec;
     const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(fullname.toUtf8().constData());
@@ -76,7 +76,7 @@ bool AVDecoder::open()
         return false;
     }
     const QString hwa = property("hwaccel").toString();
-    AVCodec* codec = get_codec(codecName(), hwa, d.codec_ctx->codec_id);
+    const AVCodec* codec = get_codec(codecName(), hwa, d.codec_ctx->codec_id);
     if (!codec) { // TODO: can be null for none-ffmpeg based decoders
         QString es(tr("No codec could be found for '%1'"));
         if (d.codec_name.isEmpty()) {
@@ -134,7 +134,7 @@ bool AVDecoder::close()
     d.close();
     // TODO: reset config?
     if (d.codec_ctx) {
-        AV_ENSURE_OK(avcodec_close(d.codec_ctx), false);
+        AV_ENSURE_OK(qtav_close_codec_context(&d.codec_ctx), false);
     }
     return true;
 }

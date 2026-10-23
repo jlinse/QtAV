@@ -91,7 +91,11 @@ static int av_read(void *opaque, unsigned char *buf, int buf_size)
     return io->read((char*)buf, buf_size);
 }
 
+#if LIBAVFORMAT_VERSION_MAJOR >= 61 // avio_alloc_context() write_packet has a const buffer
+static int av_write(void *opaque, const unsigned char *buf, int buf_size)
+#else
 static int av_write(void *opaque, unsigned char *buf, int buf_size)
+#endif
 {
     MediaIO* io = static_cast<MediaIO*>(opaque);
     return io->write((const char*)buf, buf_size);

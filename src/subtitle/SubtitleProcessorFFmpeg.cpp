@@ -250,7 +250,7 @@ bool SubtitleProcessorFFmpeg::processHeader(const QByteArray &codec, const QByte
     if (codec_ctx) {
         avcodec_free_context(&codec_ctx);
     }
-    AVCodec *c = avcodec_find_decoder_by_name(codec.constData());
+    const AVCodec *c = avcodec_find_decoder_by_name(codec.constData());
     if (!c) {
         qDebug("subtitle avcodec_descriptor_get_by_name %s", codec.constData());
         const AVCodecDescriptor *desc = avcodec_descriptor_get_by_name(codec.constData());
@@ -270,6 +270,7 @@ bool SubtitleProcessorFFmpeg::processHeader(const QByteArray &codec, const QByte
     // no way to get time base. the pts unit used in processLine() is 's', ffmpeg use ms, so set 1/1000 here
     codec_ctx->time_base.num = 1;
     codec_ctx->time_base.den = 1000;
+    codec_ctx->pkt_timebase = codec_ctx->time_base;
     if (!data.isEmpty()) {
         av_free(codec_ctx->extradata);
         codec_ctx->extradata = (uint8_t*)av_mallocz(data.size() + AV_INPUT_BUFFER_PADDING_SIZE);
@@ -371,8 +372,23 @@ bool SubtitleProcessorFFmpeg::processSubtitle()
         qWarning("no subtitle stream found");
         return false;
     }
-    codec_ctx = m_reader.subtitleCodecContext();
-    AVCodec *dec = avcodec_find_decoder(codec_ctx->codec_id);
+    // the reader's context belongs to the demuxer and it can't be closed/reopened, so use a copy
+    const AVCodecContext *reader_ctx = m_reader.subtitleCodecContext();
+    if (!reader_ctx) {
+        qWarning("no subtitle codec context");
+        return false;
+    }
+    avcodec_free_context(&codec_ctx);
+    codec_ctx = avcodec_alloc_context3(NULL);
+    if (!codec_ctx || qtav_copy_codec_context(codec_ctx, reader_ctx) < 0) {
+        avcodec_free_context(&codec_ctx);
+        return false;
+    }
+    // the pts unit used in processLine() is 's', ffmpeg use ms, so set 1/1000 here
+    codec_ctx->time_base.num = 1;
+    codec_ctx->time_base.den = 1000;
+    codec_ctx->pkt_timebase = codec_ctx->time_base;
+    const AVCodec *dec = avcodec_find_decoder(codec_ctx->codec_id);
     const AVCodecDescriptor *dec_desc = avcodec_descriptor_get(codec_ctx->codec_id);
     if (!dec) {
         if (dec_desc)
@@ -394,6 +410,7 @@ bool SubtitleProcessorFFmpeg::processSubtitle()
     if (ret < 0) {
         qWarning("open subtitle codec error: %s", av_err2str(ret));
         av_dict_free(&codec_opts);
+        avcodec_free_context(&codec_ctx);
         return false;
     }
     while (!m_reader.atEnd()) {
@@ -409,8 +426,7 @@ bool SubtitleProcessorFFmpeg::processSubtitle()
         if (frame.isValid())
             m_frames.append(frame);
     }
-    avcodec_close(codec_ctx);
-    codec_ctx = 0;
+    avcodec_free_context(&codec_ctx);
     return true;
 }
 

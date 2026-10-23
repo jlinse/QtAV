@@ -118,21 +118,21 @@ bool VideoDecoderFFmpegBase::decode(const Packet &packet)
     DPTR_D(VideoDecoderFFmpegBase);
     // some decoders might need other fields like flags&AV_PKT_FLAG_KEY
     // const AVPacket*: ffmpeg >= 1.0. no libav
-    int got_frame_ptr = 0;
-    int ret = 0;
-    if (packet.isEOF()) {
-        AVPacket eofpkt;
-        av_init_packet(&eofpkt);
-        eofpkt.data = NULL;
-        eofpkt.size = 0;
-        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, &eofpkt);
-    } else {
-        ret = avcodec_decode_video2(d.codec_ctx, d.frame, &got_frame_ptr, (AVPacket*)packet.asAVPacket());
-    }
-    //qDebug("pic_type=%c", av_get_picture_type_char(d.frame->pict_type));
-    d.undecoded_size = qMin(packet.data.size() - ret, packet.data.size());
-    if (ret < 0) {
+    // NULL packet drains the decoder. AVERROR_EOF is returned if it's already draining
+    int ret = avcodec_send_packet(d.codec_ctx, packet.isEOF() ? NULL : (AVPacket*)packet.asAVPacket());
+    // the decoder has output frames to read before accepting a new packet. keep the packet by setting undecoded size
+    const bool again = ret == AVERROR(EAGAIN);
+    d.undecoded_size = again ? packet.data.size() : 0;
+    if (ret < 0 && !again && ret != AVERROR_EOF) {
+        d.undecoded_size = packet.data.size();
         //qWarning("[VideoDecoderFFmpegBase] %s", av_err2str(ret));
+        return false;
+    }
+    ret = avcodec_receive_frame(d.codec_ctx, d.frame);
+    const bool got_frame_ptr = ret >= 0;
+    //qDebug("pic_type=%c", av_get_picture_type_char(d.frame->pict_type));
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+        d.undecoded_size = packet.data.size();
         return false;
     }
     if (!got_frame_ptr) {
@@ -159,7 +159,7 @@ VideoFrame VideoDecoderFFmpegBase::frame()
     frame.setBits(d.frame->data);
     frame.setBytesPerLine(d.frame->linesize);
     // in s. TODO: what about AVFrame.pts? av_frame_get_best_effort_timestamp? move to VideoFrame::from(AVFrame*)
-    frame.setTimestamp((double)d.frame->pkt_pts/1000.0);
+    frame.setTimestamp((double)QTAV_FRAME_PKT_PTS(d.frame)/1000.0);
     frame.setMetaData(QStringLiteral("avbuf"), QVariant::fromValue(AVFrameBuffersRef(new AVFrameBuffers(d.frame))));
     d.updateColorDetails(&frame);
     if (frame.format().hasPalette()) {

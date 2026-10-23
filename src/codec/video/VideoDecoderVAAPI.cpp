@@ -84,7 +84,7 @@ FACTORY_REGISTER(VideoDecoder, VAAPI, "VAAPI")
 
 const char* getProfileName(AVCodecID id, int profile)
 {
-    AVCodec *c = avcodec_find_decoder(id);
+    const AVCodec *c = avcodec_find_decoder(id);
     if (!c)
         return "Unknow";
     return av_get_profile_name(c, profile);
@@ -379,7 +379,7 @@ VideoFrame VideoDecoderVAAPI::frame()
             VAWARN(vaDestroyImage(d.display->get(), img.image_id));
         }
         f.setMetaData(QStringLiteral("surface_interop"), QVariant::fromValue(VideoSurfaceInteropPtr(interop)));
-        f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+        f.setTimestamp(double(QTAV_FRAME_PKT_PTS(d.frame))/1000.0);
         f.setDisplayAspectRatio(d.getDAR(d.frame));
         d.updateColorDetails(&f);
         const ColorSpace cs = f.colorSpace();

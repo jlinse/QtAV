@@ -81,6 +81,11 @@ public:
     };
     Q_DECLARE_FLAGS(ThreadFlags, ThreadFlag)
     // flags. visualize motion vectors (MVs)
+#ifndef FF_DEBUG_VIS_MV_P_FOR // removed in FFmpeg 5.0, the values are the same as before
+#define FF_DEBUG_VIS_MV_P_FOR 1
+#define FF_DEBUG_VIS_MV_B_FOR 2
+#define FF_DEBUG_VIS_MV_B_BACK 4
+#endif
     enum MotionVectorVisFlag {
         No = 0, //default
         PF = FF_DEBUG_VIS_MV_P_FOR,
@@ -220,7 +225,9 @@ public:
     // lavfilter
         //codec_ctx->slice_flags |= SLICE_FLAG_ALLOW_FIELD; //lavfilter
         //codec_ctx->strict_std_compliance = FF_COMPLIANCE_STRICT;
+#if LIBAVCODEC_VERSION_MAJOR < 60 //removed, callbacks are always thread safe
         codec_ctx->thread_safe_callbacks = true;
+#endif
         switch (codec_ctx->codec_id) {
             case QTAV_CODEC_ID(MPEG4):
             case QTAV_CODEC_ID(H263):

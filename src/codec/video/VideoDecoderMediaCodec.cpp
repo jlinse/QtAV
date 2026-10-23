@@ -151,7 +151,7 @@ VideoFrame VideoDecoderMediaCodec::frame()
         frame.setBits(d.frame->data);
         frame.setBytesPerLine(d.frame->linesize);
         // in s. TODO: what about AVFrame.pts? av_frame_get_best_effort_timestamp? move to VideoFrame::from(AVFrame*)
-        frame.setTimestamp((double)d.frame->pkt_pts/1000.0);
+        frame.setTimestamp((double)QTAV_FRAME_PKT_PTS(d.frame)/1000.0);
         frame.setMetaData(QStringLiteral("avbuf"), QVariant::fromValue(AVFrameBuffersRef(new AVFrameBuffers(d.frame))));
         d.updateColorDetails(&frame);
         return frame;
@@ -160,7 +160,7 @@ VideoFrame VideoDecoderMediaCodec::frame()
     VideoFrame frame(d.frame->width, d.frame->height, VideoFormat::Format_RGB32);
     frame.setBytesPerLine(d.frame->width*4);
     frame.setDisplayAspectRatio(d.getDAR(d.frame));
-    frame.setTimestamp(d.frame->pkt_pts/1000.0);
+    frame.setTimestamp(QTAV_FRAME_PKT_PTS(d.frame)/1000.0);
 #ifdef MEDIACODEC_TEXTURE
     class MediaCodecTextureInterop : public VideoSurfaceInterop
     {

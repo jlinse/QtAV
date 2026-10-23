@@ -113,7 +113,9 @@ static void ffmpeg_release_va_buffer(struct AVCodecContext *c, AVFrame *ff)
 bool VideoDecoderFFmpegHWPrivate::prepare()
 {
     //// From vlc begin
+#if LIBAVCODEC_VERSION_MAJOR < 60 //removed, callbacks are always thread safe
     codec_ctx->thread_safe_callbacks = true; //?
+#endif
     codec_ctx->thread_count = threads;
 #ifdef _MSC_VER
 #pragma warning(disable:4065) //vc: switch has default but no case
@@ -328,7 +330,7 @@ VideoFrame VideoDecoderFFmpegHW::copyToFrame(const VideoFormat& fmt, int surface
         // TODO: buffer pool and create VideoFrame when needed to avoid copy? also for other va
         frame = frame.clone();
     }
-    frame.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+    frame.setTimestamp(double(QTAV_FRAME_PKT_PTS(d.frame))/1000.0);
     frame.setDisplayAspectRatio(d.getDAR(d.frame));
     d.updateColorDetails(&frame);
     return frame;

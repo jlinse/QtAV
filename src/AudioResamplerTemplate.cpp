@@ -259,10 +259,21 @@ bool AudioResamplerFF::prepare()
         }
     }
     if (use_channel_map) {
+#if QTAV_CH_LAYOUT_API && LIBSWRESAMPLE_VERSION_MAJOR >= 5 //"icl" and "uch" are removed. the layout of the used input channels is "used_chlayout"
+        {
+            AVChannelLayout ucl;
+            if (av_channel_layout_from_mask(&ucl, (uint64_t)d.out_format.channelLayoutFFmpeg()) == 0) {
+                av_opt_set_chlayout(d.context, "used_chlayout", &ucl, 0);
+                av_channel_layout_uninit(&ucl);
+            }
+        }
+        swr_set_channel_mapping(d.context, d.channel_map);
+#else
         av_opt_set_int(d.context, "icl", d.out_format.channelLayoutFFmpeg(), 0);
         //TODO: why crash if layout is mono and set uch(i.e. always the next line)
         av_opt_set_int(d.context, "uch", d.out_format.channels(), 0);
         swr_set_channel_mapping(d.context, d.channel_map);
+#endif
     }
 #endif //QTAV_HAVE(SWR_AVR_MAP)
     int ret = swr_init(d.context);

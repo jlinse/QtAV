@@ -332,7 +332,7 @@ VideoFrame VideoDecoderVDA::frame()
     if (zero_copy) {
         f = VideoFrame(d.width, d.height, fmt);
         f.setBytesPerLine(pitch);
-        f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+        f.setTimestamp(double(QTAV_FRAME_PKT_PTS(d.frame))/1000.0);
         f.setDisplayAspectRatio(d.getDAR(d.frame));
         if (zero_copy) {
             f.setMetaData(QStringLiteral("target"), QByteArrayLiteral("rect"));

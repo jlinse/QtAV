@@ -702,7 +702,11 @@ bool VideoFormat::hasPalette() const
 
 bool VideoFormat::isPseudoPaletted() const
 {
+#ifdef AV_PIX_FMT_FLAG_PSEUDOPAL // removed in FFmpeg 8.0
     return (d->flags() & AV_PIX_FMT_FLAG_PSEUDOPAL) == AV_PIX_FMT_FLAG_PSEUDOPAL;
+#else
+    return false;
+#endif
 }
 
 bool VideoFormat::isBitStream() const

@@ -37,6 +37,17 @@ static bool check_ffmpeg_hevc_dxva2()
 #if !AVCODEC_STATIC_REGISTER
     avcodec_register_all();
 #endif
+#if LIBAVCODEC_VERSION_MAJOR >= 58 //av_hwaccel_next() is removed
+    const AVCodec *hevc = avcodec_find_decoder(AV_CODEC_ID_HEVC);
+    if (!hevc)
+        return false;
+    const AVCodecHWConfig *cfg = NULL;
+    for (int i = 0; (cfg = avcodec_get_hw_config(hevc, i)); ++i) {
+        if (cfg->device_type == AV_HWDEVICE_TYPE_DXVA2 || cfg->device_type == AV_HWDEVICE_TYPE_D3D11VA)
+            return true;
+    }
+    return false;
+#else
     AVHWAccel *hwa = av_hwaccel_next(0);
     while (hwa) {
         if (strncmp("hevc_dxva2", hwa->name, 10) == 0)
@@ -46,6 +57,7 @@ static bool check_ffmpeg_hevc_dxva2()
         hwa = av_hwaccel_next(hwa);
     }
     return false;
+#endif
 }
 
 bool isHEVCSupported()

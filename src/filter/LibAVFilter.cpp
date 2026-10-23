@@ -84,7 +84,9 @@ public:
         filter_graph = 0;
         in_filter_ctx = 0;
         out_filter_ctx = 0;
+#if !AVFILTER_STATIC_REGISTER
         avfilter_register_all();
+#endif
 #endif //QTAV_HAVE(AVFILTER)
     }
     ~Private() {
@@ -204,7 +206,9 @@ QString LibAVFilter::filterDescription(const QString &filterName)
 {
     QString s;
 #if QTAV_HAVE(AVFILTER)
+#if !AVFILTER_STATIC_REGISTER
     avfilter_register_all();
+#endif
     const AVFilter *f = avfilter_get_by_name(filterName.toUtf8().constData());
     if (!f)
         return s;
@@ -283,10 +287,15 @@ QStringList LibAVFilter::registeredFilters(int type)
 {
     QStringList filters;
 #if QTAV_HAVE(AVFILTER)
+#if !AVFILTER_STATIC_REGISTER
     avfilter_register_all();
+#endif
     const AVFilter* f = NULL;
     AVFilterPad* fp = NULL; // no const in avfilter_pad_get_name() for ffmpeg<=1.2 libav<=9
-#if AV_MODULE_CHECK(LIBAVFILTER, 3, 8, 0, 53, 100)
+#if AVFILTER_STATIC_REGISTER
+    void *opaque = NULL;
+    while ((f = av_filter_iterate(&opaque))) {
+#elif AV_MODULE_CHECK(LIBAVFILTER, 3, 8, 0, 53, 100)
     while ((f = avfilter_next(f))) {
 #else
     AVFilter** ff = NULL;
@@ -448,7 +457,7 @@ void LibAVFilterAudio::process(Statistics *statistics, AudioFrame *frame)
     const AVFrame *f = ref->frame();
     AudioFormat fmt;
     fmt.setSampleFormatFFmpeg(f->format);
-    fmt.setChannelLayoutFFmpeg(f->channel_layout);
+    fmt.setChannelLayoutFFmpeg(QTAV_AVFRAME_CHANNEL_LAYOUT(f));
     fmt.setSampleRate(f->sample_rate);
     if (!fmt.isValid()) {// need more data to decode to get a frame
         return;
@@ -520,10 +529,8 @@ bool LibAVFilter::Private::pushAudioFrame(Frame *frame, bool changed, const QStr
     const AudioFormat afmt(af->format());
     avframe->pts = frame->timestamp() * 1000000.0; // time_base is 1/1000000
     avframe->sample_rate = afmt.sampleRate();
-    avframe->channel_layout = afmt.channelLayoutFFmpeg();
-#if QTAV_USE_FFMPEG(LIBAVCODEC) || QTAV_USE_FFMPEG(LIBAVUTIL) //AVFrame was in avcodec
-    avframe->channels = afmt.channels(); //MUST set because av_buffersrc_write_frame will compare channels and layout
-#endif
+    //MUST set channels because av_buffersrc_write_frame will compare channels and layout
+    QTAV_AVFRAME_SET_CHANNEL_LAYOUT(avframe, afmt.channelLayoutFFmpeg(), afmt.channels());
     avframe->format = (AVSampleFormat)afmt.sampleFormatFFmpeg();
     avframe->nb_samples = af->samplesPerChannel();
     for (int i = 0; i < af->planeCount(); ++i) {

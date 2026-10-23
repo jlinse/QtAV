@@ -47,6 +47,9 @@ extern "C"
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+#include <libavcodec/bsf.h>
+#endif
 #include <libavutil/avutil.h>
 #include <libavutil/avstring.h>
 #include <libavutil/dict.h>
@@ -63,6 +66,7 @@ extern "C"
 
 #define AVCODEC_STATIC_REGISTER FFMPEG_MODULE_CHECK(LIBAVCODEC, 58, 10, 100)
 #define AVFORMAT_STATIC_REGISTER FFMPEG_MODULE_CHECK(LIBAVFORMAT, 58, 9, 100)
+#define AVFILTER_STATIC_REGISTER FFMPEG_MODULE_CHECK(LIBAVFILTER, 7, 14, 100)
 
 #if !FFMPEG_MODULE_CHECK(LIBAVUTIL, 51, 73, 101)
 #include <libavutil/channel_layout.h>
@@ -434,6 +438,99 @@ int avfilter_copy_buf_props(AVFrame *dst, const AVFilterBufferRef *src);
 /* helper functions */
 const char *get_codec_long_name(AVCodecID id);
 
+// lavf 59 (FFmpeg 5.0) made AVInputFormat and AVOutputFormat pointers const
+#if LIBAVFORMAT_VERSION_MAJOR >= 59
+typedef const AVInputFormat QtAVInputFormat;
+typedef const AVOutputFormat QtAVOutputFormat;
+#else
+typedef AVInputFormat QtAVInputFormat;
+typedef AVOutputFormat QtAVOutputFormat;
+#endif
+
+// AVStream.codec, avcodec_copy_context() and avcodec_close() are removed. avcodec_free_context() closes the context
+#if LIBAVCODEC_VERSION_MAJOR >= 61
+#define QTAV_NO_AVCODEC_COPY_CONTEXT 1
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 62
+#define QTAV_NO_AVCODEC_CLOSE 1
+#endif
+/// copy codec parameters (including extradata and time base) from src to dst. dst must not be open.
+int qtav_copy_codec_context(AVCodecContext *dst, const AVCodecContext *src);
+#ifdef QTAV_NO_AVCODEC_COPY_CONTEXT
+#define avcodec_copy_context qtav_copy_codec_context
+#endif
+/// avcodec_close() was removed. *ctx is replaced by a new context with the same parameters if it can't be closed, so it can be opened again
+int qtav_close_codec_context(AVCodecContext **ctx);
+/// alloc a context filled with the parameters from stream. use avcodec_free_context() to free it
+AVCodecContext* qtav_alloc_stream_codec_context(const AVStream *stream);
+
+// AVFrame accessors were removed (FFmpeg 6.0), use the fields. AVFrame.pkt_pts is removed too, AVFrame.pts has the packet pts
+#if LIBAVUTIL_VERSION_MAJOR >= 57
+#define av_frame_get_colorspace(f) ((f)->colorspace)
+#define av_frame_get_color_range(f) ((f)->color_range)
+#endif
+#if LIBAVUTIL_VERSION_MAJOR >= 58
+#define QTAV_FRAME_PKT_PTS(f) ((f)->pts)
+#else
+#define QTAV_FRAME_PKT_PTS(f) ((f)->pkt_pts)
+#endif
+
+// AVCodec.pix_fmts, sample_fmts, supported_samplerates and channel_layouts are removed. they are NULL if everything is supported
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
+static inline const void* qtav_codec_config(const AVCodec *c, enum AVCodecConfig type)
+{
+    const void *v = NULL;
+    if (avcodec_get_supported_config(NULL, c, type, 0, &v, NULL) < 0)
+        return NULL;
+    return v;
+}
+static inline const AVPixelFormat* qtav_codec_pix_fmts(const AVCodec *c)
+{ return (const AVPixelFormat*)qtav_codec_config(c, AV_CODEC_CONFIG_PIX_FORMAT); }
+static inline const AVSampleFormat* qtav_codec_sample_fmts(const AVCodec *c)
+{ return (const AVSampleFormat*)qtav_codec_config(c, AV_CODEC_CONFIG_SAMPLE_FORMAT); }
+static inline const int* qtav_codec_samplerates(const AVCodec *c)
+{ return (const int*)qtav_codec_config(c, AV_CODEC_CONFIG_SAMPLE_RATE); }
+/// the first supported layout mask, 0 if all or not a native layout
+static inline int64_t qtav_codec_first_channel_layout(const AVCodec *c)
+{
+    const AVChannelLayout *cl = (const AVChannelLayout*)qtav_codec_config(c, AV_CODEC_CONFIG_CHANNEL_LAYOUT);
+    return cl && cl->nb_channels > 0 && cl->order == AV_CHANNEL_ORDER_NATIVE ? (int64_t)cl->u.mask : 0;
+}
+#else
+static inline const AVPixelFormat* qtav_codec_pix_fmts(const AVCodec *c) { return c->pix_fmts; }
+static inline const AVSampleFormat* qtav_codec_sample_fmts(const AVCodec *c) { return c->sample_fmts; }
+static inline const int* qtav_codec_samplerates(const AVCodec *c) { return c->supported_samplerates; }
+static inline int64_t qtav_codec_first_channel_layout(const AVCodec *c)
+{ return c->channel_layouts ? (int64_t)c->channel_layouts[0] : 0; }
+#endif
+
+// FFmpeg 6.0 (lavc 60) renamed FF_PROFILE_* to AV_PROFILE_*, and the old names are removed in FFmpeg 8.0
+#ifndef FF_PROFILE_H264_BASELINE
+#ifdef AV_PROFILE_H264_BASELINE
+#define FF_PROFILE_UNKNOWN AV_PROFILE_UNKNOWN
+#define FF_PROFILE_MPEG2_SIMPLE AV_PROFILE_MPEG2_SIMPLE
+#define FF_PROFILE_MPEG2_MAIN AV_PROFILE_MPEG2_MAIN
+#define FF_PROFILE_H264_BASELINE AV_PROFILE_H264_BASELINE
+#define FF_PROFILE_H264_CONSTRAINED_BASELINE AV_PROFILE_H264_CONSTRAINED_BASELINE
+#define FF_PROFILE_H264_MAIN AV_PROFILE_H264_MAIN
+#define FF_PROFILE_H264_HIGH AV_PROFILE_H264_HIGH
+#endif
+#endif
+#ifndef FF_PROFILE_HEVC_MAIN
+#ifdef AV_PROFILE_HEVC_MAIN
+#define FF_PROFILE_HEVC_MAIN AV_PROFILE_HEVC_MAIN
+#define FF_PROFILE_HEVC_MAIN_10 AV_PROFILE_HEVC_MAIN_10
+#endif
+#endif
+#ifndef FF_PROFILE_VP9_0
+#ifdef AV_PROFILE_VP9_0
+#define FF_PROFILE_VP9_0 AV_PROFILE_VP9_0
+#define FF_PROFILE_VP9_1 AV_PROFILE_VP9_1
+#define FF_PROFILE_VP9_2 AV_PROFILE_VP9_2
+#define FF_PROFILE_VP9_3 AV_PROFILE_VP9_3
+#endif
+#endif
+
 // AV_CODEC_ID_H265 is a macro defined as AV_CODEC_ID_HEVC in ffmpeg but not in libav. so we can use FF_PROFILE_HEVC_MAIN to avoid libavcodec version check. (from ffmpeg 2.1)
 #ifndef FF_PROFILE_HEVC_MAIN //libav does not define it
 #define AV_CODEC_ID_HEVC ((AVCodecID)0) //QTAV_CODEC_ID(NONE)
@@ -462,6 +559,96 @@ const char *get_codec_long_name(AVCodecID id);
         RETURN __VA_ARGS__; \
      } } while(0)
 
+/*
+ * FFmpeg 7.0 (lavu 59) removed the deprecated uint64 channel layout api. Channel layout is a 64bit mask in QtAV,
+ * so emulate the removed functions and add accessors for the fields that were replaced by AVChannelLayout ch_layout.
+ */
+#if LIBAVUTIL_VERSION_MAJOR >= 59
+#include <libavutil/channel_layout.h>
+static inline int av_get_channel_layout_nb_channels(uint64_t mask)
+{
+    int n = 0;
+    for (; mask; mask &= mask - 1)
+        ++n;
+    return n;
+}
+
+static inline int64_t av_get_default_channel_layout(int nb_channels)
+{
+    AVChannelLayout cl;
+    av_channel_layout_default(&cl, nb_channels);
+    const int64_t mask = cl.order == AV_CHANNEL_ORDER_NATIVE ? (int64_t)cl.u.mask : 0;
+    av_channel_layout_uninit(&cl);
+    return mask;
+}
+
+/// nb_channels <= 0: use the number of channels in layout
+static inline void av_get_channel_layout_string(char *buf, int buf_size, int nb_channels, uint64_t mask)
+{
+    AVChannelLayout cl;
+    if (mask && av_channel_layout_from_mask(&cl, mask) == 0) {
+        av_channel_layout_describe(&cl, buf, buf_size);
+        av_channel_layout_uninit(&cl);
+        return;
+    }
+    snprintf(buf, buf_size, "%d channels", nb_channels > 0 ? nb_channels : 0);
+}
+#endif //LIBAVUTIL_VERSION_MAJOR >= 59
+
+#if LIBAVUTIL_VERSION_MAJOR >= 58 //ch_layout is available since lavu 57.24, but the old fields are only removed in 59
+static inline int64_t qtav_channel_layout_mask(const AVChannelLayout &cl, int nb_channels_hint = 0)
+{
+    if (cl.order == AV_CHANNEL_ORDER_NATIVE)
+        return (int64_t)cl.u.mask;
+    const int n = cl.nb_channels > 0 ? cl.nb_channels : nb_channels_hint;
+    return n > 0 ? av_get_default_channel_layout(n) : 0;
+}
+static inline void qtav_set_channel_layout(AVChannelLayout *cl, int64_t mask, int nb_channels)
+{
+    av_channel_layout_uninit(cl);
+    if (mask && av_channel_layout_from_mask(cl, (uint64_t)mask) == 0)
+        return;
+    if (nb_channels > 0)
+        av_channel_layout_default(cl, nb_channels);
+}
+#define QTAV_CH_LAYOUT_API 1
+#define QTAV_AVCTX_CHANNELS(ctx) ((ctx)->ch_layout.nb_channels)
+#define QTAV_AVCTX_CHANNEL_LAYOUT(ctx) qtav_channel_layout_mask((ctx)->ch_layout)
+#define QTAV_AVCTX_SET_CHANNEL_LAYOUT(ctx, mask, channels) qtav_set_channel_layout(&(ctx)->ch_layout, mask, channels)
+#define QTAV_AVFRAME_CHANNELS(f) ((f)->ch_layout.nb_channels)
+#define QTAV_AVFRAME_CHANNEL_LAYOUT(f) qtav_channel_layout_mask((f)->ch_layout)
+#define QTAV_AVFRAME_SET_CHANNEL_LAYOUT(f, mask, channels) qtav_set_channel_layout(&(f)->ch_layout, mask, channels)
+#else
+#define QTAV_AVCTX_CHANNELS(ctx) ((ctx)->channels)
+#define QTAV_AVCTX_CHANNEL_LAYOUT(ctx) ((ctx)->channel_layout)
+#define QTAV_AVCTX_SET_CHANNEL_LAYOUT(ctx, mask, nb) do { (ctx)->channel_layout = (mask); (ctx)->channels = (nb); } while (0)
+#define QTAV_AVFRAME_CHANNELS(f) ((f)->channels)
+#define QTAV_AVFRAME_CHANNEL_LAYOUT(f) ((f)->channel_layout)
+#define QTAV_AVFRAME_SET_CHANNEL_LAYOUT(f, mask, nb) do { (f)->channel_layout = (mask); (f)->channels = (nb); } while (0)
+#endif
+
+// swr_alloc_set_opts was removed in FFmpeg 7.0 (swr 5)
+#if QTAV_HAVE(SWRESAMPLE) && LIBSWRESAMPLE_VERSION_MAJOR >= 5
+static inline SwrContext *qtav_swr_alloc_set_opts(SwrContext *s, int64_t out_ch_layout, AVSampleFormat out_sample_fmt, int out_sample_rate
+                                                  , int64_t in_ch_layout, AVSampleFormat in_sample_fmt, int in_sample_rate, int log_offset, void *log_ctx)
+{
+    AVChannelLayout out, in;
+    if (av_channel_layout_from_mask(&out, (uint64_t)out_ch_layout) < 0)
+        return NULL;
+    if (av_channel_layout_from_mask(&in, (uint64_t)in_ch_layout) < 0) {
+        av_channel_layout_uninit(&out);
+        return NULL;
+    }
+    SwrContext *ctx = s;
+    if (swr_alloc_set_opts2(&ctx, &out, out_sample_fmt, out_sample_rate, &in, in_sample_fmt, in_sample_rate, log_offset, log_ctx) < 0)
+        ctx = NULL;
+    av_channel_layout_uninit(&out);
+    av_channel_layout_uninit(&in);
+    return ctx;
+}
+#define swr_alloc_set_opts qtav_swr_alloc_set_opts
+#endif
+
 #endif //QTAV_COMPAT_H
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,33,0)
@@ -470,6 +657,8 @@ const char *get_codec_long_name(AVCodecID id);
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,56,100)
 #define AV_INPUT_BUFFER_MIN_SIZE FF_MIN_BUFFER_SIZE
+#elif !defined(AV_INPUT_BUFFER_MIN_SIZE) //removed in FFmpeg 7.0
+#define AV_INPUT_BUFFER_MIN_SIZE 16384
 #endif
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,56,100)

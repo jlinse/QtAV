@@ -81,7 +81,7 @@ public:
     //copy the info, not parse the file when constructed, then need member vars
     QString file;
     QString file_orig;
-    AVOutputFormat *format;
+    QtAVOutputFormat *format;
     QString format_forced;
     MediaIO *io;
 
@@ -94,7 +94,7 @@ public:
 
 AVStream *AVMuxer::Private::addStream(AVFormatContext* ctx, const QString &codecName, AVCodecID codecId)
 {
-    AVCodec *codec = NULL;
+    const AVCodec *codec = NULL;
     if (!codecName.isEmpty()) {
         codec = avcodec_find_encoder_by_name(codecName.toUtf8().constData());
         if (!codec) {
@@ -120,13 +120,9 @@ AVStream *AVMuxer::Private::addStream(AVFormatContext* ctx, const QString &codec
     // set by avformat if unset
     s->id = ctx->nb_streams - 1;
     s->time_base = kTB;
-    AVCodecContext *c = s->codec;
-    c->codec_id = codec->id;
-    // Using codec->time_base is deprecated, but needed for older lavf.
-    c->time_base = s->time_base;
-    /* Some formats want stream headers to be separate. */
-    if (ctx->oformat->flags & AVFMT_GLOBALHEADER)
-        c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    s->codecpar->codec_id = codec->id;
+    s->codecpar->codec_type = codec->type;
+    // GLOBAL_HEADER must be set by the encoder before it's opened
     // expose avctx to encoder and set properties in encoder?
     // list codecs for a given format in ui
     return s;
@@ -137,16 +133,19 @@ bool AVMuxer::Private::prepareStreams()
     audio_streams.clear();
     video_streams.clear();
     subtitle_streams.clear();
-    AVOutputFormat* fmt = format_ctx->oformat;
+    QtAVOutputFormat* fmt = format_ctx->oformat;
     if (venc) {
         AVStream *s = addStream(format_ctx, venc->codecName(), fmt->video_codec);
         if (s) {
-            AVCodecContext *c = s->codec;
+            AVCodecParameters *c = s->codecpar;
+            const AVCodecContext *vctx = (const AVCodecContext*)venc->codecContext();
+            if (vctx)
+                avcodec_parameters_from_context(c, vctx);
             c->bit_rate = venc->bitRate();
             c->width = venc->width();
             c->height = venc->height();
             /// MUST set after encoder is open to ensure format is valid and the same
-            c->pix_fmt = (AVPixelFormat)VideoFormat::pixelFormatToFFmpeg(venc->pixelFormat());
+            c->format = VideoFormat::pixelFormatToFFmpeg(venc->pixelFormat());
 
             // Set avg_frame_rate based on encoder frame_rate
             s->avg_frame_rate = av_d2q(venc->frameRate(), venc->frameRate()*1001.0+2);
@@ -157,25 +156,23 @@ bool AVMuxer::Private::prepareStreams()
     if (aenc) {
         AVStream *s = addStream(format_ctx, aenc->codecName(), fmt->audio_codec);
         if (s) {
-            AVCodecContext *c = s->codec;
+            AVCodecParameters *c = s->codecpar;
+            const AVCodecContext *avctx = (const AVCodecContext*)aenc->codecContext();
+            // copies initial_padding and extradata too
+            if (avctx)
+                avcodec_parameters_from_context(c, avctx);
             c->bit_rate = aenc->bitRate();
             /// MUST set after encoder is open to ensure format is valid and the same
             c->sample_rate = aenc->audioFormat().sampleRate();
-            c->sample_fmt = (AVSampleFormat)aenc->audioFormat().sampleFormatFFmpeg();
+            c->format = aenc->audioFormat().sampleFormatFFmpeg();
+#if QTAV_CH_LAYOUT_API
+            if (c->ch_layout.nb_channels <= 0)
+                qtav_set_channel_layout(&c->ch_layout, aenc->audioFormat().channelLayoutFFmpeg(), aenc->audioFormat().channels());
+#else
             c->channel_layout = aenc->audioFormat().channelLayoutFFmpeg();
             c->channels = aenc->audioFormat().channels();
-            c->bits_per_raw_sample = aenc->audioFormat().bytesPerSample()*8; // need??
-
-            AVCodecContext *avctx = (AVCodecContext *) aenc->codecContext();
-#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(56,5,100)
-            c->initial_padding = avctx->initial_padding;
-#else
-            c->delay = avctx->delay;
 #endif
-            if (avctx->extradata_size) {
-                c->extradata = avctx->extradata;
-                c->extradata_size = avctx->extradata_size;
-            }
+            c->bits_per_raw_sample = aenc->audioFormat().bytesPerSample()*8; // need??
 
             audio_streams.push_back(s->id);
         }
@@ -195,7 +192,7 @@ static void getFFmpegOutputFormats(QStringList* formats, QStringList* extensions
         while ((o = av_muxer_iterate(&it))) {
 #else
         av_register_all(); // MUST register all input/output formats
-        AVOutputFormat *o = NULL;
+        QtAVOutputFormat *o = NULL;
         while ((o = av_oformat_next(o))) {
 #endif
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)

@@ -54,7 +54,6 @@ public:
     AudioEncoderFFmpegPrivate()
         : AudioEncoderPrivate()
     {
-        avcodec_register_all();
         // NULL: codec-specific defaults won't be initialized, which may result in suboptimal default settings (this is important mainly for encoders, e.g. libx264).
         avctx = avcodec_alloc_context3(NULL);
     }
@@ -68,11 +67,11 @@ bool AudioEncoderFFmpegPrivate::open()
 {
     if (codec_name.isEmpty()) {
         // copy ctx from muxer by copyAVCodecContext
-        AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
+        const AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
         AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
         return true;
     }
-    AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    const AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
     if (!codec) {
         const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
         if (cd) {
@@ -92,37 +91,39 @@ bool AudioEncoderFFmpegPrivate::open()
     // reset format_used to user defined format. important to update default format if format is invalid
     format_used = format;
     if (format.sampleRate() <= 0) {
-        if (codec->supported_samplerates) {
-            qDebug("use first supported sample rate: %d", codec->supported_samplerates[0]);
-            format_used.setSampleRate(codec->supported_samplerates[0]);
+        const int *samplerates = qtav_codec_samplerates(codec);
+        if (samplerates) {
+            qDebug("use first supported sample rate: %d", samplerates[0]);
+            format_used.setSampleRate(samplerates[0]);
         } else {
             qWarning("sample rate and supported sample rate are not set. use 44100");
             format_used.setSampleRate(44100);
         }
     }
     if (format.sampleFormat() == AudioFormat::SampleFormat_Unknown) {
-        if (codec->sample_fmts) {
-            qDebug("use first supported sample format: %d", codec->sample_fmts[0]);
-            format_used.setSampleFormatFFmpeg((int)codec->sample_fmts[0]);
+        const AVSampleFormat *sample_fmts = qtav_codec_sample_fmts(codec);
+        if (sample_fmts) {
+            qDebug("use first supported sample format: %d", sample_fmts[0]);
+            format_used.setSampleFormatFFmpeg((int)sample_fmts[0]);
         } else {
             qWarning("sample format and supported sample format are not set. use s16");
             format_used.setSampleFormat(AudioFormat::SampleFormat_Signed16);
         }
     }
     if (format.channelLayout() == AudioFormat::ChannelLayout_Unsupported) {
-        if (codec->channel_layouts) {
+        const qint64 first_layout = qtav_codec_first_channel_layout(codec);
+        if (first_layout) {
             char cl[128];
-            av_get_channel_layout_string(cl, sizeof(cl), -1, codec->channel_layouts[0]); //TODO: ff version
+            av_get_channel_layout_string(cl, sizeof(cl), -1, first_layout); //TODO: ff version
             qDebug("use first supported channel layout: %s", cl);
-            format_used.setChannelLayoutFFmpeg((qint64)codec->channel_layouts[0]);
+            format_used.setChannelLayoutFFmpeg(first_layout);
         } else {
             qWarning("channel layout and supported channel layout are not set. use stereo");
             format_used.setChannelLayout(AudioFormat::ChannelLayout_Stereo);
         }
     }
     avctx->sample_fmt = (AVSampleFormat)format_used.sampleFormatFFmpeg();
-    avctx->channel_layout = format_used.channelLayoutFFmpeg();
-    avctx->channels = format_used.channels();
+    QTAV_AVCTX_SET_CHANNEL_LAYOUT(avctx, format_used.channelLayoutFFmpeg(), format_used.channels());
     avctx->sample_rate = format_used.sampleRate();
     avctx->bits_per_raw_sample = format_used.bytesPerSample()*8;
 
@@ -159,7 +160,7 @@ bool AudioEncoderFFmpegPrivate::open()
 
 bool AudioEncoderFFmpegPrivate::close()
 {
-    AV_ENSURE_OK(avcodec_close(avctx), false);
+    AV_ENSURE_OK(qtav_close_codec_context(&avctx), false);
     return true;
 }
 
@@ -182,8 +183,8 @@ bool AudioEncoderFFmpeg::encode(const AudioFrame &frame)
         f = av_frame_alloc();
         const AudioFormat fmt(frame.format());
         f->format = fmt.sampleFormatFFmpeg();
-        f->channel_layout = fmt.channelLayoutFFmpeg();
-        // f->channels = fmt.channels(); //remove? not availale in libav9
+        QTAV_AVFRAME_SET_CHANNEL_LAYOUT(f, fmt.channelLayoutFFmpeg(), fmt.channels());
+        f->sample_rate = fmt.sampleRate();
         // must be (not the last frame) exactly frame_size unless CODEC_CAP_VARIABLE_FRAME_SIZE is set (frame_size==0)
         // TODO: mpv use pcmhack for avctx.frame_size==0. can we use input frame.samplesPerChannel?
         f->nb_samples = d.frame_size;
@@ -199,26 +200,29 @@ bool AudioEncoderFFmpeg::encode(const AudioFrame &frame)
             f->extended_data[i] = (uint8_t*)frame.constBits(i);
         }
     }
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = (uint8_t*)d.buffer.constData(); //NULL
-    pkt.size = d.buffer.size(); //0
-    int got_packet = 0;
-    int ret = avcodec_encode_audio2(d.avctx, &pkt, f, &got_packet);
+    // NULL frame drains the encoder. AVERROR_EOF is returned if it's already draining
+    int ret = avcodec_send_frame(d.avctx, f);
     av_frame_free(&f);
-    if (ret < 0) {
-        //qWarning("error avcodec_encode_audio2: %s" ,av_err2str(ret));
-        //av_packet_unref(&pkt); //FIXME
+    if (ret < 0 && ret != AVERROR_EOF) {
+        //qWarning("error avcodec_send_frame: %s" ,av_err2str(ret));
         return false; //false
     }
-    if (!got_packet) {
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt)
+        return false;
+    ret = avcodec_receive_packet(d.avctx, pkt);
+    if (ret < 0) {
+        av_packet_free(&pkt);
+        if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+            return false; //false
         qWarning("no packet got");
         d.packet = Packet();
         // invalid frame means eof
         return frame.isValid();
     }
-   // qDebug("enc avpkt.pts: %lld, dts: %lld.", pkt.pts, pkt.dts);
-    d.packet = Packet::fromAVPacket(&pkt, av_q2d(d.avctx->time_base));
+   // qDebug("enc avpkt.pts: %lld, dts: %lld.", pkt->pts, pkt->dts);
+    d.packet = Packet::fromAVPacket(pkt, av_q2d(d.avctx->time_base));
+    av_packet_free(&pkt);
    // qDebug("enc packet.pts: %.3f, dts: %.3f.", d.packet.pts, d.packet.dts);
     return true;
 }

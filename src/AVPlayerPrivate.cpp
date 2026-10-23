@@ -57,16 +57,19 @@ int computeNotifyPrecision(qint64 duration, qreal fps)
 } // namespace Internal
 
 static bool correct_audio_channels(AVCodecContext *ctx) {
-    if (ctx->channels <= 0) {
-        if (ctx->channel_layout) {
-            ctx->channels = av_get_channel_layout_nb_channels(ctx->channel_layout);
+    int channels = QTAV_AVCTX_CHANNELS(ctx);
+    int64_t layout = QTAV_AVCTX_CHANNEL_LAYOUT(ctx);
+    if (channels <= 0) {
+        if (layout) {
+            channels = av_get_channel_layout_nb_channels(layout);
         }
     } else {
-        if (!ctx->channel_layout) {
-            ctx->channel_layout = av_get_default_channel_layout(ctx->channels);
+        if (!layout) {
+            layout = av_get_default_channel_layout(channels);
         }
     }
-    return ctx->channel_layout > 0 && ctx->channels > 0;
+    QTAV_AVCTX_SET_CHANNEL_LAYOUT(ctx, layout, channels);
+    return layout > 0 && channels > 0;
 }
 
 AVPlayer::Private::Private()
@@ -306,10 +309,10 @@ void AVPlayer::Private::initAudioStatistics(int s)
     }
     correct_audio_channels(avctx);
     statistics.audio_only.block_align = avctx->block_align;
-    statistics.audio_only.channels = avctx->channels;
+    statistics.audio_only.channels = QTAV_AVCTX_CHANNELS(avctx);
     char cl[128]; //
     // nb_channels -1: will use av_get_channel_layout_nb_channels
-    av_get_channel_layout_string(cl, sizeof(cl), avctx->channels, avctx->channel_layout);
+    av_get_channel_layout_string(cl, sizeof(cl), QTAV_AVCTX_CHANNELS(avctx), QTAV_AVCTX_CHANNEL_LAYOUT(avctx));
     statistics.audio_only.channel_layout = QLatin1String(cl);
     statistics.audio_only.sample_fmt = QLatin1String(av_get_sample_fmt_name(avctx->sample_fmt));
     statistics.audio_only.frame_size = avctx->frame_size;
@@ -336,7 +339,17 @@ void AVPlayer::Private::initVideoStatistics(int s)
     statistics.video_only.height = avctx->height;
     statistics.video_only.width = avctx->width;
     statistics.video_only.rotate = 0;
-#if AV_MODULE_CHECK(LIBAVFORMAT, 55, 18, 0, 39, 100)
+#if LIBAVCODEC_VERSION_MAJOR >= 61 //av_stream_get_side_data() is removed
+    const AVPacketSideData *psd = av_packet_side_data_get(demuxer.formatContext()->streams[s]->codecpar->coded_side_data
+                                                          , demuxer.formatContext()->streams[s]->codecpar->nb_coded_side_data
+                                                          , AV_PKT_DATA_DISPLAYMATRIX);
+    const quint8 *sd = psd ? psd->data : NULL;
+    if (sd) {
+        double r = av_display_rotation_get((const qint32*)sd);
+        if (!qIsNaN(r))
+            statistics.video_only.rotate = ((int)r + 360) % 360;
+    }
+#elif AV_MODULE_CHECK(LIBAVFORMAT, 55, 18, 0, 39, 100)
     quint8 *sd = av_stream_get_side_data(demuxer.formatContext()->streams[s], AV_PKT_DATA_DISPLAYMATRIX, NULL);
     if (sd) {
         double r = av_display_rotation_get((qint32*)sd);
@@ -390,7 +403,7 @@ bool AVPlayer::Private::setupAudioThread(AVPlayer *player)
     AudioFormat af;
     af.setSampleRate(avctx->sample_rate);
     af.setSampleFormatFFmpeg(avctx->sample_fmt);
-    af.setChannelLayoutFFmpeg(avctx->channel_layout);
+    af.setChannelLayoutFFmpeg(QTAV_AVCTX_CHANNEL_LAYOUT(avctx));
     if (!af.isValid()) {
         qWarning("invalid audio format. audio stream will be disabled");
         return false;
@@ -411,8 +424,8 @@ bool AVPlayer::Private::setupAudioThread(AVPlayer *player)
 #if !USE_AUDIO_FRAME
     adec->resampler()->inAudioFormat().setSampleFormatFFmpeg(avctx->sample_fmt);
     adec->resampler()->inAudioFormat().setSampleRate(avctx->sample_rate);
-    adec->resampler()->inAudioFormat().setChannels(avctx->channels);
-    adec->resampler()->inAudioFormat().setChannelLayoutFFmpeg(avctx->channel_layout);
+    adec->resampler()->inAudioFormat().setChannels(QTAV_AVCTX_CHANNELS(avctx));
+    adec->resampler()->inAudioFormat().setChannelLayoutFFmpeg(QTAV_AVCTX_CHANNEL_LAYOUT(avctx));
 #endif
     if (audio_track < 0)
         return true;
@@ -471,7 +484,11 @@ QVariantList AVPlayer::Private::getTracksInfo(AVDemuxer *demuxer, AVDemuxer::Str
         t[QStringLiteral("stream_index")] = QVariant(s);
 
         AVStream *stream = demuxer->formatContext()->streams[s];
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+        AVCodecParameters *ctx = stream->codecpar;
+#else
         AVCodecContext *ctx = stream->codec;
+#endif
         if (ctx) {
             const AVCodecDescriptor* codec_desc = avcodec_descriptor_get(ctx->codec_id);
             if (codec_desc)

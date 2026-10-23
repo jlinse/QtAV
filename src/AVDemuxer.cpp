@@ -22,6 +22,7 @@
 #include "QtAV/MediaIO.h"
 #include "QtAV/private/AVCompat.h"
 #include <QtCore/QMutex>
+#include <QtCore/QVector>
 #include <QtCore/QStringList>
 #include <QtCore/QIODevice>
 #if QT_VERSION >= QT_VERSION_CHECK(4, 7, 0)
@@ -266,7 +267,12 @@ public:
         if (format_ctx->pb)
             s |= !!format_ctx->pb->seekable;
         // format.read_seek: time seeking. For example, seeking on hls stream steps: find segment, read packet in segment and drop until desired pts got
+#if LIBAVFORMAT_VERSION_MAJOR < 63 //AVInputFormat.read_seek is private in FFmpeg 9.0
         s |= format_ctx->iformat->read_seek || format_ctx->iformat->read_seek2;
+#else
+        // can not know whether the demuxer supports seeking, guess from the timestamps and duration
+        s |= !(format_ctx->iformat->flags & AVFMT_NOTIMESTAMPS) && format_ctx->duration > 0;
+#endif
         return s;
     }
     // set wanted_xx_stream. call openCodecs() to read new stream frames
@@ -291,7 +297,7 @@ public:
     //copy the info, not parse the file when constructed, then need member vars
     QString file;
     QString file_orig;
-    AVInputFormat *input_format;
+    QtAVInputFormat *input_format;
     QString format_forced;
     MediaIO *input;
 
@@ -311,9 +317,31 @@ public:
         // wanted_stream is REQUIRED. e.g. always set -1 to indicate the default stream, -2 to disable
         int stream, wanted_stream; // -1 default, selected by ff
         int index, wanted_index; // index in a kind of streams
-        AVCodecContext *avctx;
+        AVCodecContext *avctx; // owned by AVDemuxer::Private::stream_ctx
     } StreamInfo;
     StreamInfo astream, vstream, sstream;
+    // FFmpeg >= 5.0 has no AVStream.codec, create contexts from AVStream.codecpar
+    QVector<AVCodecContext*> stream_ctx;
+    AVCodecContext* streamCodecContext(int s) {
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+        if (!format_ctx || s < 0 || s >= (int)format_ctx->nb_streams)
+            return 0;
+        if (stream_ctx.size() < (int)format_ctx->nb_streams)
+            stream_ctx.resize(format_ctx->nb_streams);
+        if (!stream_ctx[s])
+            stream_ctx[s] = qtav_alloc_stream_codec_context(format_ctx->streams[s]);
+        return stream_ctx[s];
+#else
+        return format_ctx->streams[s]->codec;
+#endif
+    }
+    void freeCodecContexts() {
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+        for (int i = 0; i < stream_ctx.size(); ++i)
+            avcodec_free_context(&stream_ctx[i]);
+#endif
+        stream_ctx.clear();
+    }
 
     AVDemuxer::InterruptHandler *interrupt_hanlder;
     QMutex mutex; //TODO: remove if load, read, seek is called in 1 thread
@@ -363,7 +391,7 @@ static void getFFmpegInputFormats(QStringList* formats, QStringList* extensions)
         void* it = NULL;
         while ((i = av_demuxer_iterate(&it))) {
 #else
-        AVInputFormat *i = NULL;
+        QtAVInputFormat *i = NULL;
         av_register_all(); // MUST register all input/output formats
         while ((i = av_iformat_next(i))) {
 #endif
@@ -623,12 +651,14 @@ bool AVDemuxer::seek(qint64 pos)
     if (upos <= startTime()) {
         qDebug("************seek to beginning. started = false");
         d->started = false; //???
+#if LIBAVCODEC_VERSION_MAJOR < 62 //the stream contexts are not used to decode since AVStream.codec is removed
         if (d->astream.avctx)
             d->astream.avctx->frame_number = 0;
         if (d->vstream.avctx)
             d->vstream.avctx->frame_number = 0; //TODO: why frame_number not changed after seek?
         if (d->sstream.avctx)
             d->sstream.avctx->frame_number = 0;
+#endif
     }
     return true;
 }
@@ -890,6 +920,7 @@ bool AVDemuxer::unload()
     //av_close_input_file(d->format_ctx); //deprecated
     if (d->format_ctx) {
         qDebug("closing d->format_ctx");
+        d->freeCodecContexts();
         avformat_close_input(&d->format_ctx); //libavf > 53.10.0
         d->format_ctx = 0;
         d->input_format = 0;
@@ -1077,8 +1108,8 @@ AVCodecContext* AVDemuxer::audioCodecContext(int stream) const
         return d->astream.avctx;
     if (stream > (int)d->format_ctx->nb_streams)
         return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_AUDIO)
+    AVCodecContext *avctx = d->streamCodecContext(stream);
+    if (avctx && avctx->codec_type == AVMEDIA_TYPE_AUDIO)
         return avctx;
     return 0;
 }
@@ -1089,8 +1120,8 @@ AVCodecContext* AVDemuxer::videoCodecContext(int stream) const
         return d->vstream.avctx;
     if (stream > (int)d->format_ctx->nb_streams)
         return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_VIDEO)
+    AVCodecContext *avctx = d->streamCodecContext(stream);
+    if (avctx && avctx->codec_type == AVMEDIA_TYPE_VIDEO)
         return avctx;
     return 0;
 }
@@ -1101,8 +1132,8 @@ AVCodecContext* AVDemuxer::subtitleCodecContext(int stream) const
         return d->sstream.avctx;
     if (stream > (int)d->format_ctx->nb_streams)
         return 0;
-    AVCodecContext *avctx = d->format_ctx->streams[stream]->codec;
-    if (avctx->codec_type == AVMEDIA_TYPE_SUBTITLE)
+    AVCodecContext *avctx = d->streamCodecContext(stream);
+    if (avctx && avctx->codec_type == AVMEDIA_TYPE_SUBTITLE)
         return avctx;
     return 0;
 }
@@ -1298,7 +1329,7 @@ bool AVDemuxer::Private::setStream(AVDemuxer::StreamType st, int streamValue)
     // don't touch wanted index
     si->stream = s;
     si->wanted_stream = streamValue;
-    si->avctx = format_ctx->streams[s]->codec;
+    si->avctx = streamCodecContext(s);
     has_attached_pic = !!(format_ctx->streams[s]->disposition & AV_DISPOSITION_ATTACHED_PIC);
     return true;
 }
@@ -1311,7 +1342,11 @@ bool AVDemuxer::Private::prepareStreams()
         return false;
     AVMediaType type = AVMEDIA_TYPE_UNKNOWN;
     for (unsigned int i = 0; i < format_ctx->nb_streams; ++i) {
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+        type = format_ctx->streams[i]->codecpar->codec_type;
+#else
         type = format_ctx->streams[i]->codec->codec_type;
+#endif
         if (type == AVMEDIA_TYPE_VIDEO) {
             video_streams.push_back(i);
         } else if (type == AVMEDIA_TYPE_AUDIO) {

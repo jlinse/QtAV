@@ -175,6 +175,8 @@ void AudioEncodeFilter::encode(const AudioFrame& frame)
     AudioFrame f(frame);
     if (f.format() != d.enc->audioFormat())
         f = f.to(d.enc->audioFormat());
+    if (!f.isValid()) // conversion failed or the resampler has no output yet
+        return;
 
     if (d.leftOverAudio.isValid()) {
         f.prepend(d.leftOverAudio);

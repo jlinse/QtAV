@@ -219,7 +219,7 @@ VideoFrame VideoDecoderVideoToolbox::frame()
         f = VideoFrame(d.width, d.height, fmt);
         f.setBytesPerLine(pitch);
         // TODO: move to updateFrameInfo
-        f.setTimestamp(double(d.frame->pkt_pts)/1000.0);
+        f.setTimestamp(double(QTAV_FRAME_PKT_PTS(d.frame))/1000.0);
         f.setDisplayAspectRatio(d.getDAR(d.frame));
         d.updateColorDetails(&f);
         if (d.interop_res) { // zero_copy

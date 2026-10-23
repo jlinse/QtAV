@@ -183,8 +183,7 @@ public:
         interop_res = cuda::InteropResourcePtr();
     }
     ~VideoDecoderCUDAPrivate() {
-        if (bsf)
-            av_bitstream_filter_close(bsf);
+        av_bsf_free(&bsf);
         if (!can_load)
             return;
         if (!isLoaded()) //cuda_api
@@ -320,7 +319,7 @@ public:
     int nb_dec_surface;
     QString description;
 
-    AVBitStreamFilterContext *bsf; //TODO: rename bsf_ctx
+    AVBSFContext *bsf; //TODO: rename bsf_ctx
 
     VideoDecoderCUDA::CopyMode copy_mode;
     cuda::InteropResourcePtr interop_res; //may be still used in video frames when decoder is destroyed
@@ -385,22 +384,29 @@ bool VideoDecoderCUDA::decode(const Packet &packet)
         }
         return !d.frame_queue.isEmpty();
     }
-    uint8_t *outBuf = 0;
-    int outBufSize = 0;
-    int filtered = 0;
+    const uint8_t *outBuf = (const uint8_t*)packet.data.constData();
+    int outBufSize = packet.data.size();
+    AVPacket *filtered = NULL;
     if (d.bsf) {
-        // h264_mp4toannexb_filter does not use last parameter 'keyFrame', so just set 0
-        //return: 0: not changed, no outBuf allocated. >0: ok. <0: fail
-        filtered = av_bitstream_filter_filter(d.bsf, d.codec_ctx, NULL, &outBuf, &outBufSize
-                                                  , (const uint8_t*)packet.data.constData(), packet.data.size()
-                                                  , 0);//d.is_keyframe);
-        //qDebug("%s @%d filtered=%d outBuf=%p, outBufSize=%d", __FUNCTION__, __LINE__, filtered, outBuf, outBufSize);
-        if (filtered < 0) {
-            qDebug("failed to filter: %s", av_err2str(filtered));
+        // h264_mp4toannexb_filter. use the original data if failed
+        int ret = AVERROR(ENOMEM);
+        AVPacket *in = av_packet_alloc();
+        filtered = av_packet_alloc();
+        if (in && filtered && (ret = av_new_packet(in, packet.data.size())) >= 0) {
+            memcpy(in->data, packet.data.constData(), packet.data.size());
+            ret = av_bsf_send_packet(d.bsf, in); // in is moved to the filter
+            if (ret >= 0)
+                ret = av_bsf_receive_packet(d.bsf, filtered);
         }
-    } else {
-        outBuf = (uint8_t*)packet.data.constData();
-        outBufSize = packet.data.size();
+        av_packet_free(&in);
+        //qDebug("%s @%d ret=%d outBuf=%p, outBufSize=%d", __FUNCTION__, __LINE__, ret, outBuf, outBufSize);
+        if (ret >= 0) {
+            outBuf = filtered->data;
+            outBufSize = filtered->size;
+        } else {
+            qDebug("failed to filter: %s", av_err2str(ret));
+            av_packet_free(&filtered);
+        }
     }
 
     CUVIDSOURCEDATAPACKET cuvid_pkt;
@@ -414,9 +420,7 @@ bool VideoDecoderCUDA::decode(const Packet &packet)
     }
     //TODO: fill NALU header for h264? https://devtalk.nvidia.com/default/topic/515571/what-the-data-format-34-cuvidparsevideodata-34-can-accept-/
     d.doParseVideoData(&cuvid_pkt);
-    if (filtered > 0) {
-        av_freep(&outBuf);
-    }
+    av_packet_free(&filtered);
     // callbacks are in the same thread as this. so no queue is required?
     //qDebug("frame queue size on decode: %d", d.frame_queue.size());
     return !d.frame_queue.isEmpty();
@@ -778,20 +782,23 @@ bool VideoDecoderCUDAPrivate::processDecodedData(CUVIDPARSERDISPINFO *cuviddisp,
 
 void VideoDecoderCUDAPrivate::setBSF(AVCodecID codec)
 {
-    if (codec == QTAV_CODEC_ID(H264)) {
-        if (!bsf)
-            bsf = av_bitstream_filter_init("h264_mp4toannexb");
-        Q_ASSERT(bsf && "h264_mp4toannexb bsf not found");
-    } else if (codec == QTAV_CODEC_ID(HEVC)) {
-        if (!bsf)
-            bsf = av_bitstream_filter_init("hevc_mp4toannexb");
-        Q_ASSERT(bsf && "hevc_mp4toannexb bsf not found");
-    } else {
-        if (bsf) {
-            av_bitstream_filter_close(bsf);
-            bsf = 0;
-        }
-    }
+    // always create a new one because the filter needs the extradata of the current stream
+    av_bsf_free(&bsf);
+    const char *name = NULL;
+    if (codec == QTAV_CODEC_ID(H264))
+        name = "h264_mp4toannexb";
+    else if (codec == QTAV_CODEC_ID(HEVC))
+        name = "hevc_mp4toannexb";
+    if (!name)
+        return;
+    const AVBitStreamFilter *f = av_bsf_get_by_name(name);
+    Q_ASSERT(f && "mp4toannexb bsf not found");
+    if (!f)
+        return;
+    if (av_bsf_alloc(f, &bsf) < 0)
+        return;
+    if (avcodec_parameters_from_context(bsf->par_in, codec_ctx) < 0 || av_bsf_init(bsf) < 0)
+        av_bsf_free(&bsf);
 }
 
 } //namespace QtAV

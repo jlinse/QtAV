@@ -116,11 +116,11 @@ bool VideoEncoderFFmpegPrivate::open()
     nb_encoded = 0LL;
     if (codec_name.isEmpty()) {
         // copy ctx from muxer by copyAVCodecContext
-        AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
+        const AVCodec *codec = avcodec_find_encoder(avctx->codec_id);
         AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
         return true;
     }
-    AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
+    const AVCodec *codec = avcodec_find_encoder_by_name(codec_name.toUtf8().constData());
     if (!codec) {
         const AVCodecDescriptor* cd = avcodec_descriptor_get_by_name(codec_name.toUtf8().constData());
         if (cd) {
@@ -136,14 +136,15 @@ bool VideoEncoderFFmpegPrivate::open()
         avctx = 0;
     }
     avctx = avcodec_alloc_context3(codec);
+    const AVPixelFormat *pix_fmts = qtav_codec_pix_fmts(codec);
     avctx->width = width; // coded_width works, why?
     avctx->height = height;
     // reset format_used to user defined format. important to update default format if format is invalid
     format_used = VideoFormat::Format_Invalid;
     AVPixelFormat fffmt = (AVPixelFormat)format.pixelFormatFFmpeg();
-    if (codec->pix_fmts && format.isValid()) {
-        for (int i = 0; codec->pix_fmts[i] != AVPixelFormat(-1); ++i) {
-            if (fffmt == codec->pix_fmts[i]) {
+    if (pix_fmts && format.isValid()) {
+        for (int i = 0; pix_fmts[i] != AVPixelFormat(-1); ++i) {
+            if (fffmt == pix_fmts[i]) {
                 format_used = format.pixelFormat();
                 break;
             }
@@ -151,8 +152,8 @@ bool VideoEncoderFFmpegPrivate::open()
     }
     //avctx->sample_aspect_ratio =
     AVPixelFormat hwfmt = AVPixelFormat(-1);
-    if (av_pix_fmt_desc_get(codec->pix_fmts[0])->flags & AV_PIX_FMT_FLAG_HWACCEL)
-        hwfmt = codec->pix_fmts[0];
+    if (pix_fmts && (av_pix_fmt_desc_get(pix_fmts[0])->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        hwfmt = pix_fmts[0];
     bool use_hwctx = false;
     if (hwfmt != AVPixelFormat(-1)) {
 #ifdef HAVE_AVHWCTX
@@ -205,16 +206,16 @@ bool VideoEncoderFFmpegPrivate::open()
         // TODO: check frame is hw frame
         if (hwfmt == AVPixelFormat(-1)) { // sw enc
             if (format_used == VideoFormat::Format_Invalid) {// requested format is not supported by sw enc
-                if (codec->pix_fmts) { //pix_fmts[0] is always a sw format here
-                    qDebug("use first supported pixel format '%d' for sw encoder", codec->pix_fmts[0]);
-                    format_used = VideoFormat::pixelFormatFromFFmpeg((int)codec->pix_fmts[0]);
+                if (pix_fmts) { //pix_fmts[0] is always a sw format here
+                    qDebug("use first supported pixel format '%d' for sw encoder", pix_fmts[0]);
+                    format_used = VideoFormat::pixelFormatFromFFmpeg((int)pix_fmts[0]);
                 }
             }
         } else {
             if (format_used == VideoFormat::Format_Invalid) { // requested format is not supported by hw enc
-                qDebug("use first supported sw pixel format '%d' for hw encoder", codec->pix_fmts[1]);
-                if (codec->pix_fmts && codec->pix_fmts[1] != AVPixelFormat(-1))
-                    format_used = VideoFormat::pixelFormatFromFFmpeg(codec->pix_fmts[1]);
+                qDebug("use first supported sw pixel format '%d' for hw encoder", pix_fmts[1]);
+                if (pix_fmts && pix_fmts[1] != AVPixelFormat(-1))
+                    format_used = VideoFormat::pixelFormatFromFFmpeg(pix_fmts[1]);
             }
         }
         if (format_used == VideoFormat::Format_Invalid) {
@@ -247,14 +248,14 @@ bool VideoEncoderFFmpegPrivate::open()
     applyOptionsForContext();
     AV_ENSURE_OK(avcodec_open2(avctx, codec, &dict), false);
     // from mpv ao_lavc
-    const int buffer_size = qMax<int>(qMax<int>(width*height*6+200, AV_INPUT_BUFFER_MIN_SIZE), sizeof(AVPicture));//??
+    const int buffer_size = qMax<int>(width*height*6+200, AV_INPUT_BUFFER_MIN_SIZE);//??
     buffer.resize(buffer_size);
     return true;
 }
 
 bool VideoEncoderFFmpegPrivate::close()
 {
-    AV_ENSURE_OK(avcodec_close(avctx), false);
+    AV_ENSURE_OK(qtav_close_codec_context(&avctx), false);
     return true;
 }
 
@@ -368,25 +369,31 @@ bool VideoEncoderFFmpeg::encode(const VideoFrame &frame)
         }
 #endif //HAVE_AVHWCTX
     }
-    AVPacket pkt;
-    av_init_packet(&pkt);
-    pkt.data = (uint8_t*)d.buffer.constData();
-    pkt.size = d.buffer.size();
-    int got_packet = 0;
-    int ret = avcodec_encode_video2(d.avctx, &pkt, f.data(), &got_packet);
-    if (ret < 0) {
-        qWarning("error avcodec_encode_video2: %s" ,av_err2str(ret));
+    // NULL frame drains the encoder. AVERROR_EOF is returned if it's already draining
+    int ret = avcodec_send_frame(d.avctx, f.data());
+    if (ret < 0 && ret != AVERROR_EOF) {
+        qWarning("error avcodec_send_frame: %s" ,av_err2str(ret));
         return false; //false
     }
     d.nb_encoded++;
-    if (!got_packet) {
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt)
+        return false;
+    ret = avcodec_receive_packet(d.avctx, pkt);
+    if (ret < 0) {
+        av_packet_free(&pkt);
+        if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+            qWarning("error avcodec_receive_packet: %s" ,av_err2str(ret));
+            return false; //false
+        }
         qWarning("no packet got");
         d.packet = Packet();
         // invalid frame means eof
         return frame.isValid();
     }
-   // qDebug("enc avpkt.pts: %lld, dts: %lld.", pkt.pts, pkt.dts);
-    d.packet = Packet::fromAVPacket(&pkt, av_q2d(d.avctx->time_base));
+   // qDebug("enc avpkt.pts: %lld, dts: %lld.", pkt->pts, pkt->dts);
+    d.packet = Packet::fromAVPacket(pkt, av_q2d(d.avctx->time_base));
+    av_packet_free(&pkt);
    // qDebug("enc packet.pts: %.3f, dts: %.3f.", d.packet.pts, d.packet.dts);
     return true;
 }
