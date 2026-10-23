@@ -626,13 +626,17 @@ void MainWindow::changeVO(QAction *action)
     VideoRendererId vid = (VideoRendererId)action->data().toInt();
     VideoRenderer *vo = VideoRenderer::create(vid);
     if (vo && vo->isAvailable()) {
-        if (!setRenderer(vo))
+        if (setRenderer(vo))
+            return;
+        else
             action->toggle();
     } else {
         action->toggle(); //check state changes if clicked
         QMessageBox::critical(0, QString::fromLatin1("QtAV"), tr("not availabe on your platform!"));
-        return;
     }
+
+    if (vo)
+        delete vo;
 }
 
 void MainWindow::processPendingActions()
@@ -699,6 +703,10 @@ bool MainWindow::setRenderer(QtAV::VideoRenderer *renderer)
     } else if (vid == VideoRendererId_XV) {
         mpVideoEQ->setEngines(QVector<VideoEQConfigPage::Engine>() << VideoEQConfigPage::XV);
         mpVideoEQ->setEngine(VideoEQConfigPage::XV);
+        mpPlayer->renderer()->forcePreferredPixelFormat(true);
+    } else if (vid == VideoRendererId_Vulkan) {
+        mpVideoEQ->setEngines(QVector<VideoEQConfigPage::Engine>() << VideoEQConfigPage::GLSL);
+        mpVideoEQ->setEngine(VideoEQConfigPage::GLSL);
         mpPlayer->renderer()->forcePreferredPixelFormat(true);
     } else {
         mpVideoEQ->setEngines(QVector<VideoEQConfigPage::Engine>() << VideoEQConfigPage::SWScale);
