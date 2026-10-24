@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(QTAV)
+project(QTAV LANGUAGES C CXX)
+
+get_property(QTAV_IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(QTAV_IS_MULTI_CONFIG)
+  set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel" CACHE STRING "Available build configurations" FORCE)
+elseif(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
 
 set(QTAV_MAJOR 1)
 set(QTAV_MINOR 13)
