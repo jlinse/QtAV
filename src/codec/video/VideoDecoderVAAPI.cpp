@@ -27,10 +27,18 @@
 #include <QtCore/QMetaEnum>
 #include <QtCore/QStringList>
 #include <QtCore/QThread>
-extern "C" {
-#include <libavcodec/vaapi.h>
-}
 #include "QtAV/private/AVCompat.h"
+// FFmpeg 5.0 (libavcodec 59) removed libavcodec/vaapi.h and struct vaapi_context.
+// Newer FFmpeg only accepts VA-API through AVHWDeviceContext/AVHWFramesContext.
+#define QTAV_VAAPI_HWCONTEXT (LIBAVCODEC_VERSION_MAJOR >= 59)
+extern "C" {
+#if QTAV_VAAPI_HWCONTEXT
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_vaapi.h>
+#else
+#include <libavcodec/vaapi.h>
+#endif
+}
 #include "QtAV/private/factory.h"
 #include "vaapi/SurfaceInteropVAAPI.h"
 #include "utils/Logger.h"
@@ -221,6 +229,9 @@ public:
         nb_surfaces = 0;
         disable_derive = true;
         image_fmt = VideoFormat::Format_Invalid;
+#if QTAV_VAAPI_HWCONTEXT
+        hw_device_ref = NULL;
+#endif
     }
     bool open() Q_DECL_OVERRIDE;
     void close() Q_DECL_OVERRIDE;
@@ -229,7 +240,11 @@ public:
     void* setup(AVCodecContext *avctx) Q_DECL_OVERRIDE;
     bool getBuffer(void **opaque, uint8_t **data) Q_DECL_OVERRIDE;
     void releaseBuffer(void *opaque, uint8_t *data) Q_DECL_OVERRIDE;
+#if QTAV_VAAPI_HWCONTEXT
+    AVPixelFormat vaPixelFormat() const Q_DECL_OVERRIDE { return AV_PIX_FMT_VAAPI; }
+#else
     AVPixelFormat vaPixelFormat() const Q_DECL_OVERRIDE { return QTAV_PIX_FMT_C(VAAPI_VLD); }
+#endif
 
     bool support_4k;
     VideoDecoderVAAPI::DisplayType display_type;
@@ -239,7 +254,11 @@ public:
     VAConfigID    config_id;
     VAContextID   context_id;
 
+#if QTAV_VAAPI_HWCONTEXT
+    AVBufferRef *hw_device_ref; // AVHWDeviceContext wrapping display
+#else
     struct vaapi_context hw_ctx;
+#endif
     int version_major;
     int version_minor;
     int surface_width;
@@ -630,6 +649,17 @@ bool VideoDecoderVAAPIPrivate::prepareVAImage(int w, int h)
     return true;
 }
 
+#if QTAV_VAAPI_HWCONTEXT
+// AVDecoder::close() releases our display before the codec context is freed, but FFmpeg
+// destroys its VA decode context only when the codec context is freed. The device context
+// therefore holds its own display reference, dropped when the last FFmpeg ref goes away.
+static void releaseDeviceDisplay(AVHWDeviceContext *ctx)
+{
+    delete static_cast<display_ptr*>(ctx->user_opaque);
+    ctx->user_opaque = NULL;
+}
+#endif
+
 void* VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
 {
     Q_UNUSED(avctx);
@@ -669,6 +699,45 @@ void* VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
             return NULL;
     }
     initUSWC(surface_width);
+#if QTAV_VAAPI_HWCONTEXT
+    if (!hw_device_ref) {
+        hw_device_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
+        if (!hw_device_ref) {
+            qWarning("VAAPI - av_hwdevice_ctx_alloc failed");
+            return NULL;
+        }
+        AVHWDeviceContext *device_ctx = (AVHWDeviceContext*)hw_device_ref->data;
+        device_ctx->user_opaque = new display_ptr(display);
+        device_ctx->free = releaseDeviceDisplay;
+        ((AVVAAPIDeviceContext*)device_ctx->hwctx)->display = display->get();
+        if (av_hwdevice_ctx_init(hw_device_ref) < 0) {
+            qWarning("VAAPI - av_hwdevice_ctx_init failed");
+            av_buffer_unref(&hw_device_ref);
+            return NULL;
+        }
+    }
+    AVBufferRef *frames_ref = av_hwframe_ctx_alloc(hw_device_ref);
+    if (!frames_ref) {
+        qWarning("VAAPI - av_hwframe_ctx_alloc failed");
+        return NULL;
+    }
+    AVHWFramesContext *frames_ctx = (AVHWFramesContext*)frames_ref->data;
+    frames_ctx->format = AV_PIX_FMT_VAAPI;
+    frames_ctx->sw_format = AV_PIX_FMT_NV12; // surfaces are VA_RT_FORMAT_YUV420
+    frames_ctx->width = surface_width;
+    frames_ctx->height = surface_height;
+    frames_ctx->initial_pool_size = 0; // decoding surfaces come from getBuffer(), not from this pool
+    if (av_hwframe_ctx_init(frames_ref) < 0) {
+        qWarning("VAAPI - av_hwframe_ctx_init failed");
+        av_buffer_unref(&frames_ref);
+        return NULL;
+    }
+    // FFmpeg creates its own VA config and decode context from hw_frames_ctx
+    av_buffer_unref(&avctx->hw_frames_ctx);
+    avctx->hw_frames_ctx = frames_ref;
+    // FFmpeg's VA-API hwaccel ignores hwaccel_context. Return non-null to report success to the base class.
+    return avctx->hw_frames_ctx;
+#else
     VA_ENSURE_TRUE(vaCreateContext(display->get(), config_id, surface_width, surface_height, VA_PROGRESSIVE, surfaces.data(), surfaces.size(), &context_id), NULL);
     /* Setup the ffmpeg hardware context */
     memset(&hw_ctx, 0, sizeof(hw_ctx));
@@ -676,6 +745,7 @@ void* VideoDecoderVAAPIPrivate::setup(AVCodecContext *avctx)
     hw_ctx.config_id = config_id;
     hw_ctx.context_id = context_id;
     return &hw_ctx;
+#endif
 }
 
 void VideoDecoderVAAPIPrivate::close()
@@ -694,6 +764,10 @@ void VideoDecoderVAAPIPrivate::close()
         VAWARN(vaDestroyConfig(display->get(), config_id));
         config_id = VA_INVALID_ID;
     }
+#if QTAV_VAAPI_HWCONTEXT
+    // codec_ctx->hw_frames_ctx still references the device (and thus the display) until the codec context is freed
+    av_buffer_unref(&hw_device_ref);
+#endif
     display.clear();
     releaseUSWC();
     nb_surfaces = 0;

@@ -159,6 +159,14 @@ CAPI_DEFINE_M_ENTRY(void, ALC_APIENTRY, alcCaptureSamples, CAPI_ARG3(ALCdevice *
 // mkapi code generation END
 CAPI_END_DLL()
 CAPI_DEFINE_DLL
+// declared in openal_api.h for namespace style, but capi.h's CAPI_DEFINE_DLL does not define it
+namespace capi {
+bool loaded() {
+    if (!dll)
+        dll = new api_dll();
+    return dll->isLoaded();
+}
+} //namespace capi
 // CAPI_DEFINE(argc, return_type, name, argv_no_name)
 // mkapi code generation BEGIN
 CAPI_DEFINE(void, alDopplerFactor, CAPI_ARG1(ALfloat))

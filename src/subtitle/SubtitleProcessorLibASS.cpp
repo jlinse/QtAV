@@ -115,7 +115,7 @@ static void ass_msg_cb(int level, const char *fmt, va_list va, void *data)
     printf("\n");
     fflush(0);
     return;
-    QString msg(QStringLiteral("{libass} ") + QString().vsprintf(fmt, va)); //QString.vsprintf() may crash at strlen().
+    QString msg(QStringLiteral("{libass} ") + QString::vasprintf(fmt, va)); //QString.vsprintf() may crash at strlen().
     if (level == MSGL_FATAL)
         qFatal("%s", msg.toUtf8().constData());
     else if (level <= 2)
