@@ -96,13 +96,13 @@ QString PropertyEditor::buildOptions()
                 if (i < me.keyCount() - 1)
                     result += QString::fromLatin1(",");
             }
-        } else if (mp.type() == QVariant::Int){
+        } else if (mp.userType() == QMetaType::Int){
             result += QString::fromLatin1("int");
-        } else if (mp.type() == QVariant::Double) {
+        } else if (mp.userType() == QMetaType::Double) {
             result += QString::fromLatin1("real");
-        } else if (mp.type() == QVariant::String) {
+        } else if (mp.userType() == QMetaType::QString) {
             result += QString::fromLatin1("text");
-        } else if (mp.type() == QVariant::Bool) {
+        } else if (mp.userType() == QMetaType::Bool) {
             result += QString::fromLatin1("bool");
         }
         const QVariant detail =  mPropertyDetails.value(QString::fromLatin1(mp.name()));
@@ -126,6 +126,7 @@ QWidget* PropertyEditor::buildUi(QObject *obj)
         if (qstrcmp(mp.name(), "objectName") == 0)
             continue;
         value = mProperties[QString::fromLatin1(mp.name())];
+        const int type = mp.userType();
         if (mp.isEnumType()) {
             if (mp.isFlagType()) {
                 gl->addWidget(createWidgetForFlags(QString::fromLatin1(mp.name()), value, mp.enumerator(), obj ? obj->property(QByteArray("detail_").append(mp.name()).constData()).toString() : QString()), row, 0, Qt::AlignLeft | Qt::AlignVCenter);
@@ -133,13 +134,13 @@ QWidget* PropertyEditor::buildUi(QObject *obj)
                 gl->addWidget(new QLabel(QObject::tr(mp.name())), row, 0, Qt::AlignRight | Qt::AlignVCenter);
                 gl->addWidget(createWidgetForEnum(QString::fromLatin1(mp.name()), value, mp.enumerator(), obj ? obj->property(QByteArray("detail_").append(mp.name()).constData()).toString() : QString()), row, 1, Qt::AlignLeft | Qt::AlignVCenter);
             }
-        } else if (mp.type() == QVariant::Int || mp.type() == QVariant::UInt || mp.type() == QVariant::LongLong || mp.type() == QVariant::ULongLong){
+        } else if (type == QMetaType::Int || type == QMetaType::UInt || type == QMetaType::LongLong || type == QMetaType::ULongLong){
             gl->addWidget(new QLabel(QObject::tr(mp.name())), row, 0, Qt::AlignRight | Qt::AlignVCenter);
             gl->addWidget(createWidgetForInt(QString::fromLatin1(mp.name()), value.toInt(), obj ? obj->property(QByteArray("detail_").append(mp.name()).constData()).toString() : QString()), row, 1, Qt::AlignLeft | Qt::AlignVCenter);
-        } else if (mp.type() == QVariant::Double) {
+        } else if (type == QMetaType::Double) {
             gl->addWidget(new QLabel(QObject::tr(mp.name())), row, 0, Qt::AlignRight | Qt::AlignVCenter);
             gl->addWidget(createWidgetForReal(QString::fromLatin1(mp.name()), value.toReal(), obj ? obj->property(QByteArray("detail_").append(mp.name()).constData()).toString() : QString()), row, 1, Qt::AlignLeft | Qt::AlignVCenter);
-        } else if (mp.type() == QVariant::Bool) {
+        } else if (type == QMetaType::Bool) {
             gl->addWidget(createWidgetForBool(QString::fromLatin1(mp.name()), value.toBool(), obj ? obj->property(QByteArray("detail_").append(mp.name()).constData()).toString() : QString()), row, 0, 1, 2, Qt::AlignLeft);
         } else {
             gl->addWidget(new QLabel(QObject::tr(mp.name())), row, 0, Qt::AlignRight | Qt::AlignVCenter);
@@ -193,7 +194,7 @@ QWidget* PropertyEditor::createWidgetForEnum(const QString& name, const QVariant
     for (int i = 0; i < me.keyCount(); ++i) {
         box->addItem(QString::fromLatin1(me.key(i)), me.value(i));
     }
-    if (value.type() == QVariant::Int) {
+    if (value.userType() == QMetaType::Int) {
         box->setCurrentIndex(box->findData(value));
     } else {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)

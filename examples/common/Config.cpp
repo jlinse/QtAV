@@ -278,9 +278,10 @@ void Config::reload()
         db.setDatabaseName(appDataDir().append(QString("/%1.db").arg(mpData->name)));
         if (!db.open())
             qWarning("error open db");
-        db.exec("CREATE TABLE IF NOT EXISTS history (url TEXT primary key, start BIGINT, duration BIGINT)");
+        QSqlQuery(db).exec(QString::fromUtf8("CREATE TABLE IF NOT EXISTS history (url TEXT primary key, start BIGINT, duration BIGINT)"));
     }
-    QSqlQuery query(db.exec(QString::fromUtf8("SELECT * FROM history")));
+    QSqlQuery query(db);
+    query.exec(QString::fromUtf8("SELECT * FROM history"));
     while (query.next()) {
         QVariantMap var;
         var[QString::fromUtf8("url")] = query.value(0).toString();

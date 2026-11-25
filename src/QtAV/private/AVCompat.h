@@ -655,6 +655,16 @@ static inline SwrContext *qtav_swr_alloc_set_opts(SwrContext *s, int64_t out_ch_
 #define swr_alloc_set_opts qtav_swr_alloc_set_opts
 #endif
 
+// av_init_packet() is deprecated (FFmpeg 4.4+). Sets the same defaults for an AVPacket on the stack
+// or embedded in a struct, without the heap allocation of av_packet_alloc().
+static inline void qtav_init_packet(AVPacket *pkt)
+{
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->pts = AV_NOPTS_VALUE;
+    pkt->dts = AV_NOPTS_VALUE;
+    pkt->pos = -1;
+}
+
 #endif //QTAV_COMPAT_H
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(56,33,0)

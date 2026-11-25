@@ -312,7 +312,7 @@ SubtitleFrame SubtitleProcessorFFmpeg::processLine(const QByteArray &data, qreal
         return f;
     }
     AVPacket packet;
-    av_init_packet(&packet);
+    qtav_init_packet(&packet);
     packet.size = data.size();
     packet.data = (uint8_t*)data.constData();
     /*

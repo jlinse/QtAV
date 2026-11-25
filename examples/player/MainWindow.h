@@ -23,6 +23,7 @@
 
 #include <QWidget>
 #include <QUrl>
+#include <QtAV/AVError.h> // complete type needed by moc for the handleError() slot
 
 QT_BEGIN_NAMESPACE
 class QWidgetAction;
@@ -30,7 +31,6 @@ class QToolButton;
 QT_END_NAMESPACE
 namespace QtAV {
 class AudioOutput;
-class AVError;
 class AVPlayer;
 class AVClock;
 class VideoRenderer;

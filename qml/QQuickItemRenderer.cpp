@@ -392,7 +392,11 @@ void QQuickItemRenderer::drawFrame()
     if (d.rotation() == 0) {
         d.texture = window()->createTextureFromImage(d.image);
     } else if (d.rotation() == 180) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+        d.texture = window()->createTextureFromImage(d.image.flipped(Qt::Horizontal | Qt::Vertical));
+#else
         d.texture = window()->createTextureFromImage(d.image.mirrored(true, true));
+#endif
     }
     static_cast<QSGSimpleTextureNode*>(d.node)->setTexture(d.texture);
     d.node->markDirty(QSGNode::DirtyGeometry);

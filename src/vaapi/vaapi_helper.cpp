@@ -73,7 +73,9 @@ const char *profileName(VAProfile profile)
         MAP(H263Baseline);
         MAP(H264ConstrainedBaseline);
 #endif
+#if !VA_CHECK_VERSION(1, 0, 0) // deprecated in VA-API 1.0, no driver exposes it
         MAP(H264Baseline);
+#endif
         MAP(H264Main);
         MAP(H264High);
         MAP(VC1Simple);

@@ -474,7 +474,7 @@ bool AVDemuxer::readFrame()
     d->pkt = Packet();
     // no lock required because in AVDemuxThread read and seek are in the same thread
     AVPacket packet;
-    av_init_packet(&packet);
+    qtav_init_packet(&packet);
     d->interrupt_hanlder->begin(InterruptHandler::Read);
     int ret = av_read_frame(d->format_ctx, &packet); //0: ok, <0: error/end
     d->interrupt_hanlder->end();
@@ -1214,14 +1214,14 @@ void AVDemuxer::Private::applyOptionsForDict()
         opt = options.value(QStringLiteral("avformat"));
     Internal::setOptionsToDict(opt, &dict);
 
-    if (opt.type() == QVariant::Map) {
+    if (opt.userType() == QMetaType::QVariantMap) {
         QVariantMap avformat_dict(opt.toMap());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());
             if (!fmts.contains(QLatin1Char(',')) && !fmts.isEmpty())
                 format_forced = fmts; // reset when media changed
         }
-    } else if (opt.type() == QVariant::Hash) {
+    } else if (opt.userType() == QMetaType::QVariantHash) {
         QVariantHash avformat_dict(opt.toHash());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());

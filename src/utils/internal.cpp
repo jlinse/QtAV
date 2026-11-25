@@ -214,24 +214,24 @@ void setOptionsToFFmpegObj(const QVariant& opt, void* obj)
         qDebug() << QStringLiteral("%1.%2 options:").arg(QLatin1String(c->class_name)).arg(QLatin1String(c->item_name(obj)));
     else
         qDebug() << "options:";
-    if (opt.type() == QVariant::Map) {
+    if (opt.userType() == QMetaType::QVariantMap) {
         QVariantMap options(opt.toMap());
         if (options.isEmpty())
             return;
         QMapIterator<QString, QVariant> i(options);
         while (i.hasNext()) {
             i.next();
-            const QVariant::Type vt = i.value().type();
-            if (vt == QVariant::Map)
+            const int vt = i.value().userType();
+            if (vt == QMetaType::QVariantMap)
                 continue;
             const QByteArray key(i.key().toUtf8());
             qDebug("%s=>%s", i.key().toUtf8().constData(), i.value().toByteArray().constData());
-            if (vt == QVariant::Int || vt == QVariant::UInt || vt == QVariant::Bool) {
+            if (vt == QMetaType::Int || vt == QMetaType::UInt || vt == QMetaType::Bool) {
                 // QVariant.toByteArray(): "true" or "false", can not recognized by avcodec
                 av_opt_set_int(obj, key.constData(), i.value().toInt(), AV_OPT_SEARCH_CHILDREN);
-            } else if (vt == QVariant::LongLong || vt == QVariant::ULongLong) {
+            } else if (vt == QMetaType::LongLong || vt == QMetaType::ULongLong) {
                 av_opt_set_int(obj, key.constData(), i.value().toLongLong(), AV_OPT_SEARCH_CHILDREN);
-            } else if (vt == QVariant::Double) {
+            } else if (vt == QMetaType::Double) {
                 av_opt_set_double(obj, key.constData(), i.value().toDouble(), AV_OPT_SEARCH_CHILDREN);
             }
         }
@@ -243,14 +243,14 @@ void setOptionsToFFmpegObj(const QVariant& opt, void* obj)
     QHashIterator<QString, QVariant> i(options);
     while (i.hasNext()) {
         i.next();
-        const QVariant::Type vt = i.value().type();
-        if (vt == QVariant::Hash)
+        const int vt = i.value().userType();
+        if (vt == QMetaType::QVariantHash)
             continue;
         const QByteArray key(i.key().toUtf8());
         qDebug("%s=>%s", i.key().toUtf8().constData(), i.value().toByteArray().constData());
-        if (vt == QVariant::Int || vt == QVariant::UInt || vt == QVariant::Bool) {
+        if (vt == QMetaType::Int || vt == QMetaType::UInt || vt == QMetaType::Bool) {
             av_opt_set_int(obj, key.constData(), i.value().toInt(), AV_OPT_SEARCH_CHILDREN);
-        } else if (vt == QVariant::LongLong || vt == QVariant::ULongLong) {
+        } else if (vt == QMetaType::LongLong || vt == QMetaType::ULongLong) {
             av_opt_set_int(obj, key.constData(), i.value().toLongLong(), AV_OPT_SEARCH_CHILDREN);
         }
     }
@@ -260,19 +260,19 @@ void setOptionsToDict(const QVariant& opt, AVDictionary** dict)
 {
     if (!opt.isValid())
         return;
-    if (opt.type() == QVariant::Map) {
+    if (opt.userType() == QMetaType::QVariantMap) {
         QVariantMap options(opt.toMap());
         if (options.isEmpty())
             return;
         QMapIterator<QString, QVariant> i(options);
         while (i.hasNext()) {
             i.next();
-            const QVariant::Type vt = i.value().type();
-            if (vt == QVariant::Map)
+            const int vt = i.value().userType();
+            if (vt == QMetaType::QVariantMap)
                 continue;
             const QByteArray key(i.key().toUtf8());
             switch (vt) {
-            case QVariant::Bool: {
+            case QMetaType::Bool: {
                 // QVariant.toByteArray(): "true" or "false", can not recognized by avcodec
                 av_dict_set(dict, key.constData(), QByteArray::number(i.value().toInt()), 0);
             }
@@ -292,12 +292,12 @@ void setOptionsToDict(const QVariant& opt, AVDictionary** dict)
     QHashIterator<QString, QVariant> i(options);
     while (i.hasNext()) {
         i.next();
-        const QVariant::Type vt = i.value().type();
-        if (vt == QVariant::Hash)
+        const int vt = i.value().userType();
+        if (vt == QMetaType::QVariantHash)
             continue;
         const QByteArray key(i.key().toUtf8());
         switch (vt) {
-        case QVariant::Bool: {
+        case QMetaType::Bool: {
             // QVariant.toByteArray(): "true" or "false", can not recognized by avcodec
             av_dict_set(dict, key.constData(), QByteArray::number(i.value().toInt()), 0);
         }
@@ -316,20 +316,20 @@ void setOptionsForQObject(const QVariant& opt, QObject *obj)
     if (!opt.isValid())
         return;
     qDebug() << QStringLiteral("set %1(%2) meta properties:").arg(QLatin1String(obj->metaObject()->className())).arg(obj->objectName());
-    if (opt.type() == QVariant::Hash) {
+    if (opt.userType() == QMetaType::QVariantHash) {
         QVariantHash options(opt.toHash());
         if (options.isEmpty())
             return;
         QHashIterator<QString, QVariant> i(options);
         while (i.hasNext()) {
             i.next();
-            if (i.value().type() == QVariant::Hash) // for example "vaapi": {...}
+            if (i.value().userType() == QMetaType::QVariantHash) // for example "vaapi": {...}
                 continue;
             obj->setProperty(i.key().toUtf8().constData(), i.value());
             qDebug("%s=>%s", i.key().toUtf8().constData(), i.value().toByteArray().constData());
         }
     }
-    if (opt.type() != QVariant::Map)
+    if (opt.userType() != QMetaType::QVariantMap)
         return;
     QVariantMap options(opt.toMap());
     if (options.isEmpty())
@@ -337,7 +337,7 @@ void setOptionsForQObject(const QVariant& opt, QObject *obj)
     QMapIterator<QString, QVariant> i(options);
     while (i.hasNext()) {
         i.next();
-        if (i.value().type() == QVariant::Map) // for example "vaapi": {...}
+        if (i.value().userType() == QMetaType::QVariantMap) // for example "vaapi": {...}
             continue;
         obj->setProperty(i.key().toUtf8().constData(), i.value());
         qDebug("%s=>%s", i.key().toUtf8().constData(), i.value().toByteArray().constData());

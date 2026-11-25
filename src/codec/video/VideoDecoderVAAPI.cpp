@@ -115,11 +115,15 @@ static const  codec_profile_t va_profiles[] = {
     { QTAV_CODEC_ID(MPEG4), FF_PROFILE_MPEG4_SIMPLE, VAProfileMPEG4Simple },
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_HIGH, VAProfileH264High },
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_MAIN, VAProfileH264Main },
+#if !VA_CHECK_VERSION(1, 0, 0) // VAProfileH264Baseline is deprecated in VA-API 1.0, no driver exposes it
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_BASELINE, VAProfileH264Baseline },
+#endif
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_BASELINE, VAProfileH264ConstrainedBaseline },
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_BASELINE, VAProfileH264Main },
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264ConstrainedBaseline }, //mpv force main
+#if !VA_CHECK_VERSION(1, 0, 0)
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264Baseline }, //yami
+#endif
     { QTAV_CODEC_ID(H264), FF_PROFILE_H264_CONSTRAINED_BASELINE, VAProfileH264Main },
     { QTAV_CODEC_ID(VC1), FF_PROFILE_VC1_ADVANCED, VAProfileVC1Advanced },
     { QTAV_CODEC_ID(VC1), FF_PROFILE_VC1_MAIN, VAProfileVC1Main },

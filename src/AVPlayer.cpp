@@ -450,8 +450,8 @@ QVariantHash AVPlayer::optionsForAudioCodec() const
 void AVPlayer::setOptionsForVideoCodec(const QVariantHash &dict)
 {
     d->vc_opt = dict;
-    const QVariant p(dict.contains(QStringLiteral("priority")));
-    if (p.type() == QVariant::StringList) {
+    const QVariant p(dict.value(QStringLiteral("priority")));
+    if (p.userType() == QMetaType::QStringList) {
         setVideoDecoderPriority(p.toStringList());
         d->vc_opt.remove(QStringLiteral("priority"));
     }
@@ -488,7 +488,7 @@ void AVPlayer::setFile(const QString &path)
     // QFile does not support "file:"
     if (p.startsWith(QLatin1String("file:")))
         p = Internal::Path::toLocal(p);
-    d->reset_state = d->current_source.type() != QVariant::String || d->current_source.toString() != p;
+    d->reset_state = d->current_source.userType() != QMetaType::QString || d->current_source.toString() != p;
     d->current_source = p;
     // TODO: d->reset_state = d->demuxer2.setMedia(path);
     if (d->reset_state) {
@@ -502,7 +502,7 @@ void AVPlayer::setFile(const QString &path)
 
 QString AVPlayer::file() const
 {
-    if (d->current_source.type() == QVariant::String)
+    if (d->current_source.userType() == QMetaType::QString)
         return d->current_source.toString();
     return QString();
 }
@@ -510,7 +510,7 @@ QString AVPlayer::file() const
 void AVPlayer::setIODevice(QIODevice* device)
 {
     // TODO: d->reset_state = d->demuxer2.setMedia(device);
-    if (d->current_source.type() == QVariant::String) {
+    if (d->current_source.userType() == QMetaType::QString) {
         d->reset_state = true;
     } else {
         if (d->current_source.canConvert<QIODevice*>()) {
@@ -530,7 +530,7 @@ void AVPlayer::setIODevice(QIODevice* device)
 void AVPlayer::setInput(MediaIO *in)
 {
     // TODO: d->reset_state = d->demuxer2.setMedia(in);
-    if (d->current_source.type() == QVariant::String) {
+    if (d->current_source.userType() == QMetaType::QString) {
         d->reset_state = true;
     } else {
         if (d->current_source.canConvert<QIODevice*>()) {
@@ -549,7 +549,7 @@ void AVPlayer::setInput(MediaIO *in)
 
 MediaIO* AVPlayer::input() const
 {
-    if (d->current_source.type() == QVariant::String)
+    if (d->current_source.userType() == QMetaType::QString)
         return 0;
     if (!d->current_source.canConvert<QtAV::MediaIO*>())
         return 0;
@@ -665,7 +665,7 @@ void AVPlayer::loadInternal()
             d->vdec->setCodecContext(0);
     }
     qDebug() << "Loading " << d->current_source << " ...";
-    if (d->current_source.type() == QVariant::String) {
+    if (d->current_source.userType() == QMetaType::QString) {
         d->demuxer.setMedia(d->current_source.toString());
     } else {
         if (d->current_source.canConvert<QIODevice*>()) {

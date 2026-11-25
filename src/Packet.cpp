@@ -39,13 +39,13 @@ public:
         : QSharedData()
         , initialized(false)
     {
-        av_init_packet(&avpkt);
+        qtav_init_packet(&avpkt);
     }
     PacketPrivate(const PacketPrivate& o)
         : QSharedData(o)
         , initialized(o.initialized)
     { //used by QSharedDataPointer.detach()
-        av_init_packet(&avpkt);
+        qtav_init_packet(&avpkt);
         av_packet_ref(&avpkt, (AVPacket*)&o.avpkt);
     }
      ~PacketPrivate() {

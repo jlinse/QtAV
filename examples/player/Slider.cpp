@@ -122,7 +122,7 @@ void Slider::mouseMoveEvent(QMouseEvent *e)
 {
     const int o = style()->pixelMetric(QStyle::PM_SliderLength ) - 1;
     int v = QStyle::sliderValueFromPosition(minimum(), maximum(), e->pos().x()-o/2, width()-o, false);
-    emit onHover(e->x(), v);
+    emit onHover(e->pos().x(), v);
     QSlider::mouseMoveEvent(e);
 }
 

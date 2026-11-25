@@ -177,7 +177,7 @@ AVPlayer::Private::~Private() {
 
 bool AVPlayer::Private::checkSourceChange()
 {
-    if (current_source.type() == QVariant::String)
+    if (current_source.userType() == QMetaType::QString)
         return demuxer.fileName() != current_source.toString();
     if (current_source.canConvert<QIODevice*>())
         return demuxer.ioDevice() != current_source.value<QIODevice*>();
@@ -237,7 +237,7 @@ void AVPlayer::Private::initStatistics()
 void AVPlayer::Private::initBaseStatistics()
 {
     statistics.reset();
-    statistics.url = current_source.type() == QVariant::String ? current_source.toString() : QString();
+    statistics.url = current_source.userType() == QMetaType::QString ? current_source.toString() : QString();
     statistics.start_time = QTime(0, 0, 0).addMSecs(int(demuxer.startTime()));
     statistics.duration = QTime(0, 0, 0).addMSecs((int)demuxer.duration());
     AVFormatContext *fmt_ctx = demuxer.formatContext();

@@ -28,19 +28,45 @@ if(EXISTS ${QTAV_SOURCE_DIR}/contrib/capi/capi.h)
     set(HAVE_CAPI 1)
     list(APPEND EXTRA_INCLUDE ${QTAV_SOURCE_DIR}/contrib/capi) # TODO: only files use capi.h
     list(APPEND EXTRA_DEFS -DQTAV_HAVE_CAPI=1)
+    # capi.h (third-party submodule, kept stock) declares its symbol table as an unnamed
+    # 'typedef struct {...} api_t;' holding C++ typedefs, which GCC/Clang warn about.
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag(-Wnon-c-typedef-for-linkage HAVE_WNON_C_TYPEDEF_FOR_LINKAGE)
+    if(HAVE_WNON_C_TYPEDEF_FOR_LINKAGE)
+        set_source_files_properties(capi/ass_api.cpp capi/egl_api.cpp capi/openal_api.cpp
+            PROPERTIES COMPILE_OPTIONS -Wno-non-c-typedef-for-linkage)
+    endif()
 endif()
 
-# FFmpeg: use pkg-config when it knows the library, otherwise look in FFMPEG_DIR
-# (or in the AV*_INCLUDE_DIRS / AV*_LIBRARIES cache variables) so it works on Windows without pkg-config.
-set(FFMPEG_DIR "" CACHE PATH "FFmpeg install dir containing include/ and lib/ (used when pkg-config has no .pc files)")
+# FFmpeg: when FFMPEG_DIR is set, use only the FFmpeg in it (include/ and lib/). Otherwise use pkg-config,
+# falling back to the AV*_INCLUDE_DIRS / AV*_LIBRARIES cache variables (Windows without pkg-config).
+set(FFMPEG_DIR "" CACHE PATH "FFmpeg install dir containing include/ and lib/ (used instead of the system FFmpeg)")
 function(qtav_find_ffmpeg VAR PC_NAME HEADER LIB_NAME)
   set(REQUIRED_ARG ${ARGV4})
-  if(PKG_CONFIG_FOUND)
+  if(FFMPEG_DIR)
+    # Drop pkg-config results cached by an earlier configure; they would point at another FFmpeg
+    unset(${VAR}_FOUND CACHE)
+    unset(${VAR}_FOUND)
+  elseif(PKG_CONFIG_FOUND)
     pkg_check_modules(${VAR} QUIET ${PC_NAME})
   endif()
   if(NOT ${VAR}_FOUND)
-    find_path(${VAR}_HEADER_DIR ${HEADER} HINTS ${${VAR}_INCLUDE_DIRS} ${FFMPEG_DIR}/include)
-    find_library(${VAR}_LIBRARY NAMES ${LIB_NAME} HINTS ${FFMPEG_DIR}/lib)
+    if(FFMPEG_DIR)
+      find_path(${VAR}_HEADER_DIR ${HEADER} PATHS ${FFMPEG_DIR}/include NO_DEFAULT_PATH)
+      find_library(${VAR}_LIBRARY NAMES ${LIB_NAME} PATHS ${FFMPEG_DIR}/lib NO_DEFAULT_PATH)
+      if(NOT ${VAR}_LIBRARY AND NOT WIN32)
+        # Shared libraries stored only under their SONAME (libavcodec.so.63), without a libavcodec.so link
+        file(GLOB _so_files "${FFMPEG_DIR}/lib/lib${LIB_NAME}.so.[0-9]*")
+        if(_so_files)
+          list(SORT _so_files)
+          list(GET _so_files 0 _so_file)
+          set(${VAR}_LIBRARY "${_so_file}" CACHE FILEPATH "Path to the ${LIB_NAME} library" FORCE)
+        endif()
+      endif()
+    else()
+      find_path(${VAR}_HEADER_DIR ${HEADER} HINTS ${${VAR}_INCLUDE_DIRS})
+      find_library(${VAR}_LIBRARY NAMES ${LIB_NAME})
+    endif()
     if(${VAR}_LIBRARY STREQUAL "${VAR}_LIBRARY-NOTFOUND" AND ${VAR}_LIBRARIES)
       set(${VAR}_LIBRARY ${${VAR}_LIBRARIES})
     endif()

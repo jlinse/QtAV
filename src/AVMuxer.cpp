@@ -532,15 +532,15 @@ void AVMuxer::Private::applyOptionsForDict()
     if (options.contains(QStringLiteral("avformat")))
         opt = options.value(QStringLiteral("avformat"));
     Internal::setOptionsToDict(opt, &dict);
-    const auto type = opt.type();
-    if (type == QVariant::Map) {
+    const int type = opt.userType();
+    if (type == QMetaType::QVariantMap) {
         QVariantMap avformat_dict(opt.toMap());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());
             if (!fmts.contains(QLatin1Char(',')) && !fmts.isEmpty())
                 format_forced = fmts; // reset when media changed
         }
-    } else if (type == QVariant::Hash) {
+    } else if (type == QMetaType::QVariantHash) {
         QVariantHash avformat_dict(opt.toHash());
         if (avformat_dict.contains(QStringLiteral("format_whitelist"))) {
             const QString fmts(avformat_dict[QStringLiteral("format_whitelist")].toString());
